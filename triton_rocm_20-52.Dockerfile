@@ -1,7 +1,7 @@
-FROM rocm/pytorch:rocm5.2.3_ubuntu20.04_py3.7_pytorch_1.12.1
+FROM rocm/pytorch:latest
 
 # build triton
-RUN export TRITON_USE_ROCM=ON MI_GPU_ARCH=gfx90a
+RUN export TRITON_USE_ROCM=ON
 
 # Unit Tests 
 # to run unit tests
@@ -11,4 +11,7 @@ RUN export TRITON_USE_ROCM=ON MI_GPU_ARCH=gfx90a
 #    docker run -it --rm --network=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --name triton --ipc=host --shm-size 16G --device=/dev/kfd --device=/dev/dri triton_rocm52:latest
 # 3. run core unit tests on a rocm machine
 #    cd ~/triton/python
-#    pytest --verbose test/unit/language/test_core.py | tee test_core.log
+#    a. To execute all test cases
+#        pytest --verbose test/unit/language/test_core.py | tee test_core.log
+#    b. To execute individual cases
+#        pytest --verbose test/unit/language/test_core.py::test_empty_kernel[int8]

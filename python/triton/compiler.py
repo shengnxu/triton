@@ -894,7 +894,7 @@ def rocm_path_dir():
 def _get_amdgpu_arch():
     try:
         rocminfo = subprocess.check_output(rocm_path_dir() + '/bin/rocminfo').decode()
-        gfx_arch = re.search('Name:\\s+.*(gfx\\d+)', rocminfo)
+        gfx_arch = re.search('Name:\\s+.*(gfx\\w+)', rocminfo)
         return gfx_arch.group(1).strip()
     except:
         return None

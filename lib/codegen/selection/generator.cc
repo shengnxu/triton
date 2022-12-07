@@ -1185,14 +1185,18 @@ void generator::visit_load_inst(ir::load_inst* x){
     // for each block
     for (size_t ii = 0; ii < n_words; ii++)
     {
-      // pointer value
-      Value *ptr = vals_[op][idxs[i + ii]];
+      size_t size = width / nbits;
+      for(size_t s = 0; s < size; s++){
+        auto iii = i + ii*size + s;
+        // pointer value
+        Value *ptr = vals_[op][idxs[iii]];
 
-      // create load
-      Value *_ret = builder_->CreateLoad(ty, ptr);
+        // create load
+        Value *_ret = builder_->CreateLoad(ty, ptr);
 
-      // upload to global vals map
-      vals_[x][idxs[i + ii]] = _ret;
+        // upload to global vals map
+        vals_[x][idxs[iii]] = _ret;
+      }
     }
 #else
     // -----
@@ -1396,14 +1400,18 @@ void generator::visit_store_inst(ir::store_inst * x){
     // for each block
     for (unsigned int ii = 0; ii < n_words; ii++)
     {
-      // pointer
-      Value *ptr = vals_[ptr_op][idxs[i + ii]];
+      size_t size = width / nbits;
+      for(size_t s = 0; s < size; s++){
+        auto iii = i + ii*size + s;
+        // pointer
+        Value *ptr = vals_[ptr_op][idxs[iii]];
 
-      // value
-      Value *val = vals_.at(val_op)[idxs[i + ii]];
+        // value
+        Value *val = vals_.at(val_op)[idxs[iii]];
 
-      // store value at pointer
-      store(val, ptr);
+        // store value at pointer
+        store(val, ptr);
+      }
     }
 #else
     // -----

@@ -30,8 +30,8 @@ rm -rf triton_rocm_kernels
 # python python/test/test_empty.py
 # -ex 'ignore 1 472' \
 
-# pytest -rfs --verbose python/tests/test_core.py | tee /dockerx/triton/test_core.log
-pytest -rfs --verbose "python/test/unit/language/test_core.py::test_unary_op[float32- -x]" 2>&1 | tee /dockerx/triton/test_empty_kernel.log
+pytest -rfs --verbose python/test/unit/language/test_core.py | tee /dockerx/triton/test_core.log
+# pytest -rfs --verbose "python/test/unit/language/test_core.py::test_unary_op[float32- -x]" 2>&1 | tee /dockerx/triton/test_empty_kernel.log
 # pytest -rfs --verbose python/tests/test_core.py::test_empty_kernel[float32] 2>&1 | tee /dockerx/triton/test_empty_kernel.log
 # pytest -rfs --verbose "python/tests/test_core_amd.py::test_bin_op" 2>&1 | tee /dockerx/triton/test_bin_op.log
 # pytest -rfs --verbose python/tests/test_core_amd.py::test_bin_op[float32-float32-/] 2>&1 | tee /dockerx/triton/test_bin_op.log

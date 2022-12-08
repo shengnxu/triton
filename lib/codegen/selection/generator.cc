@@ -1124,21 +1124,6 @@ void generator::visit_load_inst(ir::load_inst* x){
   ir::masked_load_inst *mx = dynamic_cast<ir::masked_load_inst*>(x);
   Type* ty  = cvt(op->get_type()->get_scalar_ty()->get_pointer_element_ty());
 
-#ifdef USE_ROCM
-  // code generation
-  auto idxs = idxs_.at(x);
-  for(size_t i = 0; i <idxs.size(); i += 1){
-    indices_t idx = idxs[i];
-    // pointer value
-    Value *ptr = vals_[op][idx];
-
-    // create load
-    Value *_ret =  builder_->CreateLoad(ty, ptr);
-
-    // upload to global vals map
-    vals_[x][idx] = _ret;
-  }
-#else
   // compute vector width
   size_t vec = 1;
   bool is_mma_first_row = false;
@@ -1195,6 +1180,25 @@ void generator::visit_load_inst(ir::load_inst* x){
     bool has_l2_evict_policy = (x->get_eviction_policy() != ir::load_inst::NORMAL) && tgt_->as_nvidia()->sm() >= 80;
     has_l2_evict_policy = false;
     // has_evict_policy = false; // currently disable until supported in `store`
+
+#ifdef USE_ROCM
+    // for each block
+    for (size_t ii = 0; ii < n_words; ii++)
+    {
+      size_t size = width / nbits;
+      for(size_t s = 0; s < size; s++){
+        auto iii = i + ii*size + s;
+        // pointer value
+        Value *ptr = vals_[op][idxs[iii]];
+
+        // create load
+        Value *_ret = builder_->CreateLoad(ty, ptr);
+
+        // upload to global vals map
+        vals_[x][idxs[iii]] = _ret;
+      }
+    }
+#else
     // -----
     // create inline asm string
     // -----
@@ -1316,8 +1320,8 @@ void generator::visit_load_inst(ir::load_inst* x){
     int tmp = (width / (dtsize * 8));
     for(size_t ii = 0; ii < vec; ii++)
       vals_[x][idxs[i+ii]] = extract_elt(rets[ii/tmp], ii % tmp);
-  }
 #endif
+  }
 }
 
 void generator::visit_unmasked_load_inst(ir::unmasked_load_inst* x) {
@@ -1336,23 +1340,6 @@ void generator::visit_store_inst(ir::store_inst * x){
   // operands
   ir::value *ptr_op = x->get_pointer_operand();
   ir::value *val_op = x->get_value_operand();
-#ifdef USE_ROCM
-  auto idxs = idxs_.at(val_op);
-  Type *ty = cvt(val_op->get_type()->get_scalar_ty());
-
-  for (size_t i = 0; i < idxs.size(); i += 1)
-  {
-    auto idx = idxs[i];
-    // pointer
-    Value *ptr = vals_[ptr_op][idx];
-
-    // value
-    Value *val = vals_.at(val_op)[idxs[i]];
-
-    // store value at pointer
-    store(val, ptr);
-  }
-#else
   ir::value *msk_op = nullptr;
   if(auto* msk_st = dynamic_cast<ir::masked_store_inst*>(x))
     msk_op = msk_st->get_mask_operand();
@@ -1408,6 +1395,25 @@ void generator::visit_store_inst(ir::store_inst * x){
     int tot_width = nbits*vec;
     int width = std::min(tot_width, max_word_width);
     int n_words = std::max(1, tot_width / width);
+
+#ifdef USE_ROCM
+    // for each block
+    for (unsigned int ii = 0; ii < n_words; ii++)
+    {
+      size_t size = width / nbits;
+      for(size_t s = 0; s < size; s++){
+        auto iii = i + ii*size + s;
+        // pointer
+        Value *ptr = vals_[ptr_op][idxs[iii]];
+
+        // value
+        Value *val = vals_.at(val_op)[idxs[iii]];
+
+        // store value at pointer
+        store(val, ptr);
+      }
+    }
+#else
     // -----
     // create inline asm string
     // -----
@@ -1467,8 +1473,8 @@ void generator::visit_store_inst(ir::store_inst * x){
     if (has_l2_evict_policy)
       args.push_back(policies_.at(x->get_eviction_policy()));
     call(_asm, args);
-  }
 #endif
+  }
 }
 void generator::visit_unmasked_store_inst(ir::unmasked_store_inst* x) {
   visit_store_inst(x);

@@ -1065,15 +1065,17 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 # ---------------
 
 
-@pytest.mark.parametrize("epilogue, allow_tf32, dtype",
-                         [(epilogue, allow_tf32, dtype)
+@pytest.mark.parametrize("epilogue, allow_tf32, dtype, M, N, K",
+                         [(epilogue, allow_tf32, dtype, M, N, K)
                           for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
                           for allow_tf32 in [True, False]
-                          for dtype in ['float16']
+                          for M in [64,128] for N in [16,32,64] for K in [16,32,64]
+                          for dtype in ['float16','float32']
                           if not (allow_tf32 and (dtype in ['float16']))])
-def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
+def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
     if torch.version.hip is not None:
-        pass
+        if allow_tf32:
+            pytest.skip('no tf32 on hip')
     else:
         cc = _triton.runtime.cc(_triton.runtime.backend.CUDA, torch.cuda.current_device())
         if cc < 80:
@@ -1082,7 +1084,6 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
             elif dtype == 'float32' and allow_tf32:
                 pytest.skip("Only test tf32 on devices with sm >= 80")
 
-    M, N, K = 128, 128, 64
     num_warps = 8
     trans_a, trans_b = False, False
 
@@ -1129,7 +1130,7 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
     rs = RandomState(17)
     x = numpy_random((K, M) if trans_a else (M, K), dtype_str=dtype, rs=rs) * .1
     y = numpy_random((N, K) if trans_b else (K, N), dtype_str=dtype, rs=rs) * .1
-    w = numpy_random((N, N), dtype_str=dtype, rs=rs) * .1
+    w = numpy_random((N, N), dtype_str=dtype, rs=rs)
     if allow_tf32:
         x = (x.view('uint32') & np.uint32(0xffffe000)).view('float32')
         y = (y.view('uint32') & np.uint32(0xffffe000)).view('float32')
@@ -1141,7 +1142,7 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
     z = 1 + numpy_random((M, N), dtype_str=dtype, rs=rs) * .1
     z_tri = to_triton(z, device=device)
     if epilogue == 'trans':
-        z_tri = torch.as_strided(z_tri, (M, N), z_tri.stride()[::-1])
+        z_tri = torch.as_strided(z_tri, (M, N), [1,M])
     pgm = kernel[(1, 1)](x_tri, x_tri.stride(0), x_tri.stride(1),
                          y_tri, y_tri.stride(0), y_tri.stride(1),
                          w_tri, w_tri.stride(0), w_tri.stride(1),
@@ -1172,8 +1173,7 @@ def test_dot(epilogue, allow_tf32, dtype, device='cuda'):
     if epilogue == 'chain-dot':
         z_ref = np.matmul(z_ref.T if trans_a else z_ref, w)
     # compare
-    # print(z_ref[:,0], z_tri[:,0])
-    np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01)
+    np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.02 if dtype=='float16' else 0.003, atol=0.01 if dtype=='float16' else 0.001)
     # make sure ld/st are vectorized
     if torch.version.hip is not None:
         pass

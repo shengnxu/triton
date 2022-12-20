@@ -3553,8 +3553,11 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
   }
 
   int in_ld = in_layout->get_shape()[in_order[0]] / mts_0;
-  int n_shared_0 = std::max<int>(in_vec    / out_vec, 1);
-  int n_shared_1 = std::max<int>(per_phase*max_phase / mts_1, 1);
+  //int n_shared_0 = std::max<int>(in_vec    / out_vec, 1);
+  //int n_shared_1 = std::max<int>(per_phase*max_phase / mts_1, 1);
+  int n_shared_0 = in_layout->contig_per_thread(in_order[0]);
+  int n_shared_1 = in_layout->contig_per_thread(in_order[1]);
+
   if(in_layout->to_mma()){
     n_shared_0 = 8;
     n_shared_1 = 1;

@@ -2868,7 +2868,7 @@ void generator::visit_mma16816(ir::dot_inst* C, ir::value *A, ir::value *B, ir::
 /**
  * \brief Code Generation for FMA-based `dot` (FP32, FP64, Default)
  */
-void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::value* D, unsigned NK, Type *c_ty, Function *f_mul_add) {
+void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::value* D, unsigned NK, Type *c_ty, Function *f_mul_add, bool trans_a, bool trans_b) {
   auto shape_c = C->get_type()->get_block_shapes();
   auto shape_a = A->get_type()->get_block_shapes();
   auto shape_b = B->get_type()->get_block_shapes();
@@ -2877,20 +2877,40 @@ void generator::visit_fmadot(ir::dot_inst* C, ir::value* A, ir::value* B, ir::va
   analysis::scanline_layout* layout_c = layouts_->get(C)->to_scanline();
   analysis::shared_layout* layout_a = (analysis::shared_layout*)layouts_->get(C->get_operand(0));
   analysis::shared_layout* layout_b = (analysis::shared_layout*)layouts_->get(C->get_operand(1));
-  bool is_a_row = ord_a[0] == 1;
-  bool is_b_row = ord_b[0] == 1;
+  bool is_a_row = !trans_a;
+  bool is_b_row = trans_b;
   std::string a_trans = is_a_row ? "" : ".trans";
   std::string b_trans = is_b_row ? ".trans" : "";
-  int stride_a_m = is_a_row ? shape_a[1] : 1;
-  int stride_a_k = is_a_row ? 1 : shape_a[0];
-  int stride_b_n = is_b_row ? 1 : shape_b[0];
-  int stride_b_k = is_b_row ? shape_b[1] : 1;
-  int stride_a0 = is_a_row ? stride_a_k : stride_a_m;
-  int stride_a1 = is_a_row ? stride_a_m : stride_a_k;
-  int stride_b0 = is_b_row ? stride_b_n : stride_b_k;
-  int stride_b1 = is_b_row ? stride_b_k : stride_b_n;
-  int lda = is_a_row ? stride_a_m : stride_a_k;
-  int ldb = is_b_row ? stride_b_k : stride_b_n;
+
+  int strides[4];
+  if(ord_a[0]==0)
+  {
+    strides[0] = shape_a[0];
+    strides[1] = 1;
+  }
+  else
+  {
+    strides[0] = 1;
+    strides[1] = shape_a[1];
+  }
+  if(ord_b[0]==0)
+  {
+    strides[2] = 1;
+    strides[3] = shape_b[0];
+  }
+  else
+  {
+    strides[2] = shape_b[1];
+    strides[3] = 1;
+  }
+  int stride_a_m = strides[is_a_row ? 1 : 0];
+  int stride_a_k = strides[is_a_row ? 0 : 1];
+  int stride_b_n = strides[is_b_row ? 2 : 3];
+  int stride_b_k = strides[is_b_row ? 3 : 2];
+  int stride_a0 = strides[0];
+  int stride_a1 = strides[1];
+  int stride_b0 = strides[2];
+  int stride_b1 = strides[3];
   int per_phase_a = swizzle_->get_per_phase(layout_a);
   int max_phase_a = swizzle_->get_max_phase(layout_a);
   int per_phase_b = swizzle_->get_per_phase(layout_b);
@@ -2976,12 +2996,12 @@ void generator::visit_dot_inst(ir::dot_inst* dot) {
   Type *c_ty = cvt(D->get_type()->get_scalar_ty());
   Function *f_mul_add = Intrinsic::getDeclaration(module, Intrinsic::fmuladd, std::vector<llvm::Type*>{c_ty});
   auto A_shapes = A->get_type()->get_block_shapes();
-  size_t red_axis = 1;
+  size_t red_axis = dot->is_trans_a() ? 0 : 1;
   unsigned NK = A_shapes[red_axis];
   bool is_outer = NK == 1;
 
 #ifdef USE_ROCM
-  return visit_fmadot(dot, A, B, D, NK, c_ty, f_mul_add);
+  return visit_fmadot(dot, A, B, D, NK, c_ty, f_mul_add, dot->is_trans_a(), dot->is_trans_b());
 #else
   bool is_mma = layouts_->get(dot)->to_mma();
   if(!is_outer && is_mma && tgt_->as_nvidia() && tgt_->as_nvidia()->sm() < 80)
@@ -2990,7 +3010,7 @@ void generator::visit_dot_inst(ir::dot_inst* dot) {
     return visit_mma16816(dot, A, B, D, NK); // rename it as visit_mma_v2()?
   if (dot->get_type()->get_scalar_ty()->is_fp32_ty() &&
       A->get_type()->get_scalar_ty()->is_fp32_ty())
-    return visit_fmadot(dot, A, B, D, NK, c_ty, f_mul_add);
+    return visit_fmadot(dot, A, B, D, NK, c_ty, f_mul_add, dot->is_trans_a(), dot->is_trans_b());
   throw std::runtime_error("dot has invalid operand type");
 #endif
 }
@@ -3567,8 +3587,7 @@ void generator::visit_copy_to_shared_inst(ir::copy_to_shared_inst* cts) {
   BasicBlock* FirstBB = &CurrBB->getParent()->getEntryBlock();
   auto shapes = cts->get_type()->get_block_shapes();
 
-
-  // store to shared
+    // store to shared
   Value *current = nullptr;
   std::map<std::pair<int, int>, Value*> ptrs;
   for(int i = 0; i < idxs_.at(arg).size(); i++){

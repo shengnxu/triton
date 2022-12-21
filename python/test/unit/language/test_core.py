@@ -1065,14 +1065,15 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 # ---------------
 
 
-@pytest.mark.parametrize("epilogue, allow_tf32, dtype, M, N, K",
-                         [(epilogue, allow_tf32, dtype, M, N, K)
+@pytest.mark.parametrize("epilogue, allow_tf32, dtype, M, N, K, trans_a, trans_b",
+                         [(epilogue, allow_tf32, dtype, M, N, K, trans_a, trans_b)
                           for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
                           for allow_tf32 in [True, False]
                           for M in [64,128] for N in [16,32,64] for K in [16,32,64]
                           for dtype in ['float16','float32']
+                          for trans_a in [False,True] for trans_b in [False,True]
                           if not (allow_tf32 and (dtype in ['float16']))])
-def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
+def test_dot(epilogue, allow_tf32, dtype, M, N, K, trans_a, trans_b, device='cuda'):
     if torch.version.hip is not None:
         if allow_tf32:
             pytest.skip('no tf32 on hip')
@@ -1085,12 +1086,11 @@ def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
                 pytest.skip("Only test tf32 on devices with sm >= 80")
 
     num_warps = 8
-    trans_a, trans_b = False, False
 
     # triton kernel
     @triton.jit
-    def kernel(X, stride_xm, stride_xk,
-               Y, stride_yk, stride_yn,
+    def kernel(X, stride_x1, stride_x2,
+               Y, stride_y1, stride_y2,
                W, stride_wn, stride_wl,
                Z, stride_zm, stride_zn,
                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
@@ -1102,9 +1102,18 @@ def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
         off_n = tl.arange(0, BLOCK_N)
         off_l = tl.arange(0, BLOCK_N)
         off_k = tl.arange(0, BLOCK_K)
-        Xs = X + off_m[:, None] * stride_xm + off_k[None, :] * stride_xk
-        Ys = Y + off_k[:, None] * stride_yk + off_n[None, :] * stride_yn
-        Ws = W + off_n[:, None] * stride_wn + off_l[None, :] * stride_wl
+        if TRANS_A:
+            Xs = X + off_k[:, None] * stride_x1 + off_m[None, :] * stride_x2
+        else:
+            Xs = X + off_m[:, None] * stride_x1 + off_k[None, :] * stride_x2
+        if TRANS_B:
+            Ys = Y + off_n[:, None] * stride_y1 + off_k[None, :] * stride_y2
+        else:
+            Ys = Y + off_k[:, None] * stride_y1 + off_n[None, :] * stride_y2
+        if TRANS_B:
+            Ws = W + off_l[:, None] * stride_wn + off_n[None, :] * stride_wl
+        else:
+            Ws = W + off_n[:, None] * stride_wn + off_l[None, :] * stride_wl
         Zs = Z + off_m[:, None] * stride_zm + off_n[None, :] * stride_zn
         z = tl.dot(tl.load(Xs), tl.load(Ys), trans_a=TRANS_A, trans_b=TRANS_B, allow_tf32=ALLOW_TF32)
         if ADD_MATRIX:
@@ -1124,13 +1133,18 @@ def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
         if CHAIN_DOT:
             # tl.store(Zs, z)
             # tl.debug_barrier()
-            z = tl.dot(z.to(tl.float16), tl.load(Ws), trans_a=TRANS_A)
+            if BLOCK_M==BLOCK_N:
+                # allows us to hit the ord_a=[0,1] ord_b[0,1] pathway in visit_fmadot
+                z = tl.dot(z.to(tl.float16), z.to(tl.float16), trans_b=TRANS_B)
+            else:
+                z = tl.dot(z.to(tl.float16), tl.load(Ws), trans_b=TRANS_B)
         tl.store(Zs, z)
     # input
     rs = RandomState(17)
     x = numpy_random((K, M) if trans_a else (M, K), dtype_str=dtype, rs=rs) * .1
     y = numpy_random((N, K) if trans_b else (K, N), dtype_str=dtype, rs=rs) * .1
     w = numpy_random((N, N), dtype_str=dtype, rs=rs)
+
     if allow_tf32:
         x = (x.view('uint32') & np.uint32(0xffffe000)).view('float32')
         y = (y.view('uint32') & np.uint32(0xffffe000)).view('float32')
@@ -1159,6 +1173,7 @@ def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
     # torch result
     x_ref = x.T if trans_a else x
     y_ref = y.T if trans_b else y
+    w_ref = w.T if trans_b else w
     z_ref = np.matmul(x_ref, y_ref)
     if epilogue == 'add-matrix':
         z_ref += z
@@ -1171,7 +1186,10 @@ def test_dot(epilogue, allow_tf32, dtype, M, N, K, device='cuda'):
         denom = np.sum(num, axis=-1, keepdims=True)
         z_ref = num / denom
     if epilogue == 'chain-dot':
-        z_ref = np.matmul(z_ref.T if trans_a else z_ref, w)
+        if M==N:
+            z_ref = np.matmul(z_ref, z_ref.T if trans_b else z_ref)
+        else:
+            z_ref = np.matmul(z_ref, w_ref)
     # compare
     np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.02 if dtype=='float16' else 0.003, atol=0.01 if dtype=='float16' else 0.001)
     # make sure ld/st are vectorized

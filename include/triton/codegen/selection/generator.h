@@ -189,7 +189,7 @@ private:
   void visit_atomic_rmw_inst(ir::atomic_rmw_inst*);
   void visit_mma884(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
   void visit_mma16816(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK);
-  void visit_fmadot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add);
+  void visit_fmadot(ir::dot_inst*, ir::value *A, ir::value *B, ir::value *D, unsigned NK, Type *c_ty, Function *f_mul_add, bool trans_a, bool trans_b);
   void visit_dot_inst(ir::dot_inst*);
   void visit_trans_inst(ir::trans_inst*);
   void visit_sqrt_inst(ir::sqrt_inst*);

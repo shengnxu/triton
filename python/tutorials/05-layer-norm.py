@@ -3,6 +3,7 @@ Layer Normalization
 ====================
 """
 
+import argparse
 import torch
 
 import triton
@@ -274,5 +275,11 @@ def bench_layer_norm(M, N, dtype, provider, mode='backward', eps=1e-5, device='c
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
-test_layer_norm(1151, 8192, torch.float16)
+parser = argparse.ArgumentParser()
+parser.add_argument('m', type=int)
+parser.add_argument('n', type=int)
+args = parser.parse_args()
+# test_layer_norm(1151, 8192, torch.float16)
+test_layer_norm(args.m, args.n, torch.float16)
+
 # bench_layer_norm.run(save_path='.', print_data=True)

@@ -474,6 +474,10 @@ private:
       Value resultVal = withIndex ? load(indexSmemBase) : load(smemBase);
       rewriter.replaceOp(op, resultVal);
     }
+    llvm::errs()<<"===============start reduce==================\n";
+    auto module = rewriter.getBlock()->getParent()->getParentOfType<ModuleOp>();
+    module.dump();
+    llvm::errs()<<"===============end reduce==================\n";
 
     return success();
   }

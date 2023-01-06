@@ -124,16 +124,28 @@ struct LoadOpConversion
 
       Value pred = mask ? maskElems[vecStart] : int_val(1, 1);
       for (size_t wordIdx = 0; wordIdx < nWords; ++wordIdx) {
+        //Value ret = bitcast(load(ptrElems[vecStart + wordIdx]), valueElemTy);
+        //loadedVals.push_back(ret);
         for (size_t wordElem = 0; wordElem < wordNElems; ++wordElem) {
           size_t elemOffset = vecStart + wordIdx * wordNElems + wordElem;
-
+          
+          //Value otherPred = other ? int_val(1, 1) : int_val(1, 0);
+          //Value otherVal = load(otherElems[elemOffset]);
+          
           // get values
           Value trueVal = load(ptrElems[elemOffset]);
           Value zeroVal = bitcast(i32_val(0), valueElemTy);
-          Value falseVal = other ? load(otherElems[elemOffset]) : zeroVal;
+          //Value oneVal = bitcast(i32_val(1), valueElemTy);
+          Value falseVal = other ? otherElems[elemOffset] : zeroVal;
+          //Value falseVal = other ? trueVal : zeroVal;
+          //Value falseVal = zeroVal;
+          //Value falseVal = select(otherPred, otherVal, zeroVal);
 
           // select value based on mask
           Value ret = select(pred, trueVal, falseVal);
+          //Value ret = select(pred, zeroVal, falseVal);
+          //Value ret = zeroVal; //select(pred, trueVal, falseVal);
+          //Value ret = select(pred, trueVal, falseVal);
           loadedVals.push_back(ret);
         }
       }
@@ -255,6 +267,11 @@ struct LoadOpConversion
     Value resultStruct =
         getStructFromElements(loc, loadedVals, rewriter, llvmResultStructTy);
     rewriter.replaceOp(op, {resultStruct});
+    llvm::errs()<<"===============start load/store==================\n";
+    auto module =
+        rewriter.getBlock()->getParent()->getParentOfType<ModuleOp>();
+    module.dump();
+    llvm::errs()<<"===============end load/store==================\n";
     return success();
   }
 };
@@ -343,6 +360,7 @@ struct StoreOpConversion
           Value maskVal = llMask ? maskElems[vecStart] : int_val(1, 1);
           Value ret = select(maskVal, elem , bitcast(i32_val(0), valueElemTy));
           store(ret, ptrElems[elemOffset]);
+          //store(elem, ptrElems[elemOffset]);
         }
       }
 #else

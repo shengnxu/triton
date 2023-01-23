@@ -1,3 +1,4 @@
+#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/TypeUtilities.h"
 
@@ -407,6 +408,78 @@ struct AtomicCASOpConversion
             converter, allocation, smem, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
+#ifdef USE_ROCM
+  LogicalResult
+  matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    MLIRContext *ctx = rewriter.getContext();
+    Value ptr = op.ptr();
+
+    Value llPtr = adaptor.ptr();
+    Value llCmp = adaptor.cmp();
+    Value llVal = adaptor.val();
+
+    auto ptrElements = getElementsFromStruct(loc, llPtr, rewriter);
+    auto cmpElements = getElementsFromStruct(loc, llCmp, rewriter);
+    auto valElements = getElementsFromStruct(loc, llVal, rewriter);
+
+    auto valueTy = op.getResult().getType().dyn_cast<RankedTensorType>();
+    Type valueElemTy =
+        valueTy ? getTypeConverter()->convertType(valueTy.getElementType())
+                : op.getResult().getType();
+    auto tid = tid_val();
+    Value pred = icmp_eq(tid, i32_val(0));
+
+    Value casPtr = ptrElements[0];
+    Value casCmp = cmpElements[0];
+    Value casVal = valElements[0];
+
+    // Build blocks to bypass the atomic instruction for ~rmwMask.
+    auto *curBlock = rewriter.getInsertionBlock();
+    auto *endBlock = curBlock->splitBlock(rewriter.getInsertionPoint());
+    auto *atomicBlock = rewriter.createBlock(
+        curBlock->getParent(), std::next(Region::iterator(curBlock)));
+
+    // Fill entry block with global memory barrier and conditional branch.
+    rewriter.setInsertionPointToEnd(curBlock);
+    Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
+    atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
+    rewriter.create<LLVM::CondBrOp>(loc, pred, atomicBlock, endBlock);
+
+    // Build main block with atomic_cmpxchg.
+    rewriter.setInsertionPointToEnd(atomicBlock);
+
+    auto successOrdering = LLVM::AtomicOrdering::acq_rel;
+    auto failureOrdering = LLVM::AtomicOrdering::monotonic;
+    auto boolType = IntegerType::get(rewriter.getContext(), 1);
+    auto pairType = LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                                     {valueElemTy, boolType});
+    auto cmpxchg = rewriter.create<LLVM::AtomicCmpXchgOp>(
+        loc, pairType, casPtr, casCmp, casVal, successOrdering,
+        failureOrdering);
+    // Extract the new_loaded value from the pair.
+    Value newLoaded = rewriter.create<LLVM::ExtractValueOp>(
+        loc, valueElemTy, cmpxchg, rewriter.getI64ArrayAttr({0}));
+
+    store(newLoaded, atomPtr);
+
+    rewriter.create<LLVM::BrOp>(loc, ValueRange(), endBlock);
+
+    // Build the last block: synced load from shared memory, exit.
+    rewriter.setInsertionPointToStart(endBlock);
+
+    GCNBuilder BuilderMemfenceLDS;
+    BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
+    BuilderMemfenceLDS.launch(rewriter, loc, void_ty(ctx));
+    barrier();
+    Value ret = load(atomPtr);
+    rewriter.replaceOp(op, {ret});
+    return success();
+  }
+
+#else // USE_ROCM
+
   LogicalResult
   matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
@@ -466,6 +539,7 @@ struct AtomicCASOpConversion
     rewriter.replaceOp(op, {ret});
     return success();
   }
+#endif // USE_ROCM
 };
 
 struct AtomicRMWOpConversion
@@ -481,6 +555,141 @@ struct AtomicRMWOpConversion
       : ConvertTritonGPUOpToLLVMPattern<triton::AtomicRMWOp>(
             converter, allocation, smem, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
+
+#ifdef USE_ROCM
+  /// Try to match the mlir::triton::RMWOp to LLVM::AtomicBinOp.
+  static Optional<LLVM::AtomicBinOp> matchAtomicOp(RMWOp atomicOp) {
+    switch (atomicOp) {
+    case RMWOp::AND:
+      return LLVM::AtomicBinOp::_and;
+    case RMWOp::OR:
+      return LLVM::AtomicBinOp::_or;
+    case RMWOp::XOR:
+      return LLVM::AtomicBinOp::_xor;
+    case RMWOp::ADD:
+      return LLVM::AtomicBinOp::add;
+    case RMWOp::FADD:
+      return LLVM::AtomicBinOp::fadd;
+    case RMWOp::MAX:
+      return LLVM::AtomicBinOp::max;
+    case RMWOp::MIN:
+      return LLVM::AtomicBinOp::min;
+    case RMWOp::UMAX:
+      return LLVM::AtomicBinOp::umax;
+    case RMWOp::UMIN:
+      return LLVM::AtomicBinOp::umin;
+    case RMWOp::XCHG:
+      return LLVM::AtomicBinOp::xchg;
+    default:
+      return llvm::None;
+    }
+    llvm_unreachable("Invalid RMWOp");
+  }
+
+  LogicalResult
+  matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    MLIRContext *ctx = rewriter.getContext();
+
+    auto atomicRmwAttr = op.atomic_rmw_op();
+    Value ptr = op.ptr();
+    Value val = op.val();
+
+    Value llPtr = adaptor.ptr();
+    Value llVal = adaptor.val();
+    Value llMask = adaptor.mask();
+
+    auto valElements = getElementsFromStruct(loc, llVal, rewriter);
+    auto ptrElements = getElementsFromStruct(loc, llPtr, rewriter);
+    auto maskElements = getElementsFromStruct(loc, llMask, rewriter);
+
+    Value opResult = op.getResult();
+    auto valueTy = opResult.getType().dyn_cast<RankedTensorType>();
+    Type valueElemTy =
+        valueTy ? getTypeConverter()->convertType(valueTy.getElementType())
+                : opResult.getType();
+    const size_t valueElemNbits = valueElemTy.getIntOrFloatBitWidth();
+    auto elemsPerThread = getElemsPerThread(val.getType());
+    // vec = 1 for scalar
+    auto vec = getVectorSize(ptr);
+    Value mask = int_val(1, 1);
+    auto tid = tid_val();
+    // tensor
+    if (valueTy) {
+      auto valTy = val.getType().cast<RankedTensorType>();
+      vec = std::min<unsigned>(vec, valTy.getElementType().isF16() ? 2 : 1);
+      // mask
+      auto shape = valueTy.getShape();
+      auto numElements = product(shape);
+      mask = and_(mask, icmp_slt(mul(tid, i32_val(elemsPerThread)),
+                                 i32_val(numElements)));
+    }
+
+    auto vecTy = vec_ty(valueElemTy, vec);
+    SmallVector<Value> resultVals(elemsPerThread);
+    for (size_t i = 0; i < elemsPerThread; i += vec) {
+      Value rmwVal = undef(vecTy);
+      for (int ii = 0; ii < vec; ++ii) {
+        Value iiVal = createIndexAttrConstant(
+            rewriter, loc, getTypeConverter()->getIndexType(), ii);
+        rmwVal = insert_element(vecTy, rmwVal, valElements[i + ii], iiVal);
+      }
+
+      Value rmwPtr = ptrElements[i];
+      Value rmwMask = maskElements[i];
+      rmwMask = and_(rmwMask, mask);
+      if (!valueTy) {
+        rmwMask = and_(rmwMask, icmp_eq(tid, i32_val(0)));
+      }
+
+      Value undefVal = undef(valueElemTy);
+      // Build blocks to bypass the atomic instruction for ~rmwMask.
+      auto *curBlock = rewriter.getInsertionBlock();
+      auto *endBlock = curBlock->splitBlock(rewriter.getInsertionPoint());
+      auto *atomicBlock = rewriter.createBlock(
+          curBlock->getParent(), std::next(Region::iterator(curBlock)));
+      endBlock->addArgument({valueElemTy}, {loc});
+
+      rewriter.setInsertionPointToEnd(curBlock);
+      rewriter.create<LLVM::CondBrOp>(loc, rmwMask, atomicBlock, endBlock,
+                                      undefVal);
+
+      rewriter.setInsertionPointToEnd(atomicBlock);
+      auto maybeKind = matchAtomicOp(atomicRmwAttr);
+      // TODO: use amdgpu.raw_buffer_atomic_fadd for MI-* series of AMD GPU
+      // since it supports memref indexes (after moving triton to use memrefs).
+      auto atom = rewriter.create<LLVM::AtomicRMWOp>(
+          loc, valueElemTy, *maybeKind, rmwPtr, valElements[i],
+          LLVM::AtomicOrdering::monotonic);
+      rewriter.create<LLVM::BrOp>(loc, atom.getResult(), endBlock);
+
+      rewriter.setInsertionPointToStart(endBlock);
+      Value retVal = endBlock->getArgument(0);
+      if (valueTy) {
+        for (int ii = 0; ii < vec; ++ii) {
+          resultVals[i + ii] =
+              vec == 1 ? retVal
+                       : extract_element(valueElemTy, retVal, idx_val(ii));
+        }
+      } else {
+        Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
+        atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
+        store(retVal, atomPtr);
+        Value ret = load(atomPtr);
+        rewriter.replaceOp(op, {ret});
+      }
+    }
+    if (valueTy) {
+      Type structTy = getTypeConverter()->convertType(valueTy);
+      Value resultStruct =
+          getStructFromElements(loc, resultVals, rewriter, structTy);
+      rewriter.replaceOp(op, {resultStruct});
+    }
+    return success();
+  }
+
+#else  // USE_ROCM
 
   LogicalResult
   matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
@@ -620,6 +829,7 @@ struct AtomicRMWOpConversion
     }
     return success();
   }
+#endif // USE_ROCM
 };
 
 struct InsertSliceOpConversion

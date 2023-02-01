@@ -64,7 +64,8 @@ def get_llvm_package_info():
 
 
 def get_thirdparty_packages(triton_cache_path):
-    packages = [get_pybind11_package_info(), get_llvm_package_info()]
+    #packages = [get_pybind11_package_info(), get_llvm_package_info()]
+    packages = [get_pybind11_package_info()]
     thirdparty_cmake_args = []
     for p in packages:
         package_root_dir = os.path.join(triton_cache_path, p.package)
@@ -86,6 +87,9 @@ def get_thirdparty_packages(triton_cache_path):
             thirdparty_cmake_args.append("-D{}={}/include".format(p.include_flag, package_dir))
         if p.lib_flag:
             thirdparty_cmake_args.append("-D{}={}/lib".format(p.lib_flag, package_dir))
+    # hard-code to use rocm llvm
+    thirdparty_cmake_args.append("-DLLVM_INCLUDE_DIRS=/opt/rocm/llvm/include")
+    thirdparty_cmake_args.append("-DLLVM_LIBRARY_DIR=/opt/rocm/llvm/lib")
     return thirdparty_cmake_args
 
 # ---- cmake extension ----

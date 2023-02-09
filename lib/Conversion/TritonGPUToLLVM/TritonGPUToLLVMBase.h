@@ -599,7 +599,7 @@ private:
                                 const BlockedEncodingAttr &blocked_layout,
                                 ArrayRef<int64_t> shape) const {
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = idx_val(32);
+    Value warpSize = idx_val(64);
     Value laneId = urem(threadId, warpSize);
     Value warpId = udiv(threadId, warpSize);
     auto sizePerThread = blocked_layout.getSizePerThread();
@@ -730,7 +730,7 @@ private:
     SmallVector<Value> warpsPerCTA = {idx_val(_warpsPerCTA[0]),
                                       idx_val(_warpsPerCTA[1])};
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = idx_val(32);
+    Value warpSize = idx_val(64);
     Value laneId = urem(threadId, warpSize);
     Value warpId = udiv(threadId, warpSize);
     Value warpId0 = urem(warpId, warpsPerCTA[0]);

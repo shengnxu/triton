@@ -159,13 +159,11 @@ class LayerNorm(torch.autograd.Function):
             raise RuntimeError("This layer norm doesn't support feature dim >= 64KB.")
         # heuristics for number of warps
         if torch.version.hip is not None:
-            num_warps = 4
+            num_warps = 2
             if BLOCK_SIZE >= 2048:
-                num_warps = 8
+                num_warps = 4
             if BLOCK_SIZE >= 4096:
-                num_warps = 16
-            if BLOCK_SIZE >= 8192:
-                num_warps = 32
+                num_warps = 8
         else:
             num_warps = min(max(BLOCK_SIZE // 256, 1), 8)
         # enqueue kernel
@@ -250,7 +248,7 @@ def test_layer_norm(M, N, dtype, eps=1e-5, device='cuda'):
         styles=[('blue', '-'), ('green', '-'), ('orange', '-')],
         ylabel='GB/s',
         plot_name='layer-norm-backward',
-        args={'M': 4096, 'dtype': torch.float16, 'mode': 'backward'}
+        args={'M': 4096, 'dtype': torch.float32, 'mode': 'forward'}
     )
 )
 def bench_layer_norm(M, N, dtype, provider, mode='backward', eps=1e-5, device='cuda'):

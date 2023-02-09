@@ -220,15 +220,15 @@ for
     // }]>,
     // Custom builder initializes sizePerWarp and sizePerCTA automatically
     // Default builder takes sizePerThread, order and numWarps, and tries to
-    // pack numWarps*32 threads in the provided order for use in a type
+    // pack numWarps*64 threads in the provided order for use in a type
     // of the given shape.
     AttrBuilder<(ins "ArrayRef<int64_t>":$shape,
                      "ArrayRef<unsigned>":$sizePerThread,
                      "ArrayRef<unsigned>":$order,
                      "unsigned":$numWarps), [{
       int rank = sizePerThread.size();
-      unsigned remainingLanes = 32;
-      unsigned remainingThreads = numWarps*32;
+      unsigned remainingLanes = 64;
+      unsigned remainingThreads = numWarps*64;
       unsigned remainingWarps = numWarps;
       unsigned prevLanes = 1;
       unsigned prevWarps = 1;
@@ -246,7 +246,7 @@ for
         prevWarps *= warpsPerCTA[i];
       }
       // Expand the last dimension to fill the remaining lanes and warps
-      threadsPerWarp[order[rank-1]] = 32 / prevLanes;
+      threadsPerWarp[order[rank-1]] = 64 / prevLanes;
       warpsPerCTA[order[rank-1]] = numWarps / prevWarps;
 
       return $_get(context, sizePerThread, threadsPerWarp, warpsPerCTA, order);

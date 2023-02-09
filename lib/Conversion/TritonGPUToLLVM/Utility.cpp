@@ -138,6 +138,7 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   auto dOpr = builder.newOperand("=v");
   auto aOpr = builder.newOperand(val, "v");
   auto maskOpr = builder.newConstantOperand("offset:" + std::to_string(masks[i]));
+  builder.create<>("v_add_f32 v1, v1, v1 row_bcast:31 row_mask:0xc")->operator()();
   (*shfl)(dOpr, aOpr, maskOpr);
   auto swait = builder.create("s_waitcnt lgkmcnt(0)");
   (*swait)();

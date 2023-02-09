@@ -26,7 +26,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     });
 
     int numElems = product(origType.getShape());
-    int numThreads = numWarps * 32;
+    int numThreads = numWarps * 64;
     int numElemsPerThread = std::max(numElems / numThreads, 1);
 
     // Thread tile size depends on memory alignment

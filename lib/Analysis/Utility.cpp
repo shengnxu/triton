@@ -63,7 +63,7 @@ SmallVector<SmallVector<unsigned>> ReduceOpHelper::getScratchConfigsFast() {
   /// shared memory block1:
   auto mod = op.getOperation()->getParentOfType<ModuleOp>();
   unsigned numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
-  smemShapes[1].push_back(numWarps * 32);
+  smemShapes[1].push_back(numWarps * 64);
 
   return smemShapes;
 }

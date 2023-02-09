@@ -1,9 +1,11 @@
 name: PyTorch Triton ROCm Wheels
 on:
-  workflow_dispatch:
+  push:
   pull_request:
     branches:
       - triton-mlir-pyt20
+      - triton-mlir-pyt20-wheels
+  workflow_dispatch:
 
 jobs:
 

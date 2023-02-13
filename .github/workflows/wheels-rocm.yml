@@ -34,6 +34,8 @@ jobs:
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.12.0
+        inputs:
+          package-dir: python
         env:
           CIBW_BUILD: ${{ matrix.python }}-manylinux_x86_64
           CIBW_BUILD_VERBOSITY: 3

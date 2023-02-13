@@ -1,42 +1,65 @@
 name: PyTorch Triton ROCm Wheels
-on:
-  pull_request:
-    branches:
-      - triton-mlir-pyt20
-      - triton-mlir-pyt20-wheels
-  workflow_dispatch:
+
+# Build on every branch push, tag push, and pull request change:
+on: [push, pull_request]
 
 jobs:
-
-  Build-PyTorch-Triton-ROCm-Wheels:
-    name: Build PyTorch Triton ROCm Wheels
+  build_wheels:
+    name: Build wheels on ${{ matrix.python }}-manylinux_x86_64
     runs-on: ubuntu-latest
-    
-    steps:
+    strategy:
+      matrix:
+        python: ["cp37", "cp38", "cp39", "cp310", "cp311"]
 
-      - name: Checkout
-        uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v3
 
       - name: Patch setup.py
         run: |
-          #sed -i 's/name\=\"triton\"/name="triton-nightly"/g' python/setup.py
-          export LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d' --format="%cd")
+          export HASH=$(git rev-parse --short HEAD)
           sed -i -r "s/name\=\"(.*)\"/name=\"pytorch-triton-rocm\"/g" python/setup.py
-          sed -i -r "s/version\=\"(.*)\"/version=\"\1-dev"$LATEST_DATE"\"/g" python/setup.py
+          sed -i -r "s/version\=\"(.*)\"/version=\"\1-"$HASH"\"/g" python/setup.py
           echo "" >> python/setup.cfg
           echo "[build_ext]" >> python/setup.cfg
           echo "base-dir=/project" >> python/setup.cfg
 
+      - name: Patch setup.py version if tagged
+        # patch setup.py version for any tag starting with 'v'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # strip off initial 'v'
+          VERSION=${GITHUB_REF_NAME#v}
+          echo Version: $VERSION
+          sed -i -r "s/version\=\"(.*)\"/version=\"$VERSION\"/g" python/setup.py
+
       - name: Build wheels
-        run: |
-          python3 -m pip install cmake cibuildwheel twine
-          export CIBW_MANYLINUX_X86_64_IMAGE="rocm/dev-manylinux2014_x86_64:5.4.2"
-          export CIBW_SKIP="{cp,pp}35-*"
-          export CIBW_BUILD="{cp,pp}3*-manylinux_x86_64"
-          export CIBW_BUILD_VERBOSITY=3
-          python3 -m cibuildwheel python --output-dir wheelhouse
+        uses: pypa/cibuildwheel@v2.12.0
+        env:
+          CIBW_BUILD: ${{ matrix.python }}-manylinux_x86_64
+          CIBW_BUILD_VERBOSITY: 3
+          CIBW_MANYLINUX_X86_64_IMAGE: rocm/dev-manylinux2014_x86_64:5.4.2
 
+      - uses: actions/upload-artifact@v3
+        with:
+          path: ./wheelhouse/*.whl
 
-      - name: Upload wheels to PyPI
-        run: |
-          python3 -m twine upload wheelhouse/* -u __token__ -p ${{ secrets.PYPI_API_TOKEN }}
+  upload_pypi:
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    # upload to PyPI on every tag starting with 'v'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # alternatively, to publish when a GitHub Release is created, use the following rule:
+    # if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          # unpacks default artifact into dist/
+          # if `name: artifact` is omitted, the action will create extra parent dir
+          name: artifact
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.5.0
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          # To test: repository_url: https://test.pypi.org/legacy/

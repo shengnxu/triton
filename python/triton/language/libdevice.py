@@ -5,7 +5,7 @@ from .. import impl
 from . import core, extern
 
 if torch.version.hip is not None:
-    LIBDEVICE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cuda2gcn.bc")
+    LIBDEVICE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "third_party", "rocm", "lib", "cuda2gcn.bc")
 else:
     LIBDEVICE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "third_party", "cuda", "lib", "libdevice.10.bc")
 

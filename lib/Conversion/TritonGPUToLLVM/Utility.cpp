@@ -132,16 +132,71 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
 
 #ifdef USE_ROCM
   // This map facilates the butterfly shuffle pattern for a stride less than 16. The pattern stride is the key of the map.
-  DenseMap<short, unsigned int> masks{{16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
-  GCNBuilder builder; 
-  auto shfl = builder.create("ds_swizzle_b32");
-  auto dOpr = builder.newOperand("=v");
-  auto aOpr = builder.newOperand(val, "v");
-  auto maskOpr = builder.newConstantOperand("offset:" + std::to_string(masks[i]));
-  builder.create<>("v_add_f32 v1, v1, v1 row_bcast:31 row_mask:0xc")->operator()();
-  (*shfl)(dOpr, aOpr, maskOpr);
-  auto swait = builder.create("s_waitcnt lgkmcnt(0)");
-  (*swait)();
+  GCNBuilder builder;
+  switch (i){
+    case 32:
+    {
+      auto cOpr0 = builder.newConstantOperand(0);
+      auto cOprN1 = builder.newConstantOperand(-1);
+      auto cOpr2 = builder.newConstantOperand(2);
+      auto cOpr32 = builder.newConstantOperand(32);
+      auto lower = builder.create("v_mbcnt_lo_u32_b32");
+      auto lowerResOpr = builder.newOperand("=v");
+      auto lowerOpr1 = builder.newOperand(cOprN1->value, "v");
+      auto lowerOpr2 = builder.newOperand(cOpr0->value, "v");
+      (*lower)(lowerResOpr, lowerOpr1, lowerOpr2);
+      lowerResOpr->constraint = "v";
+      auto higher = builder.create("v_mbcnt_hi_u32_b32");
+      auto higherResOpr = builder.newOperand("=v");
+      (*higher)(higherResOpr, lowerOpr1, lowerResOpr);
+      higherResOpr->constraint = "v";
+      auto vor = builder.create("v_or_b32_e32");
+      auto vorResOpr = builder.newOperand("=v");
+      (*vor)(vorResOpr, cOpr32, higherResOpr);
+      vorResOpr->constraint = "v";
+      auto cmp = builder.create("v_cmp_gt_i32_e32 vcc 64");
+      (*cmp)(vorResOpr);
+      auto vmask = builder.create("v_cndmask_b32_e32");
+      auto vmaskResOpr = builder.newOperand("=v");
+      auto restOpr = builder.newConstantOperand("vcc");
+      (*vmask)(vmaskResOpr, higherResOpr, vorResOpr, restOpr);
+      vmaskResOpr->constraint = "v";
+      auto multiplier = builder.create("v_lshlrev_b32_e32");
+      auto mulResOpr = builder.newOperand("=v");
+      auto bitShift = builder.newOperand(cOpr2->value, "v");
+      (*multiplier)(mulResOpr, bitShift, vmaskResOpr);
+      mulResOpr->constraint = "v";
+      auto swait0 = builder.create("s_waitcnt vmcnt(0)");
+      (*swait0)();
+      auto permute = builder.create("ds_bpermute_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto aOpr = builder.newOperand(val, "v");
+      (*permute)(dOpr, mulResOpr, aOpr);
+      auto swait1 = builder.create("s_waitcnt lgkmcnt(0)");
+      (*swait1)();
+      break;
+    }
+    case 16:
+    case 8:
+    case 4:
+    case 2:
+    case 1:
+    {
+      DenseMap<short, unsigned int> masks{{16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
+      auto shfl = builder.create("ds_swizzle_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto aOpr = builder.newOperand(val, "v");
+      auto maskOpr = builder.newConstantOperand("offset:" + std::to_string(masks[i]));
+      (*shfl)(dOpr, aOpr, maskOpr);
+      auto swait = builder.create("s_waitcnt lgkmcnt(0)");
+      (*swait)();
+      break;
+    }
+    default:
+    {
+      llvm::report_fatal_error("Unsupported warpSize");
+    }
+  }
 #else
   PTXBuilder builder;
   auto &shfl = builder.create("shfl.sync")->o("bfly").o("b32");

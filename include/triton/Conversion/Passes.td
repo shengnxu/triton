@@ -25,12 +25,34 @@ def ConvertTritonToTritonGPU: Pass<"convert-triton-to-tritongpu", "mlir::ModuleO
 }
 
 
-def ConvertTritonGPUToLLVM : Pass<"convert-triton-gpu-to-llvm", "mlir::ModuleOp"> {
-    let summary = "Convert TritonGPU to LLVM";
+def ConvertTritonGPUToRock : Pass<"convert-triton-gpu-to-rock", "mlir::ModuleOp"> {
+    let summary = "Convert TritonGPU to Rock";
     let description = [{
 
     }];
-    let constructor = "mlir::triton::createConvertTritonGPUToLLVMPass()";
+    let constructor = "mlir::triton::createConvertTritonGPUToRockPass()";
+
+    let dependentDialects = ["mlir::arith::ArithDialect",
+                             "mlir::math::MathDialect",
+                             "mlir::scf::SCFDialect",
+                             "mlir::tensor::TensorDialect",
+                             "mlir::triton::TritonDialect",
+                             "mlir::triton::gpu::TritonGPUDialect"];
+
+    let options = [
+        Option<"computeCapability", "compute-capability",
+               "int32_t", /*default*/"80",
+               "device compute capability">
+    ];
+}
+
+
+def ConvertRockToLLVM : Pass<"convert-rock-to-llvm", "mlir::ModuleOp"> {
+    let summary = "Convert Rock To LLVM";
+    let description = [{
+
+    }];
+    let constructor = "mlir::triton::createConvertRockToLLVMPass()";
 
     let dependentDialects = ["mlir::arith::ArithDialect",
                              "mlir::math::MathDialect",

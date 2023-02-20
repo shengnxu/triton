@@ -15,7 +15,8 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Analysis/Allocation.h"
-#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToLLVMPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
 #include "triton/Conversion/TritonToTritonGPU/TritonToTritonGPUPass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
@@ -1518,9 +1519,13 @@ void init_triton_ir(py::module &&m) {
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUDecomposeConversionsPass());
            })
-      .def("add_triton_gpu_to_llvm",
+      .def("add_triton_gpu_to_rock",
            [](mlir::PassManager &self) {
-             self.addPass(mlir::triton::createConvertTritonGPUToLLVMPass());
+             self.addPass(mlir::triton::createConvertTritonGPUToRockPass());
+           })
+      .def("add_rock_to_llvm",
+           [](mlir::PassManager &self) {
+               self.addPass(mlir::triton::createConvertRockToLLVMPass());
            })
       .def("add_scf_to_cfg", [](mlir::PassManager &self) {
         self.addPass(mlir::createConvertSCFToCFPass());

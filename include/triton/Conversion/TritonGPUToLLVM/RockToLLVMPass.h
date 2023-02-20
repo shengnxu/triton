@@ -1,5 +1,5 @@
-#ifndef TRITON_CONVERSION_TRITONGPU_TO_LLVM_PASS_H
-#define TRITON_CONVERSION_TRITONGPU_TO_LLVM_PASS_H
+#ifndef TRITON_CONVERSION_ROCK_TO_LLVM_PASS_H
+#define TRITON_CONVERSION_ROCK_TO_LLVM_PASS_H
 
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -13,7 +13,7 @@ template <typename T> class OperationPass;
 namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonGPUToLLVMPass(int computeCapability = 80);
+createConvertRockToLLVMPass(int computeCapability = 80);
 
 } // namespace triton
 

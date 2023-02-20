@@ -13,7 +13,8 @@
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Target/LLVMIR/LLVMTranslationInterface.h"
 #include "mlir/Transforms/Passes.h"
-#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToLLVMPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/ADT/APInt.h"
@@ -302,7 +303,8 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
       /*printAfterOnlyOnChange=*/true,
       /*printAfterOnlyOnFailure*/ false, llvm::dbgs(), printingFlags);
 
-  pm.addPass(createConvertTritonGPUToLLVMPass(computeCapability));
+  pm.addPass(createConvertTritonGPUToRockPass(computeCapability));
+  pm.addPass(createConvertRockToLLVMPass(computeCapability));
   // Canonicalize to eliminate the remaining UnrealizedConversionCastOp
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass()); // Simplify the IR to improve readability.

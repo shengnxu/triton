@@ -1,7 +1,7 @@
 name: PyTorch Triton ROCm Wheels
 
-# Build on every branch push, tag push, and pull request change:
-on: [push, pull_request]
+# Build on every branch push or tag push:
+on: push
 
 jobs:
   build_wheels:
@@ -25,10 +25,10 @@ jobs:
 
       - name: Patch setup.py version if tagged
         # patch setup.py version for any tag starting with 'v'
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/pytorch-triton-rocm-v')
         run: |
-          # strip off initial 'v'
-          VERSION=${GITHUB_REF_NAME#v}
+          # strip off initial 'pytorch-triton-rocm-v'
+          VERSION=${GITHUB_REF_NAME#pytorch-triton-rocm-v}
           echo Version: $VERSION
           sed -i -r "s/version\=\"(.*)\"/version=\"$VERSION\"/g" python/setup.py
 
@@ -49,7 +49,7 @@ jobs:
     needs: build_wheels
     runs-on: ubuntu-latest
     # upload to PyPI on every tag starting with 'v'
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/pytorch-triton-rocm-v')
     # alternatively, to publish when a GitHub Release is created, use the following rule:
     # if: github.event_name == 'release' && github.event.action == 'published'
     steps:

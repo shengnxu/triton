@@ -82,39 +82,39 @@ private:
     }
     switch (redOp) {
     case RedOp::ARGMIN:
-      accIndex = select(
+      accIndex = selectOp(
           icmp_slt(acc, cur), accIndex,
-          select(icmp_sgt(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(icmp_sgt(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = smin(acc, cur);
       break;
     case RedOp::ARGMAX:
-      accIndex = select(
+      accIndex = selectOp(
           icmp_sgt(acc, cur), accIndex,
-          select(icmp_slt(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(icmp_slt(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = smax(acc, cur);
       break;
     case RedOp::ARGUMIN:
-      accIndex = select(
+      accIndex = selectOp(
           icmp_ult(acc, cur), accIndex,
-          select(icmp_ugt(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(icmp_ugt(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = umin(acc, cur);
       break;
     case RedOp::ARGUMAX:
-      accIndex = select(
+      accIndex = selectOp(
           icmp_ugt(acc, cur), accIndex,
-          select(icmp_ult(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(icmp_ult(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = umax(acc, cur);
       break;
     case RedOp::ARGFMIN:
-      accIndex = select(
+      accIndex = selectOp(
           fcmp_olt(acc, cur), accIndex,
-          select(fcmp_ogt(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(fcmp_ogt(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = fmin(acc, cur);
       break;
     case RedOp::ARGFMAX:
-      accIndex = select(
+      accIndex = selectOp(
           fcmp_ogt(acc, cur), accIndex,
-          select(fcmp_olt(acc, cur), curIndex, smin(accIndex, curIndex)));
+          selectOp(fcmp_olt(acc, cur), curIndex, smin(accIndex, curIndex)));
       acc = fmax(acc, cur);
       break;
     case RedOp::ADD:
@@ -215,7 +215,7 @@ private:
       for (int N = smemShape[axis] / 2; N > 0; N >>= 1) {
         readIdx[axis] = ints[N];
         Value readMask = icmp_slt(writeIdx[axis], ints[N]);
-        Value readOffset = select(
+        Value readOffset = selectOp(
             readMask, linearize(rewriter, loc, readIdx, smemShape, srcOrd),
             ints[0]);
         Value readPtr = gep(elemPtrTy, writePtr, readOffset);

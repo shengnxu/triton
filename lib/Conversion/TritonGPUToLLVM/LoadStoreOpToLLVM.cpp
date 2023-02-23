@@ -1044,7 +1044,7 @@ struct InsertSliceAsyncOpConversion
           // if there's any mask. cp.async will automatically fill the
           // remaining slots with 0 if cp-size > src-size.
           // XXX(Keren): Always assume other = 0 for now.
-          auto selectOp = select(maskElems[elemIdx + wordElemIdx],
+          auto selectOp = selectOp(maskElems[elemIdx + wordElemIdx],
                                  i32_val(byteWidth), i32_val(0));
           srcSize = ptxBuilder.newOperand(selectOp, "r");
         }

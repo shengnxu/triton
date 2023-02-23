@@ -37,7 +37,8 @@ def ConvertTritonGPUToRock : Pass<"convert-triton-gpu-to-rock", "mlir::ModuleOp"
                              "mlir::scf::SCFDialect",
                              "mlir::tensor::TensorDialect",
                              "mlir::triton::TritonDialect",
-                             "mlir::triton::gpu::TritonGPUDialect"];
+                             "mlir::triton::gpu::TritonGPUDialect",
+                             "mlir::rock::RockDialect"];
 
     let options = [
         Option<"computeCapability", "compute-capability",

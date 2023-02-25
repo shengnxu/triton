@@ -1,4 +1,8 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/IR/Types.h"
+#include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Rock/IR/GemmSize.h"
 #include "triton/Dialect/Rock/IR/Rock.h"
 #include "triton/Dialect/Rock/IR/RockGemmWrapperInterface.h"
@@ -7,10 +11,6 @@
 #include "triton/Dialect/Rock/Tuning/UtilityParams.h"
 #include "triton/Dialect/Rock/utility/loweringUtils.h"
 #include "triton/Dialect/Rock/utility/math.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/Types.h"
-#include "mlir/Pass/Pass.h"
 
 #include "llvm/Support/raw_ostream.h"
 

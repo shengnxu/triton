@@ -1,5 +1,6 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/Rock/IR/Rock.h"
 
 #include "triton/Dialect/Triton/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
@@ -33,7 +34,7 @@ int main(int argc, char **argv) {
 
   // TODO: register Triton & TritonGPU passes
   mlir::DialectRegistry registry;
-  registry.insert<mlir::triton::TritonDialect,
+  registry.insert<mlir::triton::TritonDialect, mlir::rock::RockDialect,
                   mlir::triton::gpu::TritonGPUDialect, mlir::func::FuncDialect,
                   mlir::math::MathDialect, mlir::arith::ArithDialect,
                   mlir::scf::SCFDialect, mlir::gpu::GPUDialect>();

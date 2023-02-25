@@ -32,9 +32,9 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -665,7 +665,8 @@ LogicalResult ThreadwiseReadIntoRewritePattern::matchAndRewrite(
     ThreadwiseReadIntoOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &b) const {
   Location loc = op.getLoc();
-  TypedValue<MemRefType> sourceView = cast<TypedValue<MemRefType>>(adaptor.getSource());
+  TypedValue<MemRefType> sourceView =
+      cast<TypedValue<MemRefType>>(adaptor.getSource());
   TypedValue<MemRefType> dest = cast<TypedValue<MemRefType>>(adaptor.getDest());
 
   auto [buffer, transforms] = untransform(b, sourceView, op.getExtraViews());
@@ -714,8 +715,10 @@ LogicalResult ThreadwiseWriteAllRewritePattern::matchAndRewrite(
     ThreadwiseWriteAllOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &b) const {
   Location loc = op.getLoc();
-  TypedValue<MemRefType> source = cast<TypedValue<MemRefType>>(adaptor.getSource());
-  TypedValue<MemRefType> destView = cast<TypedValue<MemRefType>>(adaptor.getDest());
+  TypedValue<MemRefType> source =
+      cast<TypedValue<MemRefType>>(adaptor.getSource());
+  TypedValue<MemRefType> destView =
+      cast<TypedValue<MemRefType>>(adaptor.getDest());
 
   auto [buffer, transforms] = untransform(b, destView, op.getExtraViews());
 

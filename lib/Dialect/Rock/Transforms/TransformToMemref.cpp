@@ -32,10 +32,10 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -124,8 +124,8 @@ void RockTransformToMemrefPass::runOnOperation() {
   MLIRContext *ctx = &getContext();
   ConversionTarget target(*ctx);
   target.addIllegalOp<TransformOp>();
-  target.addLegalDialect<arith::ArithDialect, rock::RockDialect,
-                         AffineDialect, memref::MemRefDialect>();
+  target.addLegalDialect<arith::ArithDialect, rock::RockDialect, AffineDialect,
+                         memref::MemRefDialect>();
 
   RewritePatternSet patterns(ctx);
   patterns.add<TransformRewritePattern>(ctx);

@@ -16,11 +16,11 @@
 
 #include "mlir/Dialect/AMDGPU/AMDGPUDialect.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "triton/Dialect/Rock/Passes.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/Passes.h"
+#include "triton/Dialect/Rock/Passes.h"
 #include "llvm/ADT/DenseSet.h"
 
 #define DEBUG_TYPE "rock-buffer-load-merge"

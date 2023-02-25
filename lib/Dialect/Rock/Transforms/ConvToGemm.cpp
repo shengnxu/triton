@@ -21,6 +21,7 @@
 //===-----------------------------------------------------===//
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "triton/Dialect/Rock/IR/GemmSize.h"
 #include "triton/Dialect/Rock/IR/Rock.h"
 #include "triton/Dialect/Rock/IR/RockConvInterface.h"
@@ -32,7 +33,6 @@
 #include "triton/Dialect/Rock/utility/builderUtils.h"
 #include "triton/Dialect/Rock/utility/loweringUtils.h"
 #include "triton/Dialect/Rock/utility/math.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -246,7 +246,8 @@ struct ZeroInitKernelRewritePattern final
                                 ZeroInitKernelOpAdaptor adaptor,
                                 ConversionPatternRewriter &b) const override {
     Location loc = op.getLoc();
-    TypedValue<ShapedType> buffer = cast<TypedValue<ShapedType>>(op.getBuffer());
+    TypedValue<ShapedType> buffer =
+        cast<TypedValue<ShapedType>>(op.getBuffer());
     Type bufferType = buffer.getType().getElementType();
     if (!op.getElemsPerThread().has_value())
       return op->emitOpError("elems per thread not set");
@@ -284,8 +285,10 @@ struct ConvertingCopyKernelRewritePattern final
                                 ConvertingCopyKernelOpAdaptor adaptor,
                                 ConversionPatternRewriter &b) const override {
     Location loc = op.getLoc();
-    TypedValue<ShapedType> input = cast<TypedValue<ShapedType>>(adaptor.getInput());
-    TypedValue<ShapedType> output = cast<TypedValue<ShapedType>>(adaptor.getOutput());
+    TypedValue<ShapedType> input =
+        cast<TypedValue<ShapedType>>(adaptor.getInput());
+    TypedValue<ShapedType> output =
+        cast<TypedValue<ShapedType>>(adaptor.getOutput());
     Type inputDataType = input.getType().getElementType();
     Type outputDataType = output.getType().getElementType();
     if (!op.getElemsPerThread().has_value())
@@ -421,8 +424,10 @@ struct MatchLayoutsToInput final
 
   LogicalResult matchAndRewrite(RockConvInterface op,
                                 PatternRewriter &b) const override {
-    TypedValue<ShapedType> filter = cast<TypedValue<ShapedType>>(op.getFilter());
-    TypedValue<ShapedType> output = cast<TypedValue<ShapedType>>(op.getOutput());
+    TypedValue<ShapedType> filter =
+        cast<TypedValue<ShapedType>>(op.getFilter());
+    TypedValue<ShapedType> output =
+        cast<TypedValue<ShapedType>>(op.getOutput());
     const llvm::StringMap<StringAttr> inputToFilter = {
         {"ci", b.getStringAttr("c")},
         {"hi", b.getStringAttr("y")},

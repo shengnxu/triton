@@ -1270,9 +1270,9 @@ struct InWarpTransposeRewritePattern
         swizzledRegisters.push_back(initialRegisters[i]);
         continue;
       }
-      //Value swizzled = b.create<gpu::WarpSwizzleOp>(
-      //    loc, b.getI32Type(), initialRegisters[i], swizzleSelector);
-      //swizzledRegisters.push_back(swizzled);
+      // Value swizzled = b.create<gpu::WarpSwizzleOp>(
+      //     loc, b.getI32Type(), initialRegisters[i], swizzleSelector);
+      // swizzledRegisters.push_back(swizzled);
     }
 
     for (uint32_t i = 0; i < totalSize; ++i) {

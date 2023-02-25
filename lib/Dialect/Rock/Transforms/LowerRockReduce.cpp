@@ -21,12 +21,12 @@
 //===-----------------------------------------------------===//
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "triton/Dialect/Rock/IR/Rock.h"
 #include "triton/Dialect/Rock/IR/TransformMapBuilder.h"
 #include "triton/Dialect/Rock/Passes.h"
 #include "triton/Dialect/Rock/utility/loweringUtils.h"
 #include "triton/Dialect/Rock/utility/transformMapUtils.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Support/LogicalResult.h"

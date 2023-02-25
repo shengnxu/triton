@@ -3,9 +3,9 @@
 
 #include "mlir/Dialect/AMDGPU/AMDGPUDialect.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
-#include "triton/Dialect/Rock/utility/math.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "triton/Dialect/Rock/utility/math.h"
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"

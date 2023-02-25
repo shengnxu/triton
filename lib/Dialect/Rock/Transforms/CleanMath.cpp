@@ -17,9 +17,9 @@
 
 #include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "triton/Dialect/Rock/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
+#include "triton/Dialect/Rock/Passes.h"
 
 // Remove these includes after we're not working with a test pass upstream
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
@@ -141,7 +141,6 @@ void RockCleanMathPass::runOnOperation() {
 
   OpPassManager postAnalysisPipeline("func.func");
   postAnalysisPipeline.addPass(createCanonicalizerPass());
-  postAnalysisPipeline.addPass(
-      arith::createArithUnsignedWhenEquivalentPass());
+  postAnalysisPipeline.addPass(arith::createArithUnsignedWhenEquivalentPass());
   (void)runPipeline(postAnalysisPipeline, op);
 }

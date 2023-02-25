@@ -8,10 +8,10 @@
 
 #include "triton/Dialect/Rock/utility/loweringUtils.h"
 
+#include "mlir/IR/BuiltinAttributes.h"
 #include "triton/Dialect/Rock/IR/Rock.h"
 #include "triton/Dialect/Rock/Tuning/ConvContext.h"
 #include "triton/Dialect/Rock/utility/math.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;

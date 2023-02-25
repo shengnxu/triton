@@ -12,7 +12,6 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
-#include "triton/Dialect/Rock/utility/transformMapUtils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Builders.h"
@@ -32,6 +31,7 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/MathExtras.h"
+#include "triton/Dialect/Rock/utility/transformMapUtils.h"
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -470,7 +470,7 @@ KernelType mlir::rock::kernelTypeFromConvOpType(ConvOpType convOpType) {
   case ConvOpType::BwdWeight:
     return KernelType::Conv2DBwdWeight;
   default:
-      llvm_unreachable("Unknown ConvOpType");
+    llvm_unreachable("Unknown ConvOpType");
   }
 }
 

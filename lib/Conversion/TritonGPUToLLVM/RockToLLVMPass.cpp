@@ -106,8 +106,7 @@ private:
   int numWarps{0};
 };
 
-class ConvertRockToLLVM
-    : public ConvertRockToLLVMBase<ConvertRockToLLVM> {
+class ConvertRockToLLVM : public ConvertRockToLLVMBase<ConvertRockToLLVM> {
 
 public:
   explicit ConvertRockToLLVM(int computeCapability)
@@ -217,7 +216,8 @@ public:
     mlir::arith::populateArithToLLVMConversionPatterns(typeConverter, patterns);
     mlir::populateMathToLLVMConversionPatterns(typeConverter, patterns);
 #ifdef USE_ROCM
-    mlir::populateGpuToROCDLConversionPatterns(typeConverter, patterns, mlir::gpu::amd::HIP);
+    mlir::populateGpuToROCDLConversionPatterns(typeConverter, patterns,
+                                               mlir::gpu::amd::HIP);
 #else
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           patterns);
@@ -227,17 +227,17 @@ public:
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
 
-    // Take care of scf pattern introduced by LoadStoreOp
+      // Take care of scf pattern introduced by LoadStoreOp
 #ifdef USE_ROCM
     RewritePatternSet scf_patterns_extra(context);
     mlir::populateSCFToControlFlowConversionPatterns(scf_patterns_extra);
-    if (failed(
-            applyPartialConversion(mod, scf_target, std::move(scf_patterns_extra))))
+    if (failed(applyPartialConversion(mod, scf_target,
+                                      std::move(scf_patterns_extra))))
       return signalPassFailure();
     RewritePatternSet patterns_extra(context);
-    mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns_extra);
-    if (failed(
-            applyPartialConversion(mod, target, std::move(patterns_extra))))
+    mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
+                                                          patterns_extra);
+    if (failed(applyPartialConversion(mod, target, std::move(patterns_extra))))
       return signalPassFailure();
 #endif
   }

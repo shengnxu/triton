@@ -46,15 +46,15 @@ using namespace mlir::rock;
 #include "triton/Conversion/Passes.h.inc"
 #include "triton/Dialect/Rock/Passes.h.inc"
 
-static bool isConvertSharedToDotOp(Operation *op) {
+static bool isConvertLDSToDotOp(Operation *op) {
   bool result = false;
   if (auto convertOp = dyn_cast<triton::gpu::ConvertLayoutOp>(op)) {
     auto srcTy = convertOp.getSrc().getType().cast<RankedTensorType>();
     auto dstTy = convertOp.getResult().getType().cast<RankedTensorType>();
     Attribute srcLayout = srcTy.getEncoding();
     Attribute dstLayout = dstTy.getEncoding();
-    if (srcLayout.isa<SharedEncodingAttr>() &&
-        dstLayout.isa<DotOperandEncodingAttr>())
+    if (srcLayout.isa<triton::gpu::LDSEncodingAttr>() &&
+        dstLayout.isa<triton::gpu::DotOperandEncodingAttr>())
       result = true;
   }
   return result;
@@ -90,11 +90,11 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     // Check if operands come from LDS
     // TODO (stage 2): integrate xdlops_gemm_v2 if operands come from
     // registers directly
-    if (!isConvertSharedToDotOp(matA.getDefiningOp())) {
+    if (!isConvertLDSToDotOp(matA.getDefiningOp())) {
       LLVM_DEBUG(llvm::dbgs() << "operand a does not come from LDS\n");
       return failure();
     }
-    if (!isConvertSharedToDotOp(matB.getDefiningOp())) {
+    if (!isConvertLDSToDotOp(matB.getDefiningOp())) {
       LLVM_DEBUG(llvm::dbgs() << "operand b does not come from LDS\n");
       return failure();
     }

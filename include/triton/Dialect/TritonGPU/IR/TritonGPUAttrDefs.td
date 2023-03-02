@@ -141,6 +141,51 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 }
 
 //===----------------------------------------------------------------------===//
+// LDS Layout Encoding
+//===----------------------------------------------------------------------===//
+
+def LDSEncodingAttr : TritonGPU_Attr<"LDSEncoding"> {
+  let mnemonic = "lds";
+
+  let description = [{
+A data layout in LDS required by `rock.blockwise_gemm` from the Rock dialect.
+It breaks the k dimension into kpacksPerK and kpack. And tile A and tile B
+are required to have the following data layout:
+tile A: kpacksPerK x m x kpack
+tile B: kpacksPerK x n x kpack
+$order refers to the order of axes by the rate of changing. It is used to
+indicate which dim of the tensor refers to the k dimension.
+tile A: order = [1,0]
+tile B: order = [0,1]
+Therefore, shape[order[0]] will always refer to the k dimension.
+  }];
+
+  let parameters = (
+    ins
+    "unsigned":$kpack,
+    ArrayRefParameter<"unsigned", "order of axes by the rate of changing">:$order
+  );
+
+  let builders = [
+    AttrBuilder<(ins "DotOperandEncodingAttr":$dotOpEnc,
+                     "unsigned":$kpack), [{
+        int opIdx = dotOpEnc.getOpIdx();
+        SmallVector<unsigned, 2> order{0,0};
+
+        if (opIdx == 0) // tile A order = [1,0]
+           order[0] = 1;
+        else            // tile B order = [0,1]
+           order[1] = 1;
+
+        return $_get(context, kpack, order);
+    }]>
+  ];
+
+  let extraClassDeclaration = extraBaseClassDeclaration;
+  let hasCustomAssemblyFormat = 1;
+}
+
+//===----------------------------------------------------------------------===//
 // Distributed Layout Encoding
 //===----------------------------------------------------------------------===//
 

@@ -55,6 +55,8 @@ unsigned getElemsPerThread(Attribute layout, ArrayRef<int64_t> shape) {
     return mmaLayout.getElemsPerThread(shape);
   } else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>()) {
     return sharedLayout.getElemsPerThread(shape);
+  } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
+      return ldsLayout.getElemsPerThread(shape);
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return dotLayout.getElemsPerThread(shape);
   } else {
@@ -249,6 +251,9 @@ SmallVector<unsigned> getOrder(const Attribute &layout) {
   } else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>()) {
     return SmallVector<unsigned>(sharedLayout.getOrder().begin(),
                                  sharedLayout.getOrder().end());
+  } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
+      return SmallVector<unsigned>(ldsLayout.getOrder().begin(),
+                                   ldsLayout.getOrder().end());
   } else {
     assert(0 && "Unimplemented usage of getOrder");
     return {};
@@ -405,6 +410,11 @@ unsigned SharedEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape) const {
   // TODO:
   assert(0 && "SharedEncodingAttr::getElemsPerThread not implemented");
   return 0;
+}
+
+unsigned LDSEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape) const {
+    assert(0 && "LDSEncodingAttr::getElemsPerThread not implemented");
+    return 0;
 }
 
 unsigned
@@ -594,6 +604,47 @@ void SharedEncodingAttr::print(AsmPrinter &printer) const {
 }
 
 //===----------------------------------------------------------------------===//
+// LDS encoding
+//===----------------------------------------------------------------------===//
+
+Attribute LDSEncodingAttr::parse(AsmParser &parser, Type type) {
+  if (parser.parseLess().failed())
+    return {};
+  // Parse the data as a dictionary
+  DictionaryAttr dict;
+  if (parser.parseAttribute(dict).failed())
+    return {};
+  if (parser.parseGreater().failed())
+    return {};
+
+  unsigned kpack = 0;
+  SmallVector<unsigned, 2> order;
+
+  for (const NamedAttribute &attr : dict) {
+    if (attr.getName() == "kpack") {
+      if (parseUInt(parser, attr, kpack, "kpack").failed())
+        return {};
+    } else if (attr.getName() == "order") {
+      if (parseIntArrayAttr(parser, attr, order, "order").failed())
+        return {};
+    } else {
+      parser.emitError(parser.getNameLoc(), "unexpected key: ")
+          << attr.getName().strref();
+      return {};
+    }
+  }
+
+  return parser.getChecked<LDSEncodingAttr>(parser.getContext(), kpack, order);
+}
+
+void LDSEncodingAttr::print(AsmPrinter &printer) const {
+  printer << "<{"
+          << "kpack = " << getKpack() << ", order = [" << getOrder()
+          << "]"
+          << "}>";
+}
+
+//===----------------------------------------------------------------------===//
 // Mma encoding
 //===----------------------------------------------------------------------===//
 
@@ -722,6 +773,9 @@ public:
     } else if (auto sharedAttr = attr.dyn_cast<SharedEncodingAttr>()) {
       os << "shared";
       return AliasResult::FinalAlias;
+    } else if (auto ldsAttr = attr.dyn_cast<LDSEncodingAttr>()) {
+        os << "lds";
+        return AliasResult::FinalAlias;
     } else if (auto blockedAttr = attr.dyn_cast<BlockedEncodingAttr>()) {
       os << "blocked";
       return AliasResult::FinalAlias;

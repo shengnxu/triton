@@ -17,10 +17,12 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
+#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 
 #include <memory>
 
 using namespace mlir;
+using namespace mlir::rock;
 namespace {
 #include "TritonGPUCombine.inc"
 using triton::DotOp;
@@ -1168,6 +1170,116 @@ public:
   }
 };
 
+class BlockedToMFMA : public mlir::RewritePattern {
+
+public:
+  BlockedToMFMA(mlir::MLIRContext *context)
+      : mlir::RewritePattern(triton::DotOp::getOperationName(), 1, context) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(mlir::Operation *op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto dotOp = cast<triton::DotOp>(op);
+    // TODO: Check data-types and SM compatibility
+    auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
+    if (!oldRetType.getEncoding() ||
+        oldRetType.getEncoding().isa<triton::gpu::MfmaEncodingAttr>())
+      return failure();
+
+    auto retShape = oldRetType.getShape();
+    auto mod = op->getParentOfType<mlir::ModuleOp>();
+    int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+
+
+    Value matA = dotOp.getA();
+    auto loc = dotOp.getLoc();
+    auto elementType = matA.getType().cast<RankedTensorType>().getElementType();
+    auto aShape = matA.getType().cast<RankedTensorType>().getShape();
+    uint32_t kPerBlock = aShape[1];
+    // TODO: kpack is needed to check the validity of the selected mfma
+    // instruction group.It is later used as one of the parameters of
+    // the LDSEncodingAttr. Make it a metadata that can be passed from
+    // kernel launch so that we have a single source of truth of its value.
+    uint32_t kpack = 4;
+    // Parameters for MfmaEncodingAttr
+    // TODO: Find a better way to derive [m|n]PerWave
+    // TODO: Check the validity of these parameters
+    uint32_t mPerBlock = retShape[0];
+    uint32_t nPerBlock = retShape[1];
+    uint32_t mPerWave = std::min<uint32_t>(64, mPerBlock);
+    uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
+    SmallVector<unsigned> warpsPerCTA(2), xdlopsPerWarp(2);
+    warpsPerCTA[0] = mPerBlock / mPerWave;
+    warpsPerCTA[1] = nPerBlock / nPerWave;
+
+    auto maybeMfmaInsnGroup =
+        MfmaInsnGroup::select(elementType, mPerWave, nPerWave);
+    if (failed(maybeMfmaInsnGroup)) {
+        return emitError(loc) << "Failed to select xdlops instruction group.\n";
+    }
+    MfmaInsnGroup mfmaGroup = *maybeMfmaInsnGroup;
+    if (!mfmaGroup.isCoherentWithK(kpack, kPerBlock)) {
+        return emitError(loc)
+            << "Mfma instruction group selection is not compatible with k.\n";
+    }
+
+    MfmaInsnAttr mfmaAttr = mfmaGroup.getInsnAttr();
+    int64_t nonKDim = mfmaAttr.mfmaNonKDim;
+    xdlopsPerWarp[0] = mfmaGroup.getMRepeats(mPerWave);
+    xdlopsPerWarp[1] = mfmaGroup.getNRepeats(nPerWave);
+
+    triton::gpu::MfmaEncodingAttr mfmaEnc;
+    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(
+        oldRetType.getContext(), nonKDim, warpsPerCTA, xdlopsPerWarp);
+    auto newRetType =
+        RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);
+
+    // convert accumulator
+    auto oldAcc = dotOp.getOperand(2);
+    auto newAcc = rewriter.create<triton::gpu::ConvertLayoutOp>(
+        oldAcc.getLoc(), newRetType, oldAcc);
+    Value a = dotOp.getA();
+    Value b = dotOp.getB();
+    auto oldAType = a.getType().cast<RankedTensorType>();
+    auto oldBType = b.getType().cast<RankedTensorType>();
+    auto oldAOrder = oldAType.getEncoding()
+                         .cast<triton::gpu::DotOperandEncodingAttr>()
+                         .getParent()
+                         .cast<triton::gpu::BlockedEncodingAttr>()
+                         .getOrder();
+    auto oldBOrder = oldBType.getEncoding()
+                         .cast<triton::gpu::DotOperandEncodingAttr>()
+                         .getParent()
+                         .cast<triton::gpu::BlockedEncodingAttr>()
+                         .getOrder();
+
+    // TODO: At stage 1, we do not care about the dot_op encodings, since
+    // blockwise_gemm loads data from LDS into registers.
+    // At stage 2, when xdlops_gemm is used, we need to design a new dot_op
+    // encoding to represent the data layout in registers for mfma instructions
+    Attribute isMMAv1RowA;
+    Attribute isMMAv1RowB;
+
+    auto newAType = RankedTensorType::get(
+        oldAType.getShape(), oldAType.getElementType(),
+        triton::gpu::DotOperandEncodingAttr::get(
+            oldAType.getContext(), 0, newRetType.getEncoding(), isMMAv1RowA));
+    auto newBType = RankedTensorType::get(
+        oldBType.getShape(), oldBType.getElementType(),
+        triton::gpu::DotOperandEncodingAttr::get(
+            oldBType.getContext(), 1, newRetType.getEncoding(), isMMAv1RowB));
+
+    a = rewriter.create<triton::gpu::ConvertLayoutOp>(a.getLoc(), newAType, a);
+    b = rewriter.create<triton::gpu::ConvertLayoutOp>(b.getLoc(), newBType, b);
+    auto newDot = rewriter.create<triton::DotOp>(
+        dotOp.getLoc(), newRetType, a, b, newAcc, dotOp.getAllowTF32());
+
+    rewriter.replaceOpWithNewOp<triton::gpu::ConvertLayoutOp>(
+        op, oldRetType, newDot.getResult());
+    return success();
+  }
+};
+
 // Convert + trans + convert
 // x = convert_layout distributed -> #shared_x
 // y = trans x -> #shared_y
@@ -1299,6 +1411,7 @@ public:
     patterns.add<MoveConvertOutOfLoop>(context);
     patterns.add<MoveConvertOutOfIf>(context);
     patterns.add<BlockedToMMA>(context, computeCapability);
+    patterns.add<BlockedToMFMA>(context);
     patterns.add<ConvertTransConvert>(context);
     patterns.add<ConvertDotConvert>(context);
 

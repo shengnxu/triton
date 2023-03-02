@@ -547,6 +547,58 @@ section 9.7.13.4.1 for more details.
   let extraClassDeclaration = extraBaseClassDeclaration;
 }
 
+//===----------------------------------------------------------------------===//
+// MFMA Layout Encoding
+//===----------------------------------------------------------------------===//
+
+def MfmaEncodingAttr : DistributedEncoding<"MfmaEncoding"> {
+  let mnemonic = "mfma";
+
+  let description = [{
+An encoding for tensors that have been produced by AMD Matrix Cores.
+It is characterized by three parameters:
+- `warpsPerCTA` describes the layout of warps within the CTA
+- `xdlopsPerWarp` describes the partition within the warp.
+   Each partition invokes one `mfma` instruction (xdlops)
+- `nonKDim` describes the size of the output block
+   (not to be confused with CUDA thread block) from the
+   chosen `mfma` instruction.
+
+Here is an example layout with `warpsPerCTA=[1,2]`, `xdlopsPerWarps=[1,2]`,
+and `nonKDim=32`. The chosen instruction is `mfma_32x32xkxf16`.
+            warp0                    warp1 = warp0 + 64
+ ------------/\-------------  -------------/\--------------
+    xdlops0        xdlops1       xdlops0         xdlops1
+ -----/\------ ------/\-----  -----/\------   -----/\-----
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[............ | ............  ............. | .............]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[0  1  ... 31 | 0  1  ... 31  64 65 ... 95  | 64 65 ... 95 ]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+[32 33 ... 63 | 32 33 ... 63  96 97 ... 127 | 96 97 ... 127]
+
+}];
+
+  let parameters = (
+    ins
+    "unsigned":$nonKDim,
+    ArrayRefParameter<"unsigned">:$warpsPerCTA,
+    ArrayRefParameter<"unsigned">:$xdlopsPerWarp
+  );
+
+  let hasCustomAssemblyFormat = 1;
+}
 
 
 #endif

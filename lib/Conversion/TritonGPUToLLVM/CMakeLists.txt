@@ -33,4 +33,5 @@ add_mlir_conversion_library(TritonGPUToLLVM
     TritonIR
     TritonGPUIR
     TritonGPUTransforms
+    MLIRRockUtility
 )

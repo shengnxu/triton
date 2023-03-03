@@ -41,6 +41,8 @@ private:
 
 bool isSharedEncoding(Value value);
 
+bool isMfmaEncoding(Value value);
+
 bool maybeSharedAllocationOp(Operation *op);
 
 bool maybeAliasOp(Operation *op);

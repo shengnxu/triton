@@ -12,6 +12,8 @@ include "mlir/Interfaces/InferTypeOpInterface.td" // SameOperandsAndResultType
 
 def ResultsAreSharedEncoding: NativeOpTrait<"ResultsAreSharedEncoding">;
 
+def ResultsAreMfmaEncoding: NativeOpTrait<"ResultsAreMfmaEncoding">;
+
 class TTG_Op<string mnemonic, list<Trait> traits = []> :
     Op<TritonGPU_Dialect, mnemonic, traits>;
 
@@ -205,6 +207,23 @@ def TTG_AllocTensorOp : TTG_Op<"alloc_tensor", [MemoryEffects<[MemAlloc]>,  // A
   let assemblyFormat = [{attr-dict `:` type($result)}];
 
   let results = (outs TT_Tensor:$result);
+}
+
+def TTG_MemRefToTensorOp : TTG_Op<"memref_to_tensor", [ResultsAreMfmaEncoding]> {
+
+  let summary = "convert memref to tensor";
+
+  let description = [{
+    This operation converts the result of `rock.blockwise_gemm_v2`, of type
+    memref, into a tensor, which has the `#mfma` encoding. The dst and src
+    are of the same shape. And the memory space is private/registers.
+  }];
+
+  let arguments = (ins AnyMemRef:$src);
+
+  let results = (outs TT_Tensor:$result);
+
+  let assemblyFormat = "$src attr-dict `:` type($src) `->` type($result)";
 }
 
 #endif

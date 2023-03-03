@@ -12,3 +12,15 @@ mlir::OpTrait::impl::verifyResultsAreSharedEncoding(Operation *op) {
 
   return success();
 };
+
+mlir::LogicalResult
+mlir::OpTrait::impl::verifyResultsAreMfmaEncoding(Operation *op) {
+  if (failed(verifyAtLeastNResults(op, 1)))
+    return failure();
+
+  for (auto result : op->getResults())
+    if (!isMfmaEncoding(result))
+      return op->emitOpError() << "requires all results to be Mfma encoding";
+
+  return success();
+};

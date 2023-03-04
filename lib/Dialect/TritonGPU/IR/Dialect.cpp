@@ -684,7 +684,7 @@ void MfmaEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
           << "nonKDim = " << getNonKDim() << ", "
           << "warpsPerCTA = [" << getWarpsPerCTA() << "], "
-          << "xdlopsPerWarp0 = [" << getXdlopsPerWarp() << "]"
+          << "xdlopsPerWarp = [" << getXdlopsPerWarp() << "]"
           << "}>";
 }
 

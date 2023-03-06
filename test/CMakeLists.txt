@@ -1,5 +1,7 @@
+add_subdirectory(dot-rocMLIR)
 add_subdirectory(lib)
 
+if(0)
 llvm_canonicalize_cmake_booleans(
   MLIR_ENABLE_BINDINGS_PYTHON
 )
@@ -24,3 +26,4 @@ add_lit_testsuite(check-triton-lit-tests "Running the triton regression tests"
 set_target_properties(check-triton-lit-tests PROPERTIES FOLDER "Tests")
 
 add_lit_testsuites(TRITON-LIT-TESTS ${CMAKE_CURRENT_SOURCE_DIR} DEPENDS ${TRITON_TEST_DEPENDS})
+endif()

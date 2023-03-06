@@ -1,0 +1,32 @@
+name: dot-rocMLIR Integration Tests
+
+on:
+  pull_request:
+    branches:
+      - dot-rocMLIR
+
+jobs:
+  Integration-Tests:
+    runs-on: Ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Clear cache
+        run: |
+          rm -rf ~/.triton/cache/
+
+      - name: Install Triton
+        run: |
+          cd python
+          TRITON_USE_ASSERT_ENABLED_LLVM=TRUE pip3 install -e '.[tests]'
+
+      - name: Run lit tests
+        run: |
+          cd python
+          LIT_TEST_DIR="build/$(ls build)/test/dot-rocMLIR"
+          if [ ! -d "$LIT_TEST_DIR" ]; then
+            echo "Not found `$LIT_TEST_DIR`.  Did you change an installation method?" ; exit -1
+          fi
+          lit -v "$LIT_TEST_DIR"

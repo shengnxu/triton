@@ -286,14 +286,12 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     uint32_t elemsPerThread = vectorType.getShape()[0] * nResultVectors;
     Attribute dEnc = op.getD().getType().cast<RankedTensorType>().getEncoding();
     if (!dEnc.isa<MfmaEncodingAttr>())
-        return emitError(loc)
-            << "Result of dot must be MfmaEncodingAttr.\n";
+      return emitError(loc) << "Result of dot must be MfmaEncodingAttr.\n";
     auto dEncMfma = dEnc.cast<MfmaEncodingAttr>();
     RankedTensorType toTensorType =
         RankedTensorType::get(cShape, accumulatorType, dEncMfma);
 
-    LLVM_DEBUG(llvm::dbgs()
-               << "elemsPerThread: " << elemsPerThread << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "elemsPerThread: " << elemsPerThread << "\n");
     Value toTensorOp = rewriter.create<triton::gpu::MemRefToTensorOp>(
         loc, toTensorType, regCAllocOp);
 
@@ -340,10 +338,9 @@ public:
     // replace tt.dot with rock.blockwise_gemm_v2
     ConversionTarget target(*context);
     target.addIllegalOp<triton::DotOp>();
-    target.addLegalDialect<arith::ArithDialect, rock::RockDialect,
-                           memref::MemRefDialect, AffineDialect,
-                           triton::gpu::TritonGPUDialect,
-                           vector::VectorDialect>();
+    target.addLegalDialect<
+        arith::ArithDialect, rock::RockDialect, memref::MemRefDialect,
+        AffineDialect, triton::gpu::TritonGPUDialect, vector::VectorDialect>();
 
     RewritePatternSet patterns(context);
     patterns.add<DotOpRewritePattern>(context);

@@ -100,6 +100,15 @@ bool isSharedEncoding(Value value) {
   return false;
 }
 
+bool isMfmaEncoding(Value value) {
+  auto type = value.getType();
+  if (auto tensorType = type.dyn_cast<RankedTensorType>()) {
+    auto encoding = tensorType.getEncoding();
+    return encoding && encoding.isa<triton::gpu::MfmaEncodingAttr>();
+  }
+  return false;
+}
+
 bool maybeSharedAllocationOp(Operation *op) {
   // TODO(Keren): This function can be replaced by adding
   // MemoryEffectOpInterface. We can then use the MemoryEffectOpInterface to

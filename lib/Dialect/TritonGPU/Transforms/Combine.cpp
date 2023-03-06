@@ -14,10 +14,10 @@
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/RegionUtils.h"
 #include "triton/Analysis/Utility.h"
+#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
-#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 
 #include <memory>
 
@@ -1190,7 +1190,6 @@ public:
     auto mod = op->getParentOfType<mlir::ModuleOp>();
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
-
     Value matA = dotOp.getA();
     auto loc = dotOp.getLoc();
     auto elementType = matA.getType().cast<RankedTensorType>().getElementType();
@@ -1215,12 +1214,12 @@ public:
     auto maybeMfmaInsnGroup =
         MfmaInsnGroup::select(elementType, mPerWave, nPerWave);
     if (failed(maybeMfmaInsnGroup)) {
-        return emitError(loc) << "Failed to select xdlops instruction group.\n";
+      return emitError(loc) << "Failed to select xdlops instruction group.\n";
     }
     MfmaInsnGroup mfmaGroup = *maybeMfmaInsnGroup;
     if (!mfmaGroup.isCoherentWithK(kpack, kPerBlock)) {
-        return emitError(loc)
-            << "Mfma instruction group selection is not compatible with k.\n";
+      return emitError(loc)
+             << "Mfma instruction group selection is not compatible with k.\n";
     }
 
     MfmaInsnAttr mfmaAttr = mfmaGroup.getInsnAttr();

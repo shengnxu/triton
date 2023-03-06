@@ -53,8 +53,7 @@ public:
       uint32_t kpack = 4;
       auto tmpType = RankedTensorType::get(
           dstType.getShape(), dstType.getElementType(),
-          triton::gpu::LDSEncodingAttr::get(
-              mod.getContext(), dstDotOp, kpack));
+          triton::gpu::LDSEncodingAttr::get(mod.getContext(), dstDotOp, kpack));
       auto tmp = builder.create<triton::gpu::ConvertLayoutOp>(
           cvtOp.getLoc(), tmpType, cvtOp.getOperand());
       auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(

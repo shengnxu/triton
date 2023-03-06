@@ -39,6 +39,7 @@
 
 using namespace mlir;
 using namespace mlir::triton;
+using namespace mlir::triton::gpu;
 using namespace mlir::arith;
 using namespace mlir::rock;
 
@@ -101,6 +102,7 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
 
     auto aShape = matA.getType().cast<RankedTensorType>().getShape();
     auto bShape = matB.getType().cast<RankedTensorType>().getShape();
+    auto cShape = op.getC().getType().cast<RankedTensorType>().getShape();
     auto elementType = matA.getType().cast<RankedTensorType>().getElementType();
     uint32_t mPerBlock = aShape[0];
     uint32_t kPerBlock = aShape[1];
@@ -279,8 +281,21 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
         arrayA, arrayB, regCAllocOp, rewriter.getI32IntegerAttr(blockSize),
         gemmParams);
 
-    auto cDef = op.getC().getDefiningOp();
-    op.replaceAllUsesWith(cDef);
+    // insert triton_gpu.memref_to_tensor to convert the result of
+    // blockwise_gemm to a tensor with the #mfma encoding
+    uint32_t elemsPerThread = vectorType.getShape()[0] * nResultVectors;
+    Attribute dEnc = op.getD().getType().cast<RankedTensorType>().getEncoding();
+    if (!dEnc.isa<MfmaEncodingAttr>())
+      return emitError(loc) << "Result of dot must be MfmaEncodingAttr.\n";
+    auto dEncMfma = dEnc.cast<MfmaEncodingAttr>();
+    RankedTensorType toTensorType =
+        RankedTensorType::get(cShape, accumulatorType, dEncMfma);
+
+    LLVM_DEBUG(llvm::dbgs() << "elemsPerThread: " << elemsPerThread << "\n");
+    Value toTensorOp = rewriter.create<triton::gpu::MemRefToTensorOp>(
+        loc, toTensorType, regCAllocOp);
+
+    op.replaceAllUsesWith(toTensorOp);
 
     // Erase tt.dot and the two convert_layout ops that convert
     // #shared to #dot_op for a and b
@@ -323,9 +338,9 @@ public:
     // replace tt.dot with rock.blockwise_gemm_v2
     ConversionTarget target(*context);
     target.addIllegalOp<triton::DotOp>();
-    target.addLegalDialect<arith::ArithDialect, rock::RockDialect,
-                           memref::MemRefDialect, AffineDialect,
-                           vector::VectorDialect>();
+    target.addLegalDialect<
+        arith::ArithDialect, rock::RockDialect, memref::MemRefDialect,
+        AffineDialect, triton::gpu::TritonGPUDialect, vector::VectorDialect>();
 
     RewritePatternSet patterns(context);
     patterns.add<DotOpRewritePattern>(context);

@@ -56,7 +56,7 @@ unsigned getElemsPerThread(Attribute layout, ArrayRef<int64_t> shape) {
   } else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>()) {
     return sharedLayout.getElemsPerThread(shape);
   } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
-      return ldsLayout.getElemsPerThread(shape);
+    return ldsLayout.getElemsPerThread(shape);
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return dotLayout.getElemsPerThread(shape);
   } else {
@@ -252,8 +252,8 @@ SmallVector<unsigned> getOrder(const Attribute &layout) {
     return SmallVector<unsigned>(sharedLayout.getOrder().begin(),
                                  sharedLayout.getOrder().end());
   } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
-      return SmallVector<unsigned>(ldsLayout.getOrder().begin(),
-                                   ldsLayout.getOrder().end());
+    return SmallVector<unsigned>(ldsLayout.getOrder().begin(),
+                                 ldsLayout.getOrder().end());
   } else {
     assert(0 && "Unimplemented usage of getOrder");
     return {};
@@ -413,8 +413,8 @@ unsigned SharedEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape) const {
 }
 
 unsigned LDSEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape) const {
-    assert(0 && "LDSEncodingAttr::getElemsPerThread not implemented");
-    return 0;
+  assert(0 && "LDSEncodingAttr::getElemsPerThread not implemented");
+  return 0;
 }
 
 unsigned
@@ -639,8 +639,7 @@ Attribute LDSEncodingAttr::parse(AsmParser &parser, Type type) {
 
 void LDSEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
-          << "kpack = " << getKpack() << ", order = [" << getOrder()
-          << "]"
+          << "kpack = " << getKpack() << ", order = [" << getOrder() << "]"
           << "}>";
 }
 
@@ -671,7 +670,8 @@ Attribute MfmaEncodingAttr::parse(AsmParser &parser, Type type) {
         return {};
     }
     if (attr.getName() == "xdlopsPerWarp") {
-        if (parseIntArrayAttr(parser, attr, xdlopsPerWarp, "xdlopsPerWarp").failed())
+      if (parseIntArrayAttr(parser, attr, xdlopsPerWarp, "xdlopsPerWarp")
+              .failed())
         return {};
     }
   }
@@ -684,7 +684,7 @@ void MfmaEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
           << "nonKDim = " << getNonKDim() << ", "
           << "warpsPerCTA = [" << getWarpsPerCTA() << "], "
-          << "xdlopsPerWarp0 = [" << getXdlopsPerWarp() << "]"
+          << "xdlopsPerWarp = [" << getXdlopsPerWarp() << "]"
           << "}>";
 }
 
@@ -818,8 +818,8 @@ public:
       os << "shared";
       return AliasResult::FinalAlias;
     } else if (auto ldsAttr = attr.dyn_cast<LDSEncodingAttr>()) {
-        os << "lds";
-        return AliasResult::FinalAlias;
+      os << "lds";
+      return AliasResult::FinalAlias;
     } else if (auto blockedAttr = attr.dyn_cast<BlockedEncodingAttr>()) {
       os << "blocked";
       return AliasResult::FinalAlias;

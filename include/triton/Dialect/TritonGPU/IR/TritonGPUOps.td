@@ -226,4 +226,21 @@ def TTG_MemRefToTensorOp : TTG_Op<"memref_to_tensor", [ResultsAreMfmaEncoding]> 
   let assemblyFormat = "$src attr-dict `:` type($src) `->` type($result)";
 }
 
+def TTG_TensorToMemRefOp : TTG_Op<"tensor_to_memref", [SameOperandsAndResultShape,
+                                                       SameOperandsAndResultElementType,
+                                                       NoMemoryEffect]>{
+  let summary = "tensor to memref";
+
+  let description = [{
+    This operation casts a tensor object into a memref with the same shape.
+    It is assumed that the tensor has been stored in shared memory.
+  }];
+
+  let arguments = (ins TT_Tensor:$src);
+ 
+  let results = (outs AnyMemRef:$result);
+
+  let assemblyFormat = "$src attr-dict `:` type($src) `->` type($result)";
+}
+
 #endif

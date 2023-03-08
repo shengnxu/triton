@@ -15,6 +15,7 @@ namespace OpTrait {
 namespace impl {
 LogicalResult verifyResultsAreSharedEncoding(Operation *op);
 LogicalResult verifyResultsAreMfmaEncoding(Operation *op);
+LogicalResult verifySameOperandsAndResultNumElements(Operation *op);
 } // namespace impl
 
 template <typename ConcreteType>
@@ -32,6 +33,15 @@ class ResultsAreMfmaEncoding
 public:
   static LogicalResult verifyTrait(Operation *op) {
     return impl::verifyResultsAreMfmaEncoding(op);
+  }
+};
+
+template <typename ConcreteType>
+class SameOperandsAndResultNumElements
+    : public TraitBase<ConcreteType, SameOperandsAndResultNumElements> {
+public:
+  static LogicalResult verifyTrait(Operation *op) {
+    return impl::verifySameOperandsAndResultNumElements(op);
   }
 };
 

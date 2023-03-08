@@ -46,6 +46,8 @@ module attributes {"triton_gpu.num-warps" = 8 : i32} {
     %34 = tt.load %25 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<64x256xf16, #blocked2>
     %35 = triton_gpu.convert_layout %33 : (tensor<128x64xf16, #blocked>) -> tensor<128x64xf16, #lds>
     %36 = triton_gpu.convert_layout %34 : (tensor<64x256xf16, #blocked2>) -> tensor<64x256xf16, #lds1>
+    // CHECK: triton_gpu.tensor_to_memref {{.*}} : tensor<128x64xf16, #lds> -> memref<8192xf16, #gpu.address_space<workgroup>>
+    // CHECK: triton_gpu.tensor_to_memref {{.*}} : tensor<64x256xf16, #lds1> -> memref<16384xf16, #gpu.address_space<workgroup>>
     // CHECK-NOT: triton_gpu.convert_layout {{.*}} : (tensor<128x64xf16, #lds{{.*}}>) -> tensor<128x64xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>}>>
     // CHECK-NOT: triton_gpu.convert_layout {{.*}} : (tensor<64x256xf16, #lds{{.*}}>) -> tensor<64x256xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>}>>
     %37 = triton_gpu.convert_layout %35 : (tensor<128x64xf16, #lds>) -> tensor<128x64xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>}>>

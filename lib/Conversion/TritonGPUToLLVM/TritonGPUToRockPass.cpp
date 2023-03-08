@@ -146,13 +146,8 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
                             << "numWarps:       " << numWarps << "\n"
                             << "numWaves:       " << numWaves << "\n");
 
-    // Allocate LDS space
-    // TODO:
-    // The current design is to introduce memref as the LDS buffer.
-    // We need either
-    // 1. prepare data with desired layout when storing into LDS
-    // 2. store data as it is in LDS and rearrange data later
-    // For now, let's pretend data is ready in LDS buffer with good layout
+    // Prepare LDS buffer
+    // TODO: Check the size of LDS buffer
     int64_t ldsBlockASize = mPerBlock * kPerBlock;
     int64_t ldsBlockBSize = nPerBlock * kPerBlock;
     int64_t ldsBlockSize = ldsBlockASize + ldsBlockBSize;
@@ -161,17 +156,26 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     auto workgroupMemoryAddressSpace =
         rewriter.getAttr<mlir::gpu::AddressSpaceAttr>(
             mlir::gpu::GPUDialect::getWorkgroupAddressSpace());
-    auto ldsMemRefType = MemRefType::get(
-        {ldsBlockSize}, elementType, AffineMap{}, workgroupMemoryAddressSpace);
-    auto ldsGpuAllocOp = rewriter.create<rock::GpuAllocOp>(loc, ldsMemRefType);
+    // Convert LDS buffer for tile A
+    auto aConvertOp =
+        dyn_cast<triton::gpu::ConvertLayoutOp>(matA.getDefiningOp());
+    auto ldsAMemRefType = MemRefType::get(
+        {ldsBlockASize}, elementType, AffineMap{}, workgroupMemoryAddressSpace);
+    auto ldsBufferA = rewriter.create<triton::gpu::TensorToMemRefOp>(
+        loc, ldsAMemRefType, aConvertOp.getSrc());
+    // Convert LDS buffer for tile B
+    auto bConvertOp =
+        dyn_cast<triton::gpu::ConvertLayoutOp>(matB.getDefiningOp());
+    auto ldsBMemRefType = MemRefType::get(
+        {ldsBlockBSize}, elementType, AffineMap{}, workgroupMemoryAddressSpace);
+    auto ldsBufferB = rewriter.create<triton::gpu::TensorToMemRefOp>(
+        loc, ldsBMemRefType, bConvertOp.getSrc());
 
     auto waveSizeConstantOp = rewriter.create<ConstantIndexOp>(loc, waveSize);
     auto mPerWaveConstantOp = rewriter.create<ConstantIndexOp>(loc, mPerWave);
     auto nPerWaveConstantOp = rewriter.create<ConstantIndexOp>(loc, nPerWave);
     auto nWavesConstantOp = rewriter.create<ConstantIndexOp>(loc, nWaves);
 
-    // Get current workgroup ID.
-    auto bid = rewriter.create<WorkgroupIdOp>(loc, rewriter.getIndexType());
     // Get current workitem ID.
     auto tid = rewriter.create<WorkitemIdOp>(loc, rewriter.getIndexType());
 
@@ -270,14 +274,13 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     // emit blockwise_gemm_v2
     BlockwiseGemmV2Op blockwiseGemmV2Op;
     int64_t ldsBlockAOffset = 0;
-    int64_t ldsBlockBOffset = ldsBlockASize;
+    int64_t ldsBlockBOffset = 0;
     XdlopsGemmParamsAttr gemmParams = rewriter.getAttr<XdlopsGemmParamsAttr>(
         kpacksPerBlock, mPerBlock, nPerBlock, kpack, mPerWave, nPerWave,
         /*forceUnroll*/ true);
     blockwiseGemmV2Op = rewriter.create<BlockwiseGemmV2Op>(
-        loc, ldsGpuAllocOp, ldsGpuAllocOp,
-        rewriter.getIndexAttr(ldsBlockAOffset),
-        rewriter.getIndexAttr(ldsBlockBOffset), mMyWaveOffsetA, mMyWaveOffsetB,
+        loc, ldsBufferA, ldsBufferB, rewriter.getIndexAttr(ldsBlockAOffset),
+        rewriter.getIndexAttr(ldsBlockAOffset), mMyWaveOffsetA, mMyWaveOffsetB,
         arrayA, arrayB, regCAllocOp, rewriter.getI32IntegerAttr(blockSize),
         gemmParams);
 

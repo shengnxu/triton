@@ -14,6 +14,8 @@ def ResultsAreSharedEncoding: NativeOpTrait<"ResultsAreSharedEncoding">;
 
 def ResultsAreMfmaEncoding: NativeOpTrait<"ResultsAreMfmaEncoding">;
 
+def SameOperandsAndResultNumElements: NativeOpTrait<"SameOperandsAndResultNumElements">;
+
 class TTG_Op<string mnemonic, list<Trait> traits = []> :
     Op<TritonGPU_Dialect, mnemonic, traits>;
 
@@ -209,7 +211,8 @@ def TTG_AllocTensorOp : TTG_Op<"alloc_tensor", [MemoryEffects<[MemAlloc]>,  // A
   let results = (outs TT_Tensor:$result);
 }
 
-def TTG_MemRefToTensorOp : TTG_Op<"memref_to_tensor", [ResultsAreMfmaEncoding]> {
+def TTG_MemRefToTensorOp : TTG_Op<"memref_to_tensor", [ResultsAreMfmaEncoding,
+                                                       NoMemoryEffect]> {
 
   let summary = "convert memref to tensor";
 
@@ -226,8 +229,8 @@ def TTG_MemRefToTensorOp : TTG_Op<"memref_to_tensor", [ResultsAreMfmaEncoding]> 
   let assemblyFormat = "$src attr-dict `:` type($src) `->` type($result)";
 }
 
-def TTG_TensorToMemRefOp : TTG_Op<"tensor_to_memref", [SameOperandsAndResultShape,
-                                                       SameOperandsAndResultElementType,
+def TTG_TensorToMemRefOp : TTG_Op<"tensor_to_memref", [SameOperandsAndResultElementType,
+                                                       SameOperandsAndResultNumElements,
                                                        NoMemoryEffect]>{
   let summary = "tensor to memref";
 

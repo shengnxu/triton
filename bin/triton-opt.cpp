@@ -1,10 +1,11 @@
+#include "mlir/Dialect/AMDGPU/AMDGPUDialect.h"
+#include "triton/Dialect/Rock/IR/Rock.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Dialect/Rock/IR/Rock.h"
 
+#include "triton/Dialect/Rock/Passes.h"
 #include "triton/Dialect/Triton/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
-#include "triton/Dialect/Rock/Passes.h"
 
 #include "triton/Conversion/Passes.h"
 
@@ -32,14 +33,18 @@ int main(int argc, char **argv) {
   mlir::triton::registerConvertTritonToTritonGPUPass();
   mlir::triton::registerConvertTritonGPUToRockPass();
   mlir::triton::registerConvertRockToLLVMPass();
+  mlir::triton::registerConvertRockToGPUPass();
   mlir::rock::registerPasses();
 
   // TODO: register Triton & TritonGPU passes
   mlir::DialectRegistry registry;
-  registry.insert<mlir::triton::TritonDialect, mlir::rock::RockDialect,
+  registry.insert<mlir::triton::TritonDialect,
                   mlir::triton::gpu::TritonGPUDialect, mlir::func::FuncDialect,
                   mlir::math::MathDialect, mlir::arith::ArithDialect,
                   mlir::scf::SCFDialect, mlir::gpu::GPUDialect>();
+  // Register dialects used by Rock
+  registry.insert<mlir::rock::RockDialect, mlir::memref::MemRefDialect,
+                  mlir::amdgpu::AMDGPUDialect, mlir::vector::VectorDialect>();
 
   return mlir::asMainReturnCode(mlir::MlirOptMain(
       argc, argv, "Triton (GPU) optimizer driver\n", registry));

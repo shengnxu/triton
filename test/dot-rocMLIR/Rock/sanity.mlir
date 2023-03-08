@@ -16,7 +16,7 @@
 #lds1 = #triton_gpu.lds<{kpack = 4, order = [0, 1]}>
 #xdlops_gemm_params = #rock.xdlops_gemm_params<kPerBlock = 16, mPerBlock = 128, nPerBlock = 256, kpack = 4, mPerWave = 64, nPerWave = 64, forceUnroll = true>
 module attributes {"triton_gpu.num-warps" = 8 : i32} {
-  func.func public @kernel_0d1c2d3d4c5d6d7d8c9d10d11c(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg1: i32 {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}, %arg4: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}) {
+  func.func public @test_dot(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg1: i32 {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}, %arg4: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}) attributes {kernel = 0 : i32} {
     %cst = arith.constant dense<0.000000e+00> : tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>
     %0 = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32, #triton_gpu.slice<{dim = 1, parent = #blocked}>>
     %1 = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32, #triton_gpu.slice<{dim = 1, parent = #blocked1}>>

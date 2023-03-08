@@ -43,9 +43,11 @@ using namespace mlir::triton::gpu;
 using namespace mlir::arith;
 using namespace mlir::rock;
 
-#define GEN_PASS_CLASSES
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTTRITONGPUTOROCK
 #include "triton/Conversion/Passes.h.inc"
 #include "triton/Dialect/Rock/Passes.h.inc"
+} // namespace mlir
 
 static bool isConvertLDSToDotOp(Operation *op) {
   bool result = false;
@@ -313,9 +315,11 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
 namespace {
 
 class ConvertTritonGPUToRock
-    : public ConvertTritonGPUToRockBase<ConvertTritonGPUToRock> {
+    : public impl::ConvertTritonGPUToRockBase<ConvertTritonGPUToRock> {
 
 public:
+  using impl::ConvertTritonGPUToRockBase<
+      ConvertTritonGPUToRock>::ConvertTritonGPUToRockBase;
   explicit ConvertTritonGPUToRock(int computeCapability)
       : computeCapability(computeCapability) {}
 

@@ -18,8 +18,10 @@
 using namespace mlir;
 using namespace mlir::triton;
 
-#define GEN_PASS_CLASSES
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTTRITONTOTRITONGPU
 #include "triton/Conversion/Passes.h.inc"
+} // namespace mlir
 
 namespace {
 
@@ -673,8 +675,10 @@ void populateCFPatterns(TritonGPUTypeConverter &typeConverter,
 //
 
 class ConvertTritonToTritonGPU
-    : public ConvertTritonToTritonGPUBase<ConvertTritonToTritonGPU> {
+    : public impl::ConvertTritonToTritonGPUBase<ConvertTritonToTritonGPU> {
 public:
+  using impl::ConvertTritonToTritonGPUBase<
+      ConvertTritonToTritonGPU>::ConvertTritonToTritonGPUBase;
   ConvertTritonToTritonGPU() = default;
   // constructor with some parameters set explicitly.
   ConvertTritonToTritonGPU(int numWarps) { this->numWarps = numWarps; }

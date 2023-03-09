@@ -62,28 +62,33 @@ struct MemRefToTensorOpConversion
     Value src = op.getSrc();
     auto srcTy = src.getType().dyn_cast<MemRefType>();
     auto srcRank = srcTy.getRank();
-    auto srcShape = srcTy.getShape();  //!< could be removed. Same shape is guaranteed.
+    auto srcShape = srcTy.getShape();
+    auto srcElemTy = srcTy.getElementType().dyn_cast<VectorType>();
+    Type llSrcElemTy = typeConverter->convertType(srcElemTy);
+    auto srcElemSize  = srcElemTy.getNumElements();
+
+    auto gpuAttr = srcTy.getMemorySpace().dyn_cast<mlir::gpu::AddressSpaceAttr>();
+    if (gpuAttr.getValue() != mlir::gpu::GPUDialect::getPrivateAddressSpace()) {
+      llvm::errs() << "private address space is required.\n";
+      return failure();
+    }
     
     Value res = op.getResult();
     auto resTy = res.getType().dyn_cast<RankedTensorType>();
     Type resElemTy = typeConverter->convertType(resTy.getElementType());
-    auto resRank = srcTy.getRank();
-    auto resShape = resTy.getShape();
+    auto resRank = resTy.getRank();
 
-    //!< TODO: Need to check the integere of private memory space.
-    // unsigned srcAddrSpace = srcTy.getMemorySpaceAsInt();
-    // if (addrSpace != PRIVATE_PLACEHOLDER) {
-    //   llvm::errs() << "Private address space is needed.\n";
-    //   return failure();
-    // }
-
-    //! The following check may be redundant because this op ensures the same shape.
-    if ((srcRank != resRank) || (srcRank == 0)) {
-      llvm::errs() << "Non-scalar and same rank are required\n";
+    if (( resRank == 0) || (srcRank == 0)) {
+      llvm::errs() << "Non-scalar rank is required\n";
       return failure();
     }
 
-    long numElems = product<long>(resShape);
+    unsigned numElems = getElemsPerThread(resTy);
+    auto srcNumElems = product<long>(srcShape);
+    if (numElems != srcNumElems) {
+      llvm::errs() << "The number of elements is not consistent.\n";
+      return failure();
+    }
 
     MemRefDescriptor desc{adaptor.getSrc()};
     Value srcPtr = desc.alignedPtr(rewriter, loc);
@@ -91,7 +96,10 @@ struct MemRefToTensorOpConversion
     SmallVector<Value> valVec;
 
     for (auto i = 0; i < numElems; i++){
-      valVec.push_back(extract_val(resElemTy, srcPtr, i));
+      Value vec = extract_val(llSrcElemTy, srcPtr, i);
+      for (auto j = 0; j < srcElemSize; j++){
+        valVec.push_back(extract_val(resElemTy, vec, j));
+      }
     }
 
     Type llvmResultStructTy = getTypeConverter()->convertType(resTy);

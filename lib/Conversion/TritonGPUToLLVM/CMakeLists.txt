@@ -12,6 +12,7 @@ add_mlir_conversion_library(TritonGPUToLLVM
     Utility.cpp
     ViewOpToLLVM.cpp
     DotOpHelpers.cpp
+    TensorMemRefOpToLLVM.cpp
 
     ADDITIONAL_HEADER_DIRS
     ${PROJECT_SOURCE_DIR}/include/triton/Conversion/TritonGPUToLLVM

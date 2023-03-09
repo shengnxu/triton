@@ -4,6 +4,7 @@
 
 #include "triton/Dialect/Triton/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+#include "triton/Dialect/Rock/Passes.h"
 
 #include "triton/Conversion/Passes.h"
 
@@ -31,6 +32,7 @@ int main(int argc, char **argv) {
   mlir::triton::registerConvertTritonToTritonGPUPass();
   mlir::triton::registerConvertTritonGPUToRockPass();
   mlir::triton::registerConvertRockToLLVMPass();
+  mlir::rock::registerPasses();
 
   // TODO: register Triton & TritonGPU passes
   mlir::DialectRegistry registry;

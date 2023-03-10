@@ -17,6 +17,25 @@ jobs:
         run: |
           rm -rf ~/.triton/cache/
 
+      - id: files
+        uses: jitterbit/get-changed-files@v1
+
+      - name: Check cpp style
+        run: |
+          ARR=(${{ steps.files.outputs.all }})
+          for index in "${!ARR[@]}"; do
+          if [[ "${ARR[$index]}" == *.cpp ]] || [[ "${ARR[$index]}" == *.h ]];then
+          CPPARR+=(${ARR[$index]})
+          fi
+          done
+          if (( ${#CPPARR[@]} ));then
+          pip install clang-format
+          clang-format -i -style=file --dry-run -Werror ${CPPARR[@]} ||
+          (echo '::error title=Style issues::Please run clang-format -i -style=file <error files>' ; exit 1)
+          else
+          echo "Nothing to check!"
+          fi
+
       - name: Install Triton
         run: |
           cd python

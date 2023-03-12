@@ -130,38 +130,23 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   }
 
 #ifdef USE_ROCM
-  GCNBuilder builder;
-  if (i > 16) {
-    Value threadId =
-        rewriter
-            .create<UnrealizedConversionCastOp>(
-                loc, TypeRange{i32_ty},
-                ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
-                    loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
-            .getResult(0);
-    Value stride = i32_val(32);
-    Value byteOffset = i32_val(2);
-    Value lineId = add(threadId, stride);
-    Value permuteAddr = shl(lineId, byteOffset);
-    auto shfl = builder.create("ds_permute_b32");
-    auto dOpr = builder.newOperand("=v");
-    auto addrOpr = builder.newOperand(permuteAddr, "v");
-    auto aOpr = builder.newOperand(val, "v");
-    (*shfl)(dOpr, addrOpr, aOpr);
-  } else {
-    // This map facilates the butterfly shuffle pattern for a stride less
-    // than 16. The pattern stride is the key of the map.
-    DenseMap<short, unsigned int> masks{
-        {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
-    auto shfl = builder.create("ds_swizzle_b32");
-    auto dOpr = builder.newOperand("=v");
-    auto aOpr = builder.newOperand(val, "v");
-    auto maskOpr =
-        builder.newConstantOperand("offset:" + std::to_string(masks[i]));
-    (*shfl)(dOpr, aOpr, maskOpr);
-  }
-  auto swait = builder.create("s_waitcnt lgkmcnt(0)");
-  (*swait)();
+  auto *context = rewriter.getContext();
+  Value int_val = zext(i32_ty, bitcast(val, rewriter.getIntegerType(bits)));
+  auto self_lo = rewriter.create<LLVM::CallIntrinsicOp>(UnknownLoc::get(context), TypeRange{i32_ty}, "llvm.amdgcn.mbcnt.lo", SmallVector<Value>({i32_val(-1), i32_val(0)})).getResult(0);
+  auto self = rewriter.create<LLVM::CallIntrinsicOp>(UnknownLoc::get(context), TypeRange{i32_ty}, "llvm.amdgcn.mbcnt.hi", SmallVector<Value>({i32_val(-1), self_lo})).getResult(0);
+  auto one = i32_val(1);
+  auto two = i32_val(2);
+  auto width = add(i32_val(0x3f), one);
+  auto index = xor_(self, i32_val(i));
+  auto self_add = add(self, width);
+  auto bitnot_mask = xor_(i32_val(0x3f), i32_val(0xffffffff));
+  auto upper_bound = and_(self_add, bitnot_mask);
+  auto cond_cmp = icmp_sge(index, upper_bound);
+  auto dst_index = select(cond_cmp, self, index);
+  auto shl_index = shl(dst_index, two);
+  SmallVector<Value> operands{shl_index, int_val};
+  auto shfl_value = rewriter.create<LLVM::CallIntrinsicOp>(UnknownLoc::get(context), TypeRange{i32_ty}, "llvm.amdgcn.ds.permute", operands).getResult(0);
+  return bitcast(trunc(rewriter.getIntegerType(bits), shfl_value), val.getType());
 #else
   PTXBuilder builder;
   auto &shfl = builder.create("shfl.sync")->o("bfly").o("b32");
@@ -171,8 +156,8 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   auto *cOpr = builder.newConstantOperand("0x1f");
   auto *maskOpr = builder.newConstantOperand("0xffffffff");
   shfl(dOpr, aOpr, bOpr, cOpr, maskOpr);
-#endif
   return builder.launch(rewriter, loc, val.getType(), false);
+#endif
 }
 
 } // namespace LLVM

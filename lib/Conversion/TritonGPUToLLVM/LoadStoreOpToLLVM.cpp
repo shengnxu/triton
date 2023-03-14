@@ -376,7 +376,7 @@ struct StoreOpConversion
         }
         llWord = bitcast(llWord, valArgTy);
 #ifdef USE_ROCM
-        Value maskVal = llMask ? and_(mask, maskElems[vecStart]) : mask;
+        Value maskVal = llMask ? maskElems[vecStart] : int_val(1, 1);
         rewriter.create<scf::IfOp>(loc, maskVal,
                                      [&](OpBuilder &builder, Location loc){
                                        auto storeOp = builder.create<LLVM::StoreOp>(loc, llWord, ptrElems[vecStart + wordIdx * wordNElems]);
@@ -641,20 +641,20 @@ struct AtomicRMWOpConversion
                 : opResult.getType();
     const size_t valueElemNbits = valueElemTy.getIntOrFloatBitWidth();
     auto elemsPerThread = getElemsPerThread(val.getType());
-    // vec = 1, numElements = 1 for scalar
+    // vec = 1 for scalar
     auto vec = getVectorSize(ptr);
-    int numElems = 1;
+    Value mask = int_val(1, 1);
+    auto tid = tid_val();
     // tensor
     if (tensorTy) {
       auto valTy = val.getType().cast<RankedTensorType>();
       vec = std::min<unsigned>(vec, valTy.getElementType().isF16() ? 2 : 1);
       // mask
-      numElems = tensorTy.getNumElements();
+      auto shape = tensorTy.getShape();
+      auto numElements = product(shape);
+      mask = and_(mask, icmp_slt(mul(tid, i32_val(elemsPerThread)),
+                                 i32_val(numElements)));
     }
-    Value mask = int_val(1, 1);
-    auto tid = tid_val();
-    mask = and_(mask,
-                icmp_slt(mul(tid, i32_val(elemsPerThread)), i32_val(numElems)));
 
     auto vecTy = vec_ty(valueElemTy, vec);
     SmallVector<Value> resultVals(elemsPerThread);
@@ -667,7 +667,11 @@ struct AtomicRMWOpConversion
       }
 
       Value rmwPtr = ptrElements[i];
-      Value rmwMask = llMask ? and_(mask, maskElements[i]) : mask;
+      Value rmwMask = maskElements[i];
+      rmwMask = and_(rmwMask, mask);
+      if (!tensorTy) {
+        rmwMask = and_(rmwMask, icmp_eq(tid, i32_val(0)));
+      }
 
       Value undefVal = undef(valueElemTy);
       // Build blocks to bypass the atomic instruction for ~rmwMask.

@@ -2,6 +2,8 @@ from __future__ import annotations  # remove after python 3.11
 
 from typing import List, Optional, Tuple
 
+import torch
+
 from . import core as tl
 from triton._C.libtriton.triton import ir
 
@@ -478,6 +480,12 @@ def not_equal(input: tl.tensor,
 def arange(start: int, end: int, builder: ir.builder) -> tl.tensor:
     if not isinstance(start, int) or not isinstance(end, int):
         raise ValueError("arange's arguments must be of type tl.constexpr")
+    is_start_int64 = bool(start >> 32)
+    is_end_int64 = bool(end >> 32)
+    if is_start_int64 or is_end_int64:
+        raise ValueError("arange must fit in int32")
+    if end <= start:
+        raise ValueError("arange's end argument must be greater than the start argument")
 
     shape = [end - start]
     ret_ty = tl.block_type(tl.int32, shape)
@@ -485,13 +493,22 @@ def arange(start: int, end: int, builder: ir.builder) -> tl.tensor:
 
 
 def full(shape: List[int], value, dtype: tl.dtype, builder: ir.builder) -> tl.tensor:
-    if value == 0:
-        _value = builder.get_null_value(dtype.to_ir(builder))
+    if isinstance(value, tl.tensor):
+        assert value.numel.value == 1, "only accepts size-1 tensor"
+        value = cast(value, dtype, builder)
+        ret_ty = tl.block_type(value.dtype, shape)
+        return tl.tensor(builder.create_splat(value.handle, shape), ret_ty)
     else:
-        get_value_fn = getattr(builder, f"get_{dtype.name}")
-        _value = get_value_fn(value)
-    ret_ty = tl.block_type(dtype, shape)
-    return tl.tensor(builder.create_splat(_value, shape), ret_ty)
+        # scalar
+        if value == 0:
+            value = builder.get_null_value(dtype.to_ir(builder))
+        else:
+            get_value_fn = getattr(builder, f"get_{dtype.name}")
+            value = get_value_fn(value)
+        if dtype is None:
+            raise ValueError("dtype must be specified when value is not a tensor")
+        ret_ty = tl.block_type(dtype, shape)
+        return tl.tensor(builder.create_splat(value, shape), ret_ty)
 
 
 
@@ -632,7 +649,7 @@ def bitcast(input: tl.tensor,
             builder: ir.builder) -> tl.tensor:
     src_ty = input.type
     if src_ty.is_block():
-        dst_ty = tl.block_type(dst_ty, input.type.get_block_shapes())
+        dst_ty = tl.block_type(dst_ty.scalar, input.type.get_block_shapes())
     if src_ty == dst_ty:
         return input
     src_sca_ty = src_ty.scalar
@@ -653,8 +670,10 @@ def cast(input: tl.tensor,
          dst_ty: tl.dtype,
          builder: ir.builder) -> tl.tensor:
     src_ty = input.type
+    if isinstance(dst_ty, tl.constexpr):
+        dst_ty = dst_ty.value
     if src_ty.is_block():
-        dst_ty = tl.block_type(dst_ty, input.type.get_block_shapes())
+        dst_ty = tl.block_type(dst_ty.scalar, input.type.get_block_shapes())
     if src_ty == dst_ty:
         return input
 
@@ -662,8 +681,8 @@ def cast(input: tl.tensor,
     dst_sca_ty = dst_ty.scalar
 
     # Casting with customized floating types involved: fp8 <=> bf16, fp16, fp32, fp64
-    if (src_sca_ty.is_customized_floating() and dst_sca_ty.is_floating()) or \
-       (src_sca_ty.is_floating() and dst_sca_ty.is_customized_floating()):
+    if (src_sca_ty.is_fp8() and dst_sca_ty.is_floating()) or \
+       (src_sca_ty.is_floating() and dst_sca_ty.is_fp8()):
         return tl.tensor(builder.create_fp_to_fp(input.handle, dst_ty.to_ir(builder)),
                          dst_ty)
 
@@ -1057,6 +1076,20 @@ def dot(lhs: tl.tensor,
         ret_scalar_ty = tl.float32
     M = lhs.type.shape[0]
     N = rhs.type.shape[1]
+
+    # Cast operands of types f16 and i8 since only FMA implemented yet for ROCM.
+    # So we always perform dot(f32,f32,f32)->f32 here with FMA.
+    # TODO: remove the case for MMA/MFMA implemented cases
+    if torch.version.hip is not None:
+        ret_cast_scalar_ty = tl.float32 if lhs.type.scalar.is_int() else ret_scalar_ty
+        lhs = cast(lhs, ret_cast_scalar_ty, builder)
+        rhs = cast(rhs, ret_cast_scalar_ty, builder)
+        _0 = builder.create_splat(builder.get_fp32(0), [M, N])
+        ret_ty = tl.block_type(ret_cast_scalar_ty, [M, N])
+        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
+                        ret_ty)
+        return cast(ret, ret_scalar_ty, builder)
+
     _0 = builder.create_splat(_0, [M, N])
     ret_ty = tl.block_type(ret_scalar_ty, [M, N])
     return tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
@@ -1123,6 +1156,10 @@ def reduce_impl(input: tl.tensor, axis: int, builder: ir.builder, name: str,
 
     # get result type
     shape = input.type.shape
+
+    rank = len(shape)
+    assert 0 <= axis < rank, f"axis (v={axis}) is out of range, should be within [0, {rank})"
+
     ret_shape = []
     for i, s in enumerate(shape):
         if i != axis:
@@ -1224,8 +1261,12 @@ def debug_barrier(builder: ir.builder) -> tl.tensor:
     return tl.tensor(builder.create_barrier(), tl.void)
 
 
-def printf(prefix: str, args: List[tl.tensor], builder: ir.builder) -> tl.tensor:
+def device_print(prefix: str, args: List[tl.tensor], builder: ir.builder) -> tl.tensor:
     new_args = []
     for arg in args:
         new_args.append(arg.handle)
-    return tl.tensor(builder.create_printf(prefix, new_args), tl.void)
+    return tl.tensor(builder.create_print(prefix, new_args), tl.void)
+
+
+def device_assert(cond: tl.tensor, msg: str, file_name: str, func_name, lineno: int, builder: ir.builder) -> tl.tensor:
+    return tl.tensor(builder.create_assert(cond.handle, msg, file_name, func_name, lineno), tl.void)

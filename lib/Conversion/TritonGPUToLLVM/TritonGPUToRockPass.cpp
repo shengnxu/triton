@@ -329,15 +329,9 @@ public:
 
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
-    // Step 1: Decompose unoptimized layout conversions to use shared memory
-    // Step 2: Decompose insert_slice_async to use load + insert_slice for
-    //   pre-Ampere architectures or unsupported vectorized load sizes
-
-    // Step 1
+    /* preprocess */
     decomposeMmaToDotOperand(mod, numWarps);
     decomposeBlockedToDotOperand(mod);
-
-    // Step 2
     if (failed(decomposeInsertSliceAsyncOp(mod)))
       return signalPassFailure();
 

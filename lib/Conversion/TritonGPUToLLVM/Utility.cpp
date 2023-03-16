@@ -1,40 +1,10 @@
 #include "Utility.h"
+#include "TypeConverter.h"
 
 namespace mlir {
 
 namespace LLVM {
 using namespace mlir::triton;
-
-Value getStructFromElements(Location loc, ValueRange resultVals,
-                            ConversionPatternRewriter &rewriter,
-                            Type structType) {
-  if (!structType.isa<LLVM::LLVMStructType>()) {
-    return *resultVals.begin();
-  }
-
-  Value llvmStruct = rewriter.create<LLVM::UndefOp>(loc, structType);
-  for (const auto &v : llvm::enumerate(resultVals)) {
-    assert(v.value() && "can not insert null values");
-    llvmStruct = insert_val(structType, llvmStruct, v.value(), v.index());
-  }
-  return llvmStruct;
-}
-
-SmallVector<Value> getElementsFromStruct(Location loc, Value llvmStruct,
-                                         ConversionPatternRewriter &rewriter) {
-  if (llvmStruct.getType().isIntOrIndexOrFloat() ||
-      llvmStruct.getType().isa<triton::PointerType>() ||
-      llvmStruct.getType().isa<LLVM::LLVMPointerType>())
-    return {llvmStruct};
-  ArrayRef<Type> types =
-      llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
-  SmallVector<Value> results(types.size());
-  for (unsigned i = 0; i < types.size(); ++i) {
-    Type type = types[i];
-    results[i] = extract_val(type, llvmStruct, i);
-  }
-  return results;
-}
 
 Value createConstantI32(Location loc, PatternRewriter &rewriter, int32_t v) {
   auto i32ty = rewriter.getIntegerType(32);
@@ -73,7 +43,14 @@ Value createLLVMIntegerConstant(OpBuilder &builder, Location loc, short width,
 SharedMemoryObject
 getSharedMemoryObjectFromStruct(Location loc, Value llvmStruct,
                                 ConversionPatternRewriter &rewriter) {
-  auto elems = getElementsFromStruct(loc, llvmStruct, rewriter);
+  ArrayRef<Type> types =
+      llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
+  SmallVector<Value> elems(types.size());
+  for (unsigned i = 0; i < types.size(); ++i) {
+    Type type = types[i];
+    elems[i] = extract_val(type, llvmStruct, i);
+  }
+
   auto rank = (elems.size() - 1) / 2;
   return {/*base=*/elems[0],
           /*strides=*/{elems.begin() + 1, elems.begin() + 1 + rank},
@@ -130,14 +107,36 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   }
 
 #ifdef USE_ROCM
-  // This map facilates the butterfly shuffle pattern for a stride less than 16. The pattern stride is the key of the map.
-  DenseMap<short, unsigned int> masks{{16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
-  GCNBuilder builder; 
-  auto shfl = builder.create("ds_swizzle_b32");
-  auto dOpr = builder.newOperand("=v");
-  auto aOpr = builder.newOperand(val, "v");
-  auto maskOpr = builder.newConstantOperand("offset:" + std::to_string(masks[i]));
-  (*shfl)(dOpr, aOpr, maskOpr);
+  GCNBuilder builder;
+  if (i > 16) {
+    Value threadId =
+        rewriter
+            .create<UnrealizedConversionCastOp>(
+                loc, TypeRange{i32_ty},
+                ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
+                    loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
+            .getResult(0);
+    Value stride = i32_val(32);
+    Value byteOffset = i32_val(2);
+    Value lineId = add(threadId, stride);
+    Value permuteAddr = shl(lineId, byteOffset);
+    auto shfl = builder.create("ds_permute_b32");
+    auto dOpr = builder.newOperand("=v");
+    auto addrOpr = builder.newOperand(permuteAddr, "v");
+    auto aOpr = builder.newOperand(val, "v");
+    (*shfl)(dOpr, addrOpr, aOpr);
+  } else {
+    // This map facilates the butterfly shuffle pattern for a stride less
+    // than 16. The pattern stride is the key of the map.
+    DenseMap<short, unsigned int> masks{
+        {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
+    auto shfl = builder.create("ds_swizzle_b32");
+    auto dOpr = builder.newOperand("=v");
+    auto aOpr = builder.newOperand(val, "v");
+    auto maskOpr =
+        builder.newConstantOperand("offset:" + std::to_string(masks[i]));
+    (*shfl)(dOpr, aOpr, maskOpr);
+  }
   auto swait = builder.create("s_waitcnt lgkmcnt(0)");
   (*swait)();
 #else
@@ -151,6 +150,40 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   shfl(dOpr, aOpr, bOpr, cOpr, maskOpr);
 #endif
   return builder.launch(rewriter, loc, val.getType(), false);
+}
+
+Value addStringToModule(Location loc, ConversionPatternRewriter &rewriter,
+                        StringRef key, StringRef content) {
+  auto moduleOp = rewriter.getBlock()->getParent()->getParentOfType<ModuleOp>();
+  auto ctx = moduleOp.getContext();
+  unsigned stringNumber = 0;
+  SmallString<16> stringConstName;
+  do {
+    stringConstName.clear();
+    (key + Twine(stringNumber++)).toStringRef(stringConstName);
+  } while (moduleOp.lookupSymbol(stringConstName));
+
+  llvm::SmallString<64> contentStr(content);
+  size_t contentSize = contentStr.size_in_bytes();
+  auto globalType = LLVM::LLVMArrayType::get(i8_ty, contentSize);
+
+  LLVM::GlobalOp global;
+  {
+    ConversionPatternRewriter::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPointToStart(moduleOp.getBody());
+    global = rewriter.create<LLVM::GlobalOp>(
+        UnknownLoc::get(ctx), globalType,
+        /*isConstant=*/true, LLVM::Linkage::Internal, stringConstName,
+        rewriter.getStringAttr(contentStr));
+  }
+
+  Value zero = i32_val(0);
+  Value globalPtr =
+      rewriter.create<LLVM::AddressOfOp>(UnknownLoc::get(ctx), global);
+  Value stringStart =
+      rewriter.create<LLVM::GEPOp>(UnknownLoc::get(ctx), ptr_ty(i8_ty),
+                                   globalPtr, SmallVector<Value>({zero, zero}));
+  return stringStart;
 }
 
 } // namespace LLVM

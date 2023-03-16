@@ -3,6 +3,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/Index/IR/IndexDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -25,6 +26,13 @@ namespace mlir {
 
 namespace {
 
+// pass named attrs (e.g., tt.contiguity) from Triton to Triton
+static void addNamedAttrs(Operation *op, DictionaryAttr dictAttrs) {
+  for (const NamedAttribute attr : dictAttrs.getValue())
+    if (!op->hasAttr(attr.getName()))
+      op->setAttr(attr.getName(), attr.getValue());
+}
+
 template <class Op> class GenericOpPattern : public OpConversionPattern<Op> {
 public:
   using OpConversionPattern<Op>::OpConversionPattern;
@@ -33,7 +41,9 @@ public:
   matchAndRewrite(Op op, typename Op::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<Op>(op, retType, adaptor.getOperands());
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<Op>(op, retType, adaptor.getOperands()),
+        adaptor.getAttributes());
     return success();
   }
 };
@@ -47,8 +57,10 @@ public:
   matchAndRewrite(SrcOp op, typename SrcOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<DstOp>(op, retType, adaptor.getPredicate(),
-                                       adaptor.getLhs(), adaptor.getRhs());
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<DstOp>(op, retType, adaptor.getPredicate(),
+                                           adaptor.getLhs(), adaptor.getRhs()),
+        adaptor.getAttributes());
     return success();
   }
 };
@@ -69,7 +81,9 @@ public:
     else
       // This is a hack. We just want to add encoding
       value = value.reshape(retType);
-    rewriter.replaceOpWithNewOp<arith::ConstantOp>(op, retType, value);
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<arith::ConstantOp>(op, retType, value),
+        adaptor.getAttributes());
     return success();
   }
 };
@@ -141,9 +155,10 @@ public:
   matchAndRewrite(arith::SelectOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<triton::gpu::SelectOp>(
-        op, retType, adaptor.getCondition(), adaptor.getTrueValue(),
-        adaptor.getFalseValue());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::gpu::SelectOp>(
+                      op, retType, adaptor.getCondition(),
+                      adaptor.getTrueValue(), adaptor.getFalseValue()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -180,8 +195,9 @@ struct TritonMakeRangePattern
   matchAndRewrite(triton::MakeRangeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type retType = getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<triton::MakeRangeOp>(
-        op, retType, adaptor.getStart(), adaptor.getEnd());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::MakeRangeOp>(
+                      op, retType, adaptor.getStart(), adaptor.getEnd()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -224,8 +240,9 @@ struct TritonExpandDimsPattern
     // construct new op
     auto newSrc = rewriter.create<triton::gpu::ConvertLayoutOp>(
         op.getLoc(), newArgType, adaptor.getSrc());
-    rewriter.replaceOpWithNewOp<triton::ExpandDimsOp>(op, newSrc,
-                                                      adaptor.getAxis());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::ExpandDimsOp>(
+                      op, newSrc, adaptor.getAxis()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -242,9 +259,15 @@ struct TritonDotPattern : public OpConversionPattern<triton::DotOp> {
     int numWarps = typeConverter->getNumWarps();
 
     SmallVector<unsigned> retSizePerThread = {1, 1};
-    if (origShape[0] * origShape[1] / (numWarps * 32) >= 4)
+#ifdef USE_ROCM
+    int warpSize = 64;
+#else
+    int warpSize = 32;
+#endif
+
+    if (origShape[0] * origShape[1] / (numWarps * warpSize) >= 4)
       retSizePerThread = {2, 2};
-    if (origShape[0] * origShape[1] / (numWarps * 32) >= 16)
+    if (origShape[0] * origShape[1] / (numWarps * warpSize) >= 16)
       retSizePerThread = {4, 4};
     SmallVector<unsigned> retOrder = {1, 0};
     Attribute dEncoding = triton::gpu::BlockedEncodingAttr::get(
@@ -277,8 +300,9 @@ struct TritonDotPattern : public OpConversionPattern<triton::DotOp> {
     }
     c = rewriter.create<triton::gpu::ConvertLayoutOp>(c.getLoc(), retType, c);
 
-    rewriter.replaceOpWithNewOp<triton::DotOp>(op, retType, a, b, c,
-                                               adaptor.getAllowTF32());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::DotOp>(
+                      op, retType, a, b, c, adaptor.getAllowTF32()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -293,8 +317,9 @@ struct TritonCatPattern : public OpConversionPattern<triton::CatOp> {
     // For now, this behaves like generic, but this will evolve when
     // we add support for `can_reorder=False`
     Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<triton::CatOp>(op, retType,
-                                               adaptor.getOperands());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::CatOp>(
+                      op, retType, adaptor.getOperands()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -326,7 +351,8 @@ struct TritonTransPattern : public OpConversionPattern<triton::TransOp> {
       src = rewriter.create<triton::gpu::ConvertLayoutOp>(src.getLoc(), srcType,
                                                           src);
     }
-    rewriter.replaceOpWithNewOp<triton::TransOp>(op, src);
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::TransOp>(op, src),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -337,10 +363,12 @@ struct TritonLoadPattern : public OpConversionPattern<triton::LoadOp> {
   LogicalResult
   matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::LoadOp>(
-        op, typeConverter->convertType(op.getType()), adaptor.getPtr(),
-        adaptor.getMask(), adaptor.getOther(), adaptor.getCache(),
-        adaptor.getEvict(), adaptor.getIsVolatile());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::LoadOp>(
+                      op, typeConverter->convertType(op.getType()),
+                      adaptor.getPtr(), adaptor.getMask(), adaptor.getOther(),
+                      adaptor.getCache(), adaptor.getEvict(),
+                      adaptor.getIsVolatile()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -351,9 +379,11 @@ struct TritonStorePattern : public OpConversionPattern<triton::StoreOp> {
   LogicalResult
   matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::StoreOp>(
-        op, adaptor.getPtr(), adaptor.getValue(), adaptor.getMask(),
-        adaptor.getCache(), adaptor.getEvict());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::StoreOp>(
+                      op, adaptor.getPtr(), adaptor.getValue(),
+                      adaptor.getMask(), adaptor.getCache(),
+                      adaptor.getEvict()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -365,9 +395,10 @@ struct TritonAtomicCASPattern
   LogicalResult
   matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::AtomicCASOp>(
-        op, typeConverter->convertType(op.getType()), adaptor.getPtr(),
-        adaptor.getCmp(), adaptor.getVal());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::AtomicCASOp>(
+                      op, typeConverter->convertType(op.getType()),
+                      adaptor.getPtr(), adaptor.getCmp(), adaptor.getVal()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -379,9 +410,11 @@ struct TritonAtomicRMWPattern
   LogicalResult
   matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::AtomicRMWOp>(
-        op, typeConverter->convertType(op.getType()), adaptor.getAtomicRmwOp(),
-        adaptor.getPtr(), adaptor.getVal(), adaptor.getMask());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::AtomicRMWOp>(
+                      op, typeConverter->convertType(op.getType()),
+                      adaptor.getAtomicRmwOp(), adaptor.getPtr(),
+                      adaptor.getVal(), adaptor.getMask()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -393,9 +426,11 @@ struct TritonExtElemwisePattern
   LogicalResult
   matchAndRewrite(triton::ExtElemwiseOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::ExtElemwiseOp>(
-        op, typeConverter->convertType(op.getType()), adaptor.getArgs(),
-        adaptor.getLibname(), adaptor.getLibpath(), adaptor.getSymbol());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::ExtElemwiseOp>(
+                      op, typeConverter->convertType(op.getType()),
+                      adaptor.getArgs(), adaptor.getLibname(),
+                      adaptor.getLibpath(), adaptor.getSymbol()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -408,7 +443,9 @@ struct TritonGenericPattern : public OpConversionPattern<Op> {
   matchAndRewrite(Op op, typename Op::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<Op>(op, retType, adaptor.getOperands());
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<Op>(op, retType, adaptor.getOperands()),
+        adaptor.getAttributes());
     return success();
   }
 };
@@ -429,8 +466,9 @@ struct TritonBroadcastPattern
     Type retType = RankedTensorType::get(opType.getShape(),
                                          opType.getElementType(), srcEncoding);
     // Type retType = this->getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<triton::BroadcastOp>(op, retType,
-                                                     adaptor.getOperands());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::BroadcastOp>(
+                      op, retType, adaptor.getOperands()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -441,20 +479,38 @@ struct TritonReducePattern : public OpConversionPattern<triton::ReduceOp> {
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::ReduceOp>(
-        op, adaptor.getRedOp(), adaptor.getOperand(), adaptor.getAxis());
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<triton::ReduceOp>(
+            op, adaptor.getRedOp(), adaptor.getOperand(), adaptor.getAxis()),
+        adaptor.getAttributes());
     return success();
   }
 };
 
-struct TritonPrintfPattern : public OpConversionPattern<triton::PrintfOp> {
-  using OpConversionPattern<PrintfOp>::OpConversionPattern;
+struct TritonPrintPattern : public OpConversionPattern<triton::PrintOp> {
+  using OpConversionPattern<triton::PrintOp>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(PrintfOp op, typename PrintfOp::Adaptor adaptor,
+  matchAndRewrite(triton::PrintOp op, typename triton::PrintOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<triton::PrintfOp>(op, op.getPrefixAttr(),
-                                                  adaptor.getOperands());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::PrintOp>(
+                      op, op.getPrefixAttr(), adaptor.getOperands()),
+                  adaptor.getAttributes());
+    return success();
+  }
+};
+
+struct TritonAssertPattern : public OpConversionPattern<triton::AssertOp> {
+  using OpConversionPattern<triton::AssertOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::AssertOp op,
+                  typename triton::AssertOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    addNamedAttrs(rewriter.replaceOpWithNewOp<triton::AssertOp>(
+                      op, adaptor.getCondition(), op.getMessageAttr(),
+                      op.getFileAttr(), op.getFuncAttr(), op.getLineAttr()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -473,8 +529,8 @@ void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
           TritonGenericPattern<triton::AddPtrOp>, TritonCatPattern,
           TritonReducePattern, TritonTransPattern, TritonExpandDimsPattern,
           TritonMakeRangePattern, TritonDotPattern, TritonLoadPattern,
-          TritonStorePattern, TritonExtElemwisePattern, TritonPrintfPattern,
-          TritonAtomicRMWPattern>(typeConverter, context);
+          TritonStorePattern, TritonExtElemwisePattern, TritonPrintPattern,
+          TritonAssertPattern, TritonAtomicRMWPattern>(typeConverter, context);
 }
 
 //
@@ -533,7 +589,9 @@ struct SCFYieldPattern : public OpConversionPattern<scf::YieldOp> {
     // rewriter.setInsertionPointToEnd(rewriter.getInsertionBlock());
     // rewriter.create<scf::YieldOp>(op.getLoc(), adaptor.getOperands());
     // op.erase();
-    rewriter.replaceOpWithNewOp<scf::YieldOp>(op, adaptor.getOperands());
+    addNamedAttrs(
+        rewriter.replaceOpWithNewOp<scf::YieldOp>(op, adaptor.getOperands()),
+        adaptor.getAttributes());
     return success();
   }
 };
@@ -638,8 +696,9 @@ public:
   LogicalResult
   matchAndRewrite(cf::BranchOp op, cf::BranchOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<cf::BranchOp>(op, op.getSuccessor(),
-                                              adaptor.getOperands());
+    addNamedAttrs(rewriter.replaceOpWithNewOp<cf::BranchOp>(
+                      op, op.getSuccessor(), adaptor.getOperands()),
+                  adaptor.getAttributes());
     return success();
   }
 };
@@ -656,6 +715,7 @@ public:
         op, adaptor.getCondition(), op.getTrueDest(),
         adaptor.getTrueDestOperands(), op.getFalseDest(),
         adaptor.getFalseDestOperands());
+    addNamedAttrs(newOp, adaptor.getAttributes());
 
     if (failed(rewriter.convertRegionTypes(newOp.getTrueDest()->getParent(),
                                            *converter)))

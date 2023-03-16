@@ -16,7 +16,6 @@ import tempfile
 import warnings
 from collections import namedtuple
 from pathlib import Path
-from sysconfig import get_paths
 from typing import Any, Callable, Dict, Tuple, Union
 
 import setuptools
@@ -40,7 +39,8 @@ def str_to_ty(name):
         ty = str_to_ty(name[1:])
         return triton.language.pointer_type(ty)
     tys = {
-        "fp8": triton.language.float8,
+        "fp8e5": triton.language.float8e5,
+        "fp8e4": triton.language.float8e4,
         "fp16": triton.language.float16,
         "bf16": triton.language.bfloat16,
         "fp32": triton.language.float32,
@@ -112,7 +112,7 @@ class enter_sub_region:
         self.generator.local_defs = self.prev_defs
 
 class CodeGenerator(ast.NodeVisitor):
-    def __init__(self, context, prototype, gscope, attributes, constants, function_name, module=None, is_kernel=False, function_types=dict()):
+    def __init__(self, context, prototype, gscope, attributes, constants, function_name, module=None, is_kernel=False, function_types=dict(), debug=False):
         self.builder = _triton.ir.builder(context)
         self.module = self.builder.create_module() if module is None else module
         self.function_ret_types = function_types
@@ -124,15 +124,19 @@ class CodeGenerator(ast.NodeVisitor):
         self.function_name = function_name
         self.is_kernel = is_kernel
         self.last_node = None
+        self.debug = debug
         self.builtins = {
             'range': range,
             'min': triton.language.minimum,
             'float': float,
             'int': int,
-            'print': print,
+            'print': triton.language.core.device_print,
             'isinstance': isinstance,
             'getattr': getattr,
         }
+        self.static_functions = [
+            'static_print', 'static_assert'
+        ]
         self.scf_stack = []
         # SSA-construction
         # name => triton.language.tensor
@@ -184,9 +188,23 @@ class CodeGenerator(ast.NodeVisitor):
                 break
         return stmts and isinstance(stmt, ast.Return)
 
+    # TODO: should be its own AST visitor
     def contains_return_op(self, node):
         if isinstance(node, ast.Return):
             return True
+        elif isinstance(node, ast.Assign):
+            return self.contains_return_op(node.value)
+        elif isinstance(node, ast.Module):
+            pred = lambda s: self.contains_return_op(s)
+            return any(pred(s) for s in node.body)
+        elif isinstance(node, ast.FunctionDef):
+            pred = lambda s: self.contains_return_op(s)
+            return any(pred(s) for s in node.body)
+        elif isinstance(node, ast.Call):
+            fn = self.visit(node.func)
+            if isinstance(fn, triton.JITFunction):
+                return self.contains_return_op(fn.parse())
+            return False
         elif isinstance(node, ast.If):
             pred = lambda s: self.contains_return_op(s)
             ret = any(pred(s) for s in node.body)
@@ -671,17 +689,24 @@ class CodeGenerator(ast.NodeVisitor):
             step = triton.language.constexpr(-step.value)
             negative_step = True
             lb, ub = ub, lb
+        lb = triton.language.core._to_tensor(lb, self.builder)
+        ub = triton.language.core._to_tensor(ub, self.builder)
+        step = triton.language.core._to_tensor(step, self.builder)
+        # induction variable type
+        iv_type = triton.language.semantic.integer_promote_impl(lb.dtype, ub.dtype)
+        iv_type = triton.language.semantic.integer_promote_impl(iv_type, step.dtype)
+        iv_ir_type = iv_type.to_ir(self.builder)
         # lb/ub/step might be constexpr, we need to cast them to tensor
-        lb = triton.language.core._to_tensor(lb, self.builder).handle
-        ub = triton.language.core._to_tensor(ub, self.builder).handle
-        step = triton.language.core._to_tensor(step, self.builder).handle
+        lb = lb.handle
+        ub = ub.handle
+        step = step.handle
         # ForOp can only accept IndexType as lb/ub/step. Cast integer to Index
         lb = self.builder.create_to_index(lb)
         ub = self.builder.create_to_index(ub)
         step = self.builder.create_to_index(step)
         # Create placeholder for the loop induction variable
-        iv = self.builder.create_undef(self.builder.get_int32_ty())
-        self.set_value(node.target.id, triton.language.core.tensor(iv, triton.language.core.int32))
+        iv = self.builder.create_undef(iv_ir_type)
+        self.set_value(node.target.id, triton.language.core.tensor(iv, iv_type))
 
         with enter_sub_region(self) as sr:
             liveins, insert_block = sr
@@ -738,11 +763,13 @@ class CodeGenerator(ast.NodeVisitor):
             # update induction variable with actual value, and replace all uses
             self.builder.set_insertion_point_to_start(for_op.get_body(0))
             iv = self.builder.create_index_to_si(for_op.get_induction_var())
+            iv = self.builder.create_int_cast(iv, iv_ir_type, True)
             if negative_step:
                 ub_si = self.builder.create_index_to_si(ub)
+                ub_si = self.builder.create_int_cast(ub_si, iv_ir_type, True)
                 iv = self.builder.create_sub(ub_si, iv)
             self.lscope[node.target.id].handle.replace_all_uses_with(iv)
-            self.set_value(node.target.id, triton.language.core.tensor(iv, triton.language.core.int32))
+            self.set_value(node.target.id, triton.language.core.tensor(iv, iv_type))
 
         # update lscope & local_defs (ForOp defines new values)
         for i, name in enumerate(names):
@@ -764,6 +791,14 @@ class CodeGenerator(ast.NodeVisitor):
     def visit_keyword(self, node):
         return {node.arg: self.visit(node.value)}
 
+    def visit_Assert(self, node) -> Any:
+        if not self.debug:
+            return
+        test = self.visit(node.test)
+        msg = self.visit(node.msg)
+        # Convert assert to triton's device_assert which happens on the device
+        return triton.language.core.device_assert(test, msg, _builder=self.builder)
+
     def visit_Call(self, node):
         fn = self.visit(node.func)
         if isinstance(fn, triton.language.constexpr):
@@ -772,6 +807,18 @@ class CodeGenerator(ast.NodeVisitor):
         for keyword in node.keywords:
             kws.update(self.visit(keyword))
         args = [self.visit(arg) for arg in node.args]
+        if fn.__name__ == "print":
+            fn = self.builtins["print"]
+        elif fn.__name__ == "device_assert":
+            if not self.debug:
+                return
+        elif fn.__name__ in self.static_functions:
+            if fn.__name__ == "static_print":
+                print(*args, **kws)
+                return
+            elif fn.__name__ == "static_assert":
+                assert args[0], args[1]
+                return
         if isinstance(fn, triton.runtime.JITFunction):
             from inspect import getcallargs
             args = getcallargs(fn.fn, *args, **kws)
@@ -791,7 +838,7 @@ class CodeGenerator(ast.NodeVisitor):
             if not self.module.has_function(fn_name):
                 prototype = triton.language.function_type([], arg_types)
                 gscope = sys.modules[fn.fn.__module__].__dict__
-                generator = CodeGenerator(self.builder.context, prototype, gscope, attributes, constants, module=self.module, function_name=fn_name, function_types=self.function_ret_types)
+                generator = CodeGenerator(self.builder.context, prototype, gscope, attributes, constants, module=self.module, function_name=fn_name, function_types=self.function_ret_types, debug=self.debug)
                 generator.visit(fn.parse())
                 callee_ret_type = generator.last_ret_type
                 self.function_ret_types[fn_name] = callee_ret_type
@@ -929,7 +976,7 @@ def parse_mlir_module(path, context):
     return module
 
 
-def build_triton_ir(fn, signature, specialization, constants):
+def build_triton_ir(fn, signature, specialization, constants, debug=False):
     # canonicalize signature
     if isinstance(signature, str):
         signature = {k: v.strip() for k, v in enumerate(signature.split(","))}
@@ -949,7 +996,7 @@ def build_triton_ir(fn, signature, specialization, constants):
     arg_types = [str_to_ty(v) for k, v in signature.items() if k not in constants]
 
     prototype = triton.language.function_type([], arg_types)
-    generator = CodeGenerator(context, prototype, gscope=gscope, constants=all_constants, function_name=function_name, attributes=new_attrs, is_kernel=True)
+    generator = CodeGenerator(context, prototype, gscope=gscope, constants=all_constants, function_name=function_name, attributes=new_attrs, is_kernel=True, debug=debug)
     try:
         generator.visit(fn.parse())
     except Exception as e:
@@ -976,37 +1023,34 @@ def optimize_triton_ir(mod):
     return mod
 
 
-def ast_to_ttir(fn, signature, specialization, constants):
-    mod, _ = build_triton_ir(fn, signature, specialization, constants)
+def ast_to_ttir(fn, signature, specialization, constants, debug=False):
+    mod, _ = build_triton_ir(fn, signature, specialization, constants, debug)
     return optimize_triton_ir(mod)
 
 
-def ttir_to_ttgir(mod, num_warps, num_stages, compute_capability):
+def ttir_to_ttgir(mod, num_warps):
     pm = _triton.ir.pass_manager(mod.context)
     pm.add_convert_triton_to_tritongpu_pass(num_warps)
+    pm.run(mod)
+    return mod
+
+
+def optimize_ttgir(mod, num_stages, compute_capability):
+    pm = _triton.ir.pass_manager(mod.context)
     pm.enable_debug()
-    pm.add_coalesce_pass()
-    # The combine pass converts blocked layout to mma layout
-    # for dot ops so that pipeline can get shared memory swizzled correctly.
-    pm.add_tritongpu_combine_pass(compute_capability)
+    pm.add_tritongpu_coalesce_pass()
+    pm.add_tritongpu_remove_layout_conversions_pass()
+    pm.add_tritongpu_accelerate_matmul_pass(compute_capability)
+    pm.add_tritongpu_remove_layout_conversions_pass()
+    pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_pipeline_pass(num_stages)
-    # Prefetch must be done after pipeline pass because pipeline pass
-    # extracts slices from the original tensor.
     pm.add_tritongpu_prefetch_pass()
-    pm.add_canonicalizer_pass()
-    pm.add_cse_pass()
-    pm.add_tritongpu_combine_pass(compute_capability)
-    pm.add_licm_pass()
-    pm.add_tritongpu_combine_pass(compute_capability)
-    pm.add_cse_pass()
+    pm.add_tritongpu_optimize_dot_operands_pass()
+    pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()
-    if compute_capability // 10 == 7:
-        # The update_mma_for_volta pass helps to compute some information for MMA encoding specifically for MMAv1
-        # NOTE this pass should be placed after all the passes those modifies mma layout
-        pm.add_tritongpu_update_mma_for_volta_pass()
+    pm.add_tritongpu_reorder_instructions_pass()
     pm.add_cse_pass()
     pm.add_symbol_dce_pass()
-    pm.add_tritongpu_reorder_instructions_pass()
     pm.run(mod)
     return mod
 
@@ -1197,6 +1241,7 @@ def generate_launcher(constants, signature):
     #define __HIP_PLATFORM_AMD__
     #include <hip/hip_runtime.h>
     #include <Python.h>
+    #include <stdio.h>
     static inline void gpuAssert(hipError_t code, const char *file, int line)
     {{
       if (code != HIP_SUCCESS)
@@ -1204,16 +1249,15 @@ def generate_launcher(constants, signature):
          const char* prefix = "Triton Error [HIP]: ";
          const char* str = hipGetErrorString(code);
          char err[1024] = {{0}};
-         strcat(err, prefix);
-         strcat(err, str);
+         snprintf(err, 1024, "%s Code: %d, Messsage: %s", prefix, code, str );
          PyErr_SetString(PyExc_RuntimeError, err);
       }}
     }}
     #define HIP_CHECK(ans) {{ gpuAssert((ans), __FILE__, __LINE__); }}
-    void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, hipStream_t stream, hipFunction_t function, {arg_decls}) {{
+    static void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, hipStream_t stream, hipFunction_t function, {arg_decls}) {{
       void *params[] = {{ {', '.join(f"&arg{i}" for i in signature.keys() if i not in constants)} }};
       if(gridX*gridY*gridZ > 0){{
-          HIP_CHECK(hipModuleLaunchKernel(function, gridX, gridY, gridZ, 32*num_warps, 1, 1, shared_memory, stream, params, 0));
+          HIP_CHECK(hipModuleLaunchKernel(function, gridX, gridY, gridZ, 64*num_warps, 1, 1, shared_memory, stream, params, 0));
       }}
     }}
     typedef struct _DevicePtrInfo {{
@@ -1268,58 +1312,44 @@ def generate_launcher(constants, signature):
       PyObject *launch_enter_hook = NULL;
       PyObject *launch_exit_hook = NULL;
       PyObject *compiled_kernel = NULL;
-      PyObject *hook_ret = NULL;
       {' '.join([f"{_extracted_type(ty)} _arg{i}; " for i, ty in signature.items()])}
       if(!PyArg_ParseTuple(args, \"{format}\", &gridX, &gridY, &gridZ, &num_warps, &shared_memory, &_stream, &_function, &launch_enter_hook, &launch_exit_hook, &compiled_kernel, {', '.join(f"&_arg{i}" for i, ty in signature.items())})) {{
-          return NULL;
+        return NULL;
       }}
-
       if (launch_enter_hook != Py_None) {{
-          PyObject *new_args = PyTuple_Pack(1, compiled_kernel);
-          hook_ret = PyObject_CallObject(launch_enter_hook, new_args);
-          Py_DECREF(new_args);
+        PyObject_CallObject(launch_enter_hook, args);
       }}
       // raise exception asap
       {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0] == "*" else "" for i, ty in signature.items()])};
       _launch(gridX, gridY, gridZ, num_warps, shared_memory, (hipStream_t)_stream, (hipFunction_t)_function, {', '.join(f"ptr_info{i}.dev_ptr" if ty[0]=="*" else f"_arg{i}"for i, ty in signature.items())});
       if (launch_exit_hook != Py_None) {{
-          PyObject *new_args = NULL;
-          if (hook_ret) {{
-              new_args = PyTuple_Pack(2, compiled_kernel, hook_ret);
-          }} else {{
-              new_args = PyTuple_Pack(1, compiled_kernel);
-          }}
-          hook_ret = PyObject_CallObject(launch_exit_hook, new_args);
-          Py_DECREF(new_args);
-      }}
-      if (hook_ret) {{
-          Py_DECREF(hook_ret);
+        PyObject_CallObject(launch_exit_hook, args);
       }}
       if(PyErr_Occurred()) {{
-          return NULL;
+        return NULL;
       }}
       // return None
       Py_INCREF(Py_None);
       return Py_None;
     }}
     static PyMethodDef ModuleMethods[] = {{
-    {{"launch", launch, METH_VARARGS, "Entry point for all kernels with this signature"}},
-    {{NULL, NULL, 0, NULL}} // sentinel
+      {{"launch", launch, METH_VARARGS, "Entry point for all kernels with this signature"}},
+      {{NULL, NULL, 0, NULL}} // sentinel
     }};
     static struct PyModuleDef ModuleDef = {{
-    PyModuleDef_HEAD_INIT,
-    \"__triton_launcher\",
-    NULL, //documentation
-    -1, //size
-    ModuleMethods
+      PyModuleDef_HEAD_INIT,
+      \"__triton_launcher\",
+      NULL, //documentation
+      -1, //size
+      ModuleMethods
     }};
     PyMODINIT_FUNC PyInit___triton_launcher(void) {{
-    PyObject *m = PyModule_Create(&ModuleDef);
-    if(m == NULL) {{
+      PyObject *m = PyModule_Create(&ModuleDef);
+      if(m == NULL) {{
         return NULL;
-    }}
-    PyModule_AddFunctions(m, ModuleMethods);
-    return m;
+      }}
+      PyModule_AddFunctions(m, ModuleMethods);
+      return m;
     }}
     """
     else:
@@ -1341,7 +1371,7 @@ def generate_launcher(constants, signature):
        }}
     }}
     #define CUDA_CHECK(ans) {{ gpuAssert((ans), __FILE__, __LINE__); }}
-    void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, CUstream stream, CUfunction function, {arg_decls}) {{
+    static void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, CUstream stream, CUfunction function, {arg_decls}) {{
       void *params[] = {{ {', '.join(f"&arg{i}" for i in signature.keys() if i not in constants)} }};
       if(gridX*gridY*gridZ > 0){{
         CUDA_CHECK(cuLaunchKernel(function, gridX, gridY, gridZ, 32*num_warps, 1, 1, shared_memory, stream, params, 0));
@@ -1399,31 +1429,18 @@ def generate_launcher(constants, signature):
       PyObject *launch_enter_hook = NULL;
       PyObject *launch_exit_hook = NULL;
       PyObject *compiled_kernel = NULL;
-      PyObject *hook_ret = NULL;
       {' '.join([f"{_extracted_type(ty)} _arg{i}; " for i, ty in signature.items()])}
       if(!PyArg_ParseTuple(args, \"{format}\", &gridX, &gridY, &gridZ, &num_warps, &shared_memory, &_stream, &_function, &launch_enter_hook, &launch_exit_hook, &compiled_kernel, {', '.join(f"&_arg{i}" for i, ty in signature.items())})) {{
         return NULL;
       }}
       if (launch_enter_hook != Py_None) {{
-        PyObject *new_args = PyTuple_Pack(1, compiled_kernel);
-        hook_ret = PyObject_CallObject(launch_enter_hook, new_args);
-        Py_DECREF(new_args);
+        PyObject_CallObject(launch_enter_hook, args);
       }}
       // raise exception asap
       {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0] == "*" else "" for i, ty in signature.items()])};
       _launch(gridX, gridY, gridZ, num_warps, shared_memory, (CUstream)_stream, (CUfunction)_function, {', '.join(f"ptr_info{i}.dev_ptr" if ty[0]=="*" else f"_arg{i}"for i, ty in signature.items())});
       if (launch_exit_hook != Py_None) {{
-        PyObject *new_args = NULL;
-        if (hook_ret) {{
-            new_args = PyTuple_Pack(2, compiled_kernel, hook_ret);
-        }} else {{
-            new_args = PyTuple_Pack(1, compiled_kernel);
-        }}
-        hook_ret = PyObject_CallObject(launch_exit_hook, new_args);
-        Py_DECREF(new_args);
-      }}
-      if (hook_ret) {{
-          Py_DECREF(hook_ret);
+        PyObject_CallObject(launch_exit_hook, args);
       }}
       if(PyErr_Occurred()) {{
         return NULL;
@@ -1451,17 +1468,12 @@ def generate_launcher(constants, signature):
       PyModule_AddFunctions(m, ModuleMethods);
       return m;
     }}
-      """
+    """
     return src
 
 
 def default_cache_dir():
     return os.path.join(os.environ["HOME"], ".triton", "cache")
-
-
-def default_cuda_dir():
-    default_dir = "/usr/local/cuda"
-    return os.getenv("CUDA_HOME", default=default_dir)
 
 
 class CacheManager:
@@ -1519,32 +1531,24 @@ def quiet():
         sys.stdout, sys.stderr = old_stdout, old_stderr
 
 @functools.lru_cache()
-def libhip_dir():
-    return "/opt/rocm/lib"
-
-@functools.lru_cache()
-def hip_home_dirs():
-    default_dir = "/opt/rocm"
-    return os.getenv("ROCM_HOME", default=default_dir)
-
-@functools.lru_cache()
 def rocm_path_dir():
     return os.getenv("ROCM_PATH", default="/opt/rocm")
 
 def _build(name, src, srcdir):
     if torch.version.hip is not None:
-        hip_lib_dir = libhip_dir()
-        hip_include_dir = os.path.join(hip_home_dirs(), "include")
+        hip_lib_dir = os.path.join(rocm_path_dir(), "lib")
+        hip_include_dir = os.path.join(rocm_path_dir(), "include")
     else:
         cuda_lib_dirs = libcuda_dirs()
-        cuda_path = os.environ.get('CUDA_PATH', default_cuda_dir())
+        base_dir = os.path.dirname(__file__)
+        cuda_path = os.path.join(base_dir, "third_party", "cuda")
+
         cu_include_dir = os.path.join(cuda_path, "include")
         triton_include_dir = os.path.join(os.path.dirname(__file__), "include")
         cuda_header = os.path.join(cu_include_dir, "cuda.h")
         triton_cuda_header = os.path.join(triton_include_dir, "cuda.h")
         if not os.path.exists(cuda_header) and os.path.exists(triton_cuda_header):
             cu_include_dir = triton_include_dir
-
     suffix = sysconfig.get_config_var('EXT_SUFFIX')
     so = os.path.join(srcdir, '{name}{suffix}'.format(name=name, suffix=suffix))
     # try to avoid setuptools if possible
@@ -1556,7 +1560,17 @@ def _build(name, src, srcdir):
         cc = gcc if gcc is not None else clang
         if cc is None:
             raise RuntimeError("Failed to find C compiler. Please specify via CC environment variable.")
-    py_include_dir = get_paths()["include"]
+    # This function was renamed and made public in Python 3.10
+    if hasattr(sysconfig, 'get_default_scheme'):
+        scheme = sysconfig.get_default_scheme()
+    else:
+        scheme = sysconfig._get_default_scheme()
+    # 'posix_local' is a custom scheme on Debian. However, starting Python 3.10, the default install
+    # path changes to include 'local'. This change is required to use triton with system-wide python.
+    if scheme == 'posix_local':
+        scheme = 'posix_prefix'
+    py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
+
     if torch.version.hip is not None:
         ret = subprocess.check_call([cc, src, f"-I{hip_include_dir}", f"-I{py_include_dir}", f"-I{srcdir}", "-shared", "-fPIC", f"-L{hip_lib_dir}", "-lamdhip64", "-o", so])
     else:
@@ -1717,7 +1731,22 @@ arg_type_pattern = {
 }
 
 
+def _get_jsonable_constants(constants):
+    def _is_jsonable(x):
+        try:
+            json.dumps(x)
+            return True
+        except (TypeError, OverflowError):
+            return False
+    serialized_constants = {}
+    for constant in constants:
+        if _is_jsonable(constants[constant]):
+            serialized_constants[constant] = constants[constant]
+    return serialized_constants
+
 # def compile(fn, signature: str, device: int = -1, constants=dict(), num_warps: int = 4, num_stages: int = 3, extern_libs=None, configs=None):
+
+
 @static_vars(discovered_gfx_arch_fulldetails = get_amdgpu_arch_fulldetails())
 def compile(fn, **kwargs):
     capability = kwargs.get("cc", None)
@@ -1734,6 +1763,7 @@ def compile(fn, **kwargs):
     num_warps = kwargs.get("num_warps", 4)
     num_stages = kwargs.get("num_stages", 3 if capability >= 75 else 2)
     extern_libs = kwargs.get("extern_libs", dict())
+    debug = kwargs.get("debug", False)
     # build compilation stages
     if torch.version.hip is not None:
         if extern_libs is None:
@@ -1751,30 +1781,30 @@ def compile(fn, **kwargs):
             raise RuntimeError('gfx_arch is None (not specified)')
         stages = {
             "ast": (lambda path: fn, None),
-            "ttir": (lambda path: _triton.ir.parse_mlir_module(path, context),
-                    lambda src: ast_to_ttir(src, signature, configs[0], constants)),
-            "ttgir": (lambda path: _triton.ir.parse_mlir_module(path, context),
-                    lambda src: ttir_to_ttgir(src, num_warps, num_stages, capability)),
+            "ttir": (lambda path: parse_mlir_module(path, context),
+                     lambda src: ast_to_ttir(src, signature, configs[0], constants, debug)),
+            "ttgir": (lambda path: parse_mlir_module(path, context),
+                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps), num_stages, capability)),
             "llir": (lambda path: Path(path).read_text(),
-                    lambda src: ttgir_to_llir(src, extern_libs, capability)),
+                     lambda src: ttgir_to_llir(src, extern_libs, capability)),
             "amdgcn": (lambda path: Path(path).read_text(),
-                    lambda src: llir_to_amdgcn_and_hsaco(src, gfx_arch, 
-                                                        gfx_arch_full_details[0], 
+                       lambda src: llir_to_amdgcn_and_hsaco(src, gfx_arch,
+                                                        gfx_arch_full_details[0],
                                                         gfx_arch_full_details[2])),
         }
     else:
         stages = {
             "ast": (lambda path: fn, None),
-            "ttir": (lambda path: _triton.ir.parse_mlir_module(path, context),
-                    lambda src: ast_to_ttir(src, signature, configs[0], constants)),
-            "ttgir": (lambda path: _triton.ir.parse_mlir_module(path, context),
-                    lambda src: ttir_to_ttgir(src, num_warps, num_stages, capability)),
+            "ttir": (lambda path: parse_mlir_module(path, context),
+                     lambda src: ast_to_ttir(src, signature, configs[0], constants, debug)),
+            "ttgir": (lambda path: parse_mlir_module(path, context),
+                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps), num_stages, capability)),
             "llir": (lambda path: Path(path).read_text(),
-                    lambda src: ttgir_to_llir(src, extern_libs, capability)),
+                     lambda src: ttgir_to_llir(src, extern_libs, capability)),
             "ptx": (lambda path: Path(path).read_text(),
                     lambda src: llir_to_ptx(src, capability)),
             "cubin": (lambda path: Path(path).read_bytes(),
-                    lambda src: ptx_to_cubin(src, capability))
+                      lambda src: ptx_to_cubin(src, capability))
         }
 
     # find out the signature of the function
@@ -1820,7 +1850,8 @@ def compile(fn, **kwargs):
         with open(fn_cache_manager._make_path(f"{name}.json")) as f:
             metadata = json.load(f)
     else:
-        metadata = {"num_warps": num_warps, "num_stages": num_stages, "ctime": dict()}
+        metadata = {"num_warps": num_warps, "num_stages": num_stages,
+                    "constants": _get_jsonable_constants(constants), "ctime": dict(), "debug": debug}
         if ext == "ptx":
             assert "shared" in kwargs, "ptx compilation must provide shared memory size"
             metadata["shared"] = kwargs["shared"]
@@ -1866,7 +1897,7 @@ def compile(fn, **kwargs):
     # write-back metadata
     fn_cache_manager.put(json.dumps(metadata), f"{name}.json", binary=False)
     # return handle to compiled kernel
-    return CompiledKernel(so_path, metadata, asm)
+    return CompiledKernel(fn, so_path, metadata, asm)
 
 @static_vars(discovered_gfx_arch_fulldetails = get_amdgpu_arch_fulldetails())
 def _get_amdgcn_bitcode_paths():
@@ -1911,17 +1942,19 @@ class CompiledKernel:
     launch_enter_hook = None
     launch_exit_hook = None
 
-    def __init__(self, so_path, metadata, asm):
+    def __init__(self, fn, so_path, metadata, asm):
         # initialize launcher
         import importlib.util
         spec = importlib.util.spec_from_file_location("__triton_launcher", so_path)
         mod = importlib.util.module_from_spec(spec)
+        self.fn = fn
         spec.loader.exec_module(mod)
         self.c_wrapper = getattr(mod, "launch")
         # initialize metadata
         self.shared = metadata["shared"]
         self.num_warps = metadata["num_warps"]
         self.num_stages = metadata["num_stages"]
+        self.constants = metadata["constants"]
         # initialize asm dict
         self.asm = asm
         # binaries are lazily initialized
@@ -1935,22 +1968,24 @@ class CompiledKernel:
         if self.cu_module is not None:
             return
         device = torch.cuda.current_device()
-        global cuda_utils
-        global hip_utils
         if torch.version.hip is not None:
+            global hip_utils
             init_hip_utils()
+            max_shared = hip_utils.get_device_properties(device)["max_shared_mem"]
+            if self.shared > max_shared:
+                raise OutOfResources(self.shared, max_shared, "shared memory")
             mod, func, n_regs, n_spills = hip_utils.load_binary(self.metadata["name"], self.asm["hsaco_path"], self.shared, device)
-            self.cu_module = mod
-            self.cu_function = func
         else:
+            global cuda_utils
             init_cuda_utils()
             max_shared = cuda_utils.get_device_properties(device)["max_shared_mem"]
             if self.shared > max_shared:
                 raise OutOfResources(self.shared, max_shared, "shared memory")
             mod, func, n_regs, n_spills = cuda_utils.load_binary(self.metadata["name"], self.asm["cubin"], self.shared, device)
-            # print(self.shared, n_regs, n_spills)
-            self.cu_module = mod
-            self.cu_function = func
+        self.n_spills = n_spills
+        self.n_regs = n_regs
+        self.cu_module = mod
+        self.cu_function = func
 
     def __getattribute__(self, name):
         if name == 'c_wrapper':
@@ -2155,14 +2190,31 @@ class HIPUtils(object):
         {{
           if (code != HIP_SUCCESS)
           {{
-             const char* prefix = "Triton Error [CUDA]: ";
+             const char* prefix = "Triton Error [HIP]: ";
              const char* str = hipGetErrorString(code);
              char err[1024] = {0};
-             strcat(err, prefix);
-             strcat(err, str);
+             snprintf(err, 1024, "%s Code: %d, Messsage: %s", prefix, code, str );
              PyErr_SetString(PyExc_RuntimeError, err);
           }}
         }}
+
+        #define HIP_CHECK(ans) { gpuAssert((ans), __FILE__, __LINE__); if(PyErr_Occurred()) return NULL; }
+
+        static PyObject* getDeviceProperties(PyObject* self, PyObject* args){
+            int device_id;
+            if(!PyArg_ParseTuple(args, "i", &device_id))
+                return NULL;
+
+            hipDeviceProp_t props;
+            HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+
+            // create a struct to hold device properties
+            return Py_BuildValue("{s:i, s:i, s:i, s:i, s:i}", "max_shared_mem", props.sharedMemPerBlock,
+                                       "multiprocessor_count", props.multiProcessorCount,
+                                       "sm_clock_rate", props.clockRate,
+                                       "mem_clock_rate", props.memoryClockRate,
+                                       "mem_bus_width", props.memoryBusWidth);
+        }
 
         static PyObject* loadBinary(PyObject* self, PyObject* args) {
             const char* name;
@@ -2218,6 +2270,7 @@ class HIPUtils(object):
 
         static PyMethodDef ModuleMethods[] = {
           {"load_binary", loadBinary, METH_VARARGS, "Load provided hsaco into HIP driver"},
+          {"get_device_properties", getDeviceProperties, METH_VARARGS, "Get the properties for a given device"},
           {NULL, NULL, 0, NULL} // sentinel
         };
 
@@ -2257,4 +2310,4 @@ class HIPUtils(object):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.load_binary = mod.load_binary
-        # self.get_device_properties = mod.get_device_properties
+        self.get_device_properties = mod.get_device_properties

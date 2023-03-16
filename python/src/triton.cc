@@ -13,6 +13,8 @@
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/Index/IR/IndexDialect.h"
+#include "mlir/Dialect/Index/IR/IndexOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Analysis/Allocation.h"
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
@@ -46,6 +48,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <regex>
+#include <signal.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -120,11 +123,13 @@ void init_triton_ir(py::module &&m) {
       .def(py::init<>())
       .def("load_triton", [](mlir::MLIRContext &self) {
         self.getOrLoadDialect<mlir::triton::TritonDialect>();
+        self.getOrLoadDialect<mlir::index::IndexDialect>();
         // we load LLVM because the frontend uses LLVM.undef for
         // some placeholders
         self.getOrLoadDialect<mlir::triton::TritonDialect>();
         self.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
         self.getOrLoadDialect<mlir::gpu::GPUDialect>();
+        self.getOrLoadDialect<mlir::tensor::TensorDialect>();
       });
   // .def(py::init([](){
   //   mlir::MLIRContext context;
@@ -394,8 +399,8 @@ void init_triton_ir(py::module &&m) {
         registry.insert<mlir::triton::TritonDialect,
                         mlir::triton::gpu::TritonGPUDialect,
                         mlir::math::MathDialect, mlir::arith::ArithDialect,
-                        mlir::func::FuncDialect, mlir::scf::SCFDialect,
-                        mlir::cf::ControlFlowDialect>();
+                        mlir::index::IndexDialect, mlir::func::FuncDialect,
+                        mlir::scf::SCFDialect, mlir::cf::ControlFlowDialect>();
         context.appendDialectRegistry(registry);
         context.loadAllAvailableDialects();
 
@@ -513,6 +518,12 @@ void init_triton_ir(py::module &&m) {
              return mlir::Value(self.create<mlir::arith::ConstantIntOp>(
                  loc, v, self.getI8Type()));
            })
+      .def("get_int16",
+           [](mlir::OpBuilder &self, int64_t v) -> mlir::Value {
+             auto loc = self.getUnknownLoc();
+             return mlir::Value(self.create<mlir::arith::ConstantIntOp>(
+                 loc, v, self.getI16Type()));
+           })
       .def("get_int32",
            [](mlir::OpBuilder &self, int64_t v) -> mlir::Value {
              auto loc = self.getUnknownLoc();
@@ -525,16 +536,15 @@ void init_triton_ir(py::module &&m) {
              return mlir::Value(self.create<mlir::arith::ConstantIntOp>(
                  loc, v, self.getI64Type()));
            })
-      // bfloat16 cannot be initialized as it is treated as int16 for now
-      //.def("get_bf16",
-      //     [](mlir::OpBuilder &self, float v) -> mlir::Value {
-      //       auto loc = self.getUnknownLoc();
-      //       auto type = self.getBF16Type();
-      //       return self.create<mlir::arith::ConstantFloatOp>(
-      //           loc,
-      //           mlir::APFloat(type.getFloatSemantics(), std::to_string(v)),
-      //           type);
-      //     })
+      .def("get_bf16",
+           [](mlir::OpBuilder &self, float v) -> mlir::Value {
+             auto loc = self.getUnknownLoc();
+             auto type = self.getBF16Type();
+             return self.create<mlir::arith::ConstantFloatOp>(
+                 loc,
+                 mlir::APFloat(type.getFloatSemantics(), std::to_string(v)),
+                 type);
+           })
       .def("get_fp16",
            [](mlir::OpBuilder &self, float v) -> mlir::Value {
              auto loc = self.getUnknownLoc();
@@ -546,6 +556,12 @@ void init_triton_ir(py::module &&m) {
              auto loc = self.getUnknownLoc();
              return self.create<mlir::arith::ConstantOp>(
                  loc, self.getF32FloatAttr(v));
+           })
+      .def("get_fp64",
+           [](mlir::OpBuilder &self, double v) -> mlir::Value {
+             auto loc = self.getUnknownLoc();
+             return self.create<mlir::arith::ConstantOp>(
+                 loc, self.getF64FloatAttr(v));
            })
       .def("get_null_value",
            [](mlir::OpBuilder &self, mlir::Type type) -> mlir::Value {
@@ -598,9 +614,13 @@ void init_triton_ir(py::module &&m) {
       .def(
           "get_int64_ty",
           [](mlir::OpBuilder &self) -> mlir::Type { return self.getI64Type(); })
-      .def("get_fp8_ty",
+      .def("get_fp8e4_ty",
            [](mlir::OpBuilder &self) -> mlir::Type {
-             return self.getType<mlir::triton::Float8Type>();
+             return self.getType<mlir::Float8E4M3FNType>();
+           })
+      .def("get_fp8e5_ty",
+           [](mlir::OpBuilder &self) -> mlir::Type {
+             return self.getType<mlir::Float8E5M2Type>();
            })
       .def(
           "get_half_ty",
@@ -819,7 +839,7 @@ void init_triton_ir(py::module &&m) {
            [](mlir::OpBuilder &self, mlir::Value &input) -> mlir::Value {
              auto loc = self.getUnknownLoc();
              return self.create<mlir::arith::IndexCastOp>(
-                 loc, self.getI32Type(), input);
+                 loc, self.getI64Type(), input);
            })
       .def("create_fmul",
            [](mlir::OpBuilder &self, mlir::Value &lhs,
@@ -901,23 +921,27 @@ void init_triton_ir(py::module &&m) {
 #ifdef USE_ROCM
              mlir::Type elementType = getElementTypeOrSelf(lhs.getType());
              unsigned typeWidth = elementType.getIntOrFloatBitWidth();
-             // Should be replaced to tensor::SplatOp in LLVM 16
              auto constValue = self.create<mlir::arith::ConstantIntOp>(
                  loc, typeWidth, elementType);
-             auto splatValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), constValue);
-
              auto zeroConst =
                  self.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
-             auto zeroValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), zeroConst);
-
-             auto cmpValue = self.create<mlir::arith::CmpIOp>(
-                 loc, mlir::arith::CmpIPredicate::slt, rhs, splatValue);
-
-             auto shiftValue = self.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
-             return mlir::Value(self.create<mlir::arith::SelectOp>(
-                 loc, cmpValue, shiftValue, zeroValue));
+             if (lhs.getType().isIntOrIndex()) {
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+               auto shiftValue = self.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, zeroConst));
+             } else {
+               auto splatValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), constValue);
+               auto zeroValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), zeroConst);
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+               auto shiftValue = self.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, zeroValue));
+             }
 #else
              return mlir::Value(
                  self.create<mlir::arith::ShLIOp>(loc, lhs, rhs));
@@ -930,23 +954,27 @@ void init_triton_ir(py::module &&m) {
 #ifdef USE_ROCM
              mlir::Type elementType = getElementTypeOrSelf(lhs.getType());
              unsigned typeWidth = elementType.getIntOrFloatBitWidth();
-             // Should be replaced to tensor::SplatOp in LLVM 16
              auto constValue = self.create<mlir::arith::ConstantIntOp>(
                  loc, typeWidth, elementType);
-             auto splatValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), constValue);
-
              auto zeroConst =
                  self.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
-             auto zeroValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), zeroConst);
-
-             auto cmpValue = self.create<mlir::arith::CmpIOp>(
-                 loc, mlir::arith::CmpIPredicate::slt, rhs, splatValue);
-
-             auto shiftValue = self.create<mlir::arith::ShRUIOp>(loc, lhs, rhs);
-             return mlir::Value(self.create<mlir::arith::SelectOp>(
-                 loc, cmpValue, shiftValue, zeroValue));
+             if (lhs.getType().isIntOrIndex()) {
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+               auto shiftValue = self.create<mlir::arith::ShRUIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, zeroConst));
+             } else {
+               auto splatValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), constValue);
+               auto zeroValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), zeroConst);
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+               auto shiftValue = self.create<mlir::arith::ShRUIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, zeroValue));
+             }
 #else
              return mlir::Value(
                  self.create<mlir::arith::ShRUIOp>(loc, lhs, rhs));
@@ -959,36 +987,43 @@ void init_triton_ir(py::module &&m) {
 #ifdef USE_ROCM
              mlir::Type elementType = getElementTypeOrSelf(lhs.getType());
              unsigned typeWidth = elementType.getIntOrFloatBitWidth();
-             // Should be replaced to tensor::SplatOp in LLVM 16
              auto constValue = self.create<mlir::arith::ConstantIntOp>(
                  loc, typeWidth, elementType);
-             auto splatValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), constValue);
-
              auto zeroConst =
                  self.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
-             auto zeroValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), zeroConst);
-
              uint64_t ones_val = 0xFFFFFFFFFFFFFFFF;
-             auto onesConst = self.create<mlir::arith::ConstantIntOp>(
-                 loc, ones_val, elementType);
-             auto onesValue = self.create<mlir::triton::SplatOp>(
-                 loc, lhs.getType(), onesConst);
 
-             auto negativeCmpValue = self.create<mlir::arith::CmpIOp>(
-                 loc, mlir::arith::CmpIPredicate::slt, lhs, zeroValue);
-             auto otherValue = mlir::Value(self.create<mlir::arith::SelectOp>(
-                 loc, negativeCmpValue, onesValue, zeroValue));
-
-             auto cmpValue = self.create<mlir::arith::CmpIOp>(
-                 loc, mlir::arith::CmpIPredicate::slt, rhs, splatValue);
-
-             auto shiftValue = self.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
-             return mlir::Value(self.create<mlir::arith::SelectOp>(
-                 loc, cmpValue, shiftValue, otherValue));
+             auto onesConst =
+                 self.create<mlir::arith::ConstantIntOp>(loc, ones_val, elementType);
+             if (lhs.getType().isIntOrIndex()) {
+               auto negativeCmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::slt, lhs, zeroConst);
+               auto otherValue = mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, negativeCmpValue, onesConst, zeroConst));
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+               auto shiftValue = self.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, otherValue));
+             } else {
+               auto splatValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), constValue);
+               auto zeroValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), zeroConst);
+               auto onesValue = self.create<mlir::tensor::SplatOp>(
+                   loc, lhs.getType(), onesConst);
+               auto negativeCmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::slt, lhs, zeroValue);
+               auto otherValue = mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, negativeCmpValue, onesValue, zeroValue));
+               auto cmpValue = self.create<mlir::arith::CmpIOp>(
+                   loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+               auto shiftValue = self.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
+               return mlir::Value(self.create<mlir::arith::SelectOp>(
+                   loc, cmpValue, shiftValue, otherValue));
+             }
 #else
-                  return mlir::Value(
+             return mlir::Value(
                  self.create<mlir::arith::ShRSIOp>(loc, lhs, rhs));
 #endif
            })
@@ -1416,15 +1451,31 @@ void init_triton_ir(py::module &&m) {
              return self.create<mlir::arith::SelectOp>(loc, condition,
                                                        trueValue, falseValue);
            })
-      .def("create_printf",
+      .def("create_print",
            [](mlir::OpBuilder &self, const std::string &prefix,
               const std::vector<mlir::Value> &values) -> void {
              auto loc = self.getUnknownLoc();
-             self.create<mlir::triton::PrintfOp>(
+             self.create<mlir::triton::PrintOp>(
                  loc,
                  mlir::StringAttr::get(self.getContext(),
                                        llvm::StringRef(prefix)),
                  values);
+           })
+      .def("create_assert",
+           [](mlir::OpBuilder &self, mlir::Value &condition,
+              const std::string &message, const std::string &fileName,
+              const std::string &funcName, unsigned lineNo) -> void {
+             auto loc = self.getUnknownLoc();
+             auto messageAttr = mlir::StringAttr::get(self.getContext(),
+                                                      llvm::StringRef(message));
+             auto fileNameAttr = mlir::StringAttr::get(
+                 self.getContext(), llvm::StringRef(fileName));
+             auto funcNameAttr = mlir::StringAttr::get(
+                 self.getContext(), llvm::StringRef(funcName));
+             auto lineNoAttr = self.getI32IntegerAttr(lineNo);
+             self.create<mlir::triton::AssertOp>(loc, condition, messageAttr,
+                                                 fileNameAttr, funcNameAttr,
+                                                 lineNoAttr);
            })
       // Undef
       .def("create_undef",
@@ -1465,7 +1516,7 @@ void init_triton_ir(py::module &&m) {
       .def(
           "add_sccp_pass",
           [](mlir::PassManager &self) { self.addPass(mlir::createSCCPPass()); })
-      .def("add_coalesce_pass",
+      .def("add_tritongpu_coalesce_pass",
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUCoalescePass());
            })
@@ -1504,14 +1555,18 @@ void init_triton_ir(py::module &&m) {
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUPrefetchPass());
            })
-      .def("add_tritongpu_combine_pass",
+      .def("add_tritongpu_accelerate_matmul_pass",
            [](mlir::PassManager &self, int computeCapability) {
              self.addPass(
-                 mlir::createTritonGPUCombineOpsPass(computeCapability));
+                 mlir::createTritonGPUAccelerateMatmulPass(computeCapability));
            })
-      .def("add_tritongpu_update_mma_for_volta_pass",
+      .def("add_tritongpu_optimize_dot_operands_pass",
            [](mlir::PassManager &self) {
-             self.addPass(mlir::createTritonGPUUpdateMmaForVoltaPass());
+             self.addPass(mlir::createTritonGPUOptimizeDotOperandsPass());
+           })
+      .def("add_tritongpu_remove_layout_conversions_pass",
+           [](mlir::PassManager &self) {
+             self.addPass(mlir::createTritonGPURemoveLayoutConversionsPass());
            })
       .def("add_tritongpu_reorder_instructions_pass",
            [](mlir::PassManager &self) {
@@ -1595,7 +1650,6 @@ void init_triton_translation(py::module &m) {
           llvm::sys::fs::createTemporaryFile("compile-ptx-src", "", fsrc);
           llvm::sys::fs::createTemporaryFile("compile-ptx-log", "", flog);
           std::string fbin = std::string(fsrc) + ".o";
-          llvm::FileRemover srcRemover(fsrc);
           llvm::FileRemover logRemover(flog);
           llvm::FileRemover binRemover(fbin);
           const char *_fsrc = fsrc.c_str();
@@ -1612,16 +1666,30 @@ void init_triton_translation(py::module &m) {
 
           err = system(cmd.c_str());
           if (err != 0) {
+            err >>= 8;
             std::ifstream _log(_flog);
             std::string log(std::istreambuf_iterator<char>(_log), {});
-            throw std::runtime_error("Internal Triton PTX codegen error: \n" +
-                                     log);
+            if (err == 255) {
+              throw std::runtime_error("Internal Triton PTX codegen error: \n" +
+                                       log);
+            } else if (err == 128 + SIGSEGV) {
+              throw std::runtime_error("Please run `ptxas " + fsrc.str().str() +
+                                       "` to confirm that this is a "
+                                       "bug in `ptxas`\n" +
+                                       log);
+            } else {
+              throw std::runtime_error("`ptxas` failed with error code " +
+                                       std::to_string(err) + ": \n" + log);
+            }
+            return {};
+          } else {
+            llvm::FileRemover srcRemover(fsrc);
+            std::ifstream _cubin(_fbin, std::ios::binary);
+            std::string cubin(std::istreambuf_iterator<char>(_cubin), {});
+            _cubin.close();
+            py::bytes bytes(cubin);
+            return std::move(bytes);
           }
-          std::ifstream _cubin(_fbin, std::ios::binary);
-          std::string cubin(std::istreambuf_iterator<char>(_cubin), {});
-          _cubin.close();
-          py::bytes bytes(cubin);
-          return std::move(bytes);
         });
 
   m.def("add_external_libs",

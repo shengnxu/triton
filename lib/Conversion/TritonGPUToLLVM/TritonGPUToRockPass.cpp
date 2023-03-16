@@ -18,6 +18,7 @@
 #include "triton/Dialect/Rock/utility/loweringUtils.h"
 #include "triton/Dialect/Rock/utility/math.h"
 #include "triton/Dialect/Rock/utility/transformMapUtils.h"
+#include "triton/Analysis/AxisInfo.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"

@@ -19,8 +19,10 @@
 using namespace mlir;
 using namespace mlir::triton;
 
-#define GEN_PASS_CLASSES
+namespace mlir {
+#define GEN_PASS_DEF_TRITONCONVERTARITHTOINDEX
 #include "triton/Conversion/Passes.h.inc"
+} // namespace mlir
 
 namespace {
 class TritonArithToIndexConversionTarget : public mlir::ConversionTarget {
@@ -63,8 +65,12 @@ LogicalResult replaceArithCmpWithIndexCmp(arith::CmpIOp op,
   return success();
 }
 
-class ArithToIndex : public TritonConvertArithToIndexBase<ArithToIndex> {
+class ArithToIndex
+    : public impl::TritonConvertArithToIndexBase<ArithToIndex> {
+
 public:
+    using impl::TritonConvertArithToIndexBase<ArithToIndex>::TritonConvertArithToIndexBase;
+
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();

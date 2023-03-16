@@ -15,16 +15,16 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Analysis/Allocation.h"
-#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
 #include "triton/Conversion/TritonToTritonGPU/TritonToTritonGPUPass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+#include "triton/Target/HSACO/HSACOTranslation.h"
 #include "triton/Target/LLVMIR/LLVMIRTranslation.h"
 #include "triton/Target/PTX/PTXTranslation.h"
-#include "triton/Target/HSACO/HSACOTranslation.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "llvm/IR/LegacyPassManager.h"
@@ -640,9 +640,11 @@ void init_triton_ir(py::module &&m) {
                return llvm::dyn_cast<mlir::func::FuncOp>(funcOperation);
              auto loc = self.getUnknownLoc();
              if (auto funcTy = funcType.dyn_cast<mlir::FunctionType>()) {
-               llvm::SmallVector<mlir::NamedAttribute> attrs = {
+               llvm::SmallVector<mlir::NamedAttribute, 2> attrs = {
                    mlir::NamedAttribute(self.getStringAttr("sym_visibility"),
-                                        self.getStringAttr(visibility))};
+                                        self.getStringAttr(visibility)),
+                   mlir::NamedAttribute(self.getStringAttr("kernel"),
+                                        self.getI32IntegerAttr(0))};
                return self.create<mlir::func::FuncOp>(loc, funcName, funcTy,
                                                       attrs);
              }
@@ -969,8 +971,8 @@ void init_triton_ir(py::module &&m) {
                  loc, lhs.getType(), zeroConst);
 
              uint64_t ones_val = 0xFFFFFFFFFFFFFFFF;
-             auto onesConst =
-                 self.create<mlir::arith::ConstantIntOp>(loc, ones_val, elementType);
+             auto onesConst = self.create<mlir::arith::ConstantIntOp>(
+                 loc, ones_val, elementType);
              auto onesValue = self.create<mlir::triton::SplatOp>(
                  loc, lhs.getType(), onesConst);
 
@@ -1525,7 +1527,7 @@ void init_triton_ir(py::module &&m) {
            })
       .def("add_rock_to_llvm",
            [](mlir::PassManager &self) {
-               self.addPass(mlir::triton::createConvertRockToLLVMPass());
+             self.addPass(mlir::triton::createConvertRockToLLVMPass());
            })
       .def("add_scf_to_cfg", [](mlir::PassManager &self) {
         self.addPass(mlir::createConvertSCFToCFPass());
@@ -1630,8 +1632,8 @@ void init_triton_translation(py::module &m) {
 
   m.def(
       "translate_llvmir_to_hsaco",
-      [](const std::string llvmIR, std::string gfx_arch, std::string gfx_triple, 
-          std::string gfx_features) -> std::tuple<std::string, std::string> {
+      [](const std::string llvmIR, std::string gfx_arch, std::string gfx_triple,
+         std::string gfx_features) -> std::tuple<std::string, std::string> {
         // create LLVM module from C++
         llvm::LLVMContext context;
         std::unique_ptr<llvm::MemoryBuffer> buffer =
@@ -1640,7 +1642,8 @@ void init_triton_translation(py::module &m) {
         std::unique_ptr<llvm::Module> module =
             llvm::parseIR(buffer->getMemBufferRef(), error, context);
         // translate module to HSACO
-        auto hsacoCode = triton::translateLLVMIRToHSACO(*module, gfx_arch, gfx_triple, gfx_features);
+        auto hsacoCode = triton::translateLLVMIRToHSACO(
+            *module, gfx_arch, gfx_triple, gfx_features);
         return hsacoCode;
       },
       ret::take_ownership);

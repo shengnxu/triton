@@ -30,8 +30,10 @@
 using namespace mlir;
 using namespace mlir::triton;
 
-#define GEN_PASS_CLASSES
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTROCKTOLLVM
 #include "triton/Conversion/Passes.h.inc"
+} // namespace mlir
 
 namespace mlir {
 
@@ -106,9 +108,11 @@ private:
   int numWarps{0};
 };
 
-class ConvertRockToLLVM : public ConvertRockToLLVMBase<ConvertRockToLLVM> {
+class ConvertRockToLLVM
+    : public impl::ConvertRockToLLVMBase<ConvertRockToLLVM> {
 
 public:
+  using impl::ConvertRockToLLVMBase<ConvertRockToLLVM>::ConvertRockToLLVMBase;
   explicit ConvertRockToLLVM(int computeCapability)
       : computeCapability(computeCapability) {}
 

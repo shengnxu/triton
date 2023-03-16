@@ -7,6 +7,9 @@
 
 namespace mlir {
 
+#define GEN_PASS_DECL_CONVERTTRITONGPUTOROCK
+#include "triton/Conversion/Passes.h.inc"
+
 class ModuleOp;
 template <typename T> class OperationPass;
 

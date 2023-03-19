@@ -57,7 +57,7 @@ unsigned getElemsPerThread(Attribute layout, ArrayRef<int64_t> shape,
   } else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>()) {
     return sharedLayout.getElemsPerThread(shape, eltTy);
   } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
-      return ldsLayout.getElemsPerThread(shape, eltTy);
+    return ldsLayout.getElemsPerThread(shape, eltTy);
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return dotLayout.getElemsPerThread(shape, eltTy);
   } else {

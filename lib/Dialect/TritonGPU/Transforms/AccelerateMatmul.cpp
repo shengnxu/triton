@@ -1,9 +1,9 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Analysis/Utility.h"
+#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
-#include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
 #include <memory>
 
 using namespace mlir;
@@ -213,7 +213,6 @@ public:
     auto mod = op->getParentOfType<mlir::ModuleOp>();
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
-
     Value matA = dotOp.getA();
     auto loc = dotOp.getLoc();
     auto elementType = matA.getType().cast<RankedTensorType>().getElementType();
@@ -238,12 +237,12 @@ public:
     auto maybeMfmaInsnGroup =
         MfmaInsnGroup::select(elementType, mPerWave, nPerWave);
     if (failed(maybeMfmaInsnGroup)) {
-        return emitError(loc) << "Failed to select xdlops instruction group.\n";
+      return emitError(loc) << "Failed to select xdlops instruction group.\n";
     }
     MfmaInsnGroup mfmaGroup = *maybeMfmaInsnGroup;
     if (!mfmaGroup.isCoherentWithK(kpack, kPerBlock)) {
-        return emitError(loc)
-            << "Mfma instruction group selection is not compatible with k.\n";
+      return emitError(loc)
+             << "Mfma instruction group selection is not compatible with k.\n";
     }
 
     MfmaInsnAttr mfmaAttr = mfmaGroup.getInsnAttr();
@@ -278,12 +277,12 @@ public:
 
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(
-            oldAType.getContext(), 0, newRetType.getEncoding()));
+        triton::gpu::DotOperandEncodingAttr::get(oldAType.getContext(), 0,
+                                                 newRetType.getEncoding()));
     auto newBType = RankedTensorType::get(
         oldBType.getShape(), oldBType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(
-            oldBType.getContext(), 1, newRetType.getEncoding()));
+        triton::gpu::DotOperandEncodingAttr::get(oldBType.getContext(), 1,
+                                                 newRetType.getEncoding()));
 
     a = rewriter.create<triton::gpu::ConvertLayoutOp>(a.getLoc(), newAType, a);
     b = rewriter.create<triton::gpu::ConvertLayoutOp>(b.getLoc(), newBType, b);

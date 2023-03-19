@@ -65,11 +65,11 @@ LogicalResult replaceArithCmpWithIndexCmp(arith::CmpIOp op,
   return success();
 }
 
-class ArithToIndex
-    : public impl::TritonConvertArithToIndexBase<ArithToIndex> {
+class ArithToIndex : public impl::TritonConvertArithToIndexBase<ArithToIndex> {
 
 public:
-    using impl::TritonConvertArithToIndexBase<ArithToIndex>::TritonConvertArithToIndexBase;
+  using impl::TritonConvertArithToIndexBase<
+      ArithToIndex>::TritonConvertArithToIndexBase;
 
   void runOnOperation() override {
     MLIRContext *context = &getContext();

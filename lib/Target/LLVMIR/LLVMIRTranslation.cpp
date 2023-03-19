@@ -14,21 +14,21 @@
 #include "mlir/Target/LLVMIR/LLVMTranslationInterface.h"
 #include "mlir/Transforms/Passes.h"
 #include "triton/Conversion/TritonGPUToLLVM/ArithToIndexPass.h"
-#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
+#include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
-#include "llvm/IR/CallingConv.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/SourceMgr.h"
 
-#include <iostream>
 #include <dlfcn.h>
 #include <filesystem>
+#include <iostream>
 #include <iterator>
 
 namespace mlir {
@@ -343,9 +343,10 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   if (::triton::tools::getBoolEnv("LLVM_IR_ENABLE_DUMP")) {
     std::string mod_string;
     std::unique_ptr<llvm::raw_string_ostream> ir_ss(
-           new llvm::raw_string_ostream(mod_string));
+        new llvm::raw_string_ostream(mod_string));
     llvmIR->print(*ir_ss, nullptr);
-    std::cout << "// -----// LLVM IR Dump //----- //\n" << mod_string << std::endl;
+    std::cout << "// -----// LLVM IR Dump //----- //\n"
+              << mod_string << std::endl;
   }
 
   return llvmIR;

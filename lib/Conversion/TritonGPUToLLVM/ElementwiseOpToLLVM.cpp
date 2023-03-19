@@ -21,16 +21,16 @@ struct FpToFpOpConversion
 #ifdef USE_ROCM
     auto fp8x4VecTy = vec_ty(i8_ty, 4);
     Value a0 = undef(fp8x4VecTy);
-    a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
+    a0 = insert_element(fp8x4VecTy, a0, int_val(8, 0), i32_val(0));
     a0 = insert_element(fp8x4VecTy, a0, v0, i32_val(1));
-    a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
+    a0 = insert_element(fp8x4VecTy, a0, int_val(8, 0), i32_val(2));
     a0 = insert_element(fp8x4VecTy, a0, v1, i32_val(3));
     a0 = bitcast(a0, i32_ty);
 
     Value a1 = undef(fp8x4VecTy);
-    a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(0));
+    a1 = insert_element(fp8x4VecTy, a1, int_val(8, 0), i32_val(0));
     a1 = insert_element(fp8x4VecTy, a1, v2, i32_val(1));
-    a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(2));
+    a1 = insert_element(fp8x4VecTy, a1, int_val(8, 0), i32_val(2));
     a1 = insert_element(fp8x4VecTy, a1, v3, i32_val(3));
     a1 = bitcast(a1, i32_ty);
 
@@ -40,19 +40,17 @@ struct FpToFpOpConversion
     b0 = lshr(i32_ty, b0, i32_val(1));
     b1 = lshr(i32_ty, b1, i32_val(1));
 
-    b0 = or_( i32_ty, b0, and_(i32_ty, a0, i32_val(0x80008000)) );
-    b1 = or_( i32_ty, b1, and_(i32_ty, a1, i32_val(0x80008000)) );
+    b0 = or_(i32_ty, b0, and_(i32_ty, a0, i32_val(0x80008000)));
+    b1 = or_(i32_ty, b1, and_(i32_ty, a1, i32_val(0x80008000)));
 
     auto fp16x2VecTy = vec_ty(f16_ty, 2);
     auto fp16x2Vec0 = bitcast(b0, fp16x2VecTy);
     auto fp16x2Vec1 = bitcast(b1, fp16x2VecTy);
 
-    return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
-             extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
-             extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
-             extract_element(f16_ty, fp16x2Vec1, i32_val(1))
-           };
-
+    return {extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
+            extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
+            extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
+            extract_element(f16_ty, fp16x2Vec1, i32_val(1))};
 
 #else
     auto fp8x4VecTy = vec_ty(i8_ty, 4);
@@ -125,16 +123,16 @@ struct FpToFpOpConversion
 #ifdef USE_ROCM
     auto fp8x4VecTy = vec_ty(i8_ty, 4);
     Value a0 = undef(fp8x4VecTy);
-    a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
+    a0 = insert_element(fp8x4VecTy, a0, int_val(8, 0), i32_val(0));
     a0 = insert_element(fp8x4VecTy, a0, v0, i32_val(1));
-    a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
+    a0 = insert_element(fp8x4VecTy, a0, int_val(8, 0), i32_val(2));
     a0 = insert_element(fp8x4VecTy, a0, v1, i32_val(3));
     a0 = bitcast(a0, i32_ty);
 
     Value a1 = undef(fp8x4VecTy);
-    a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(0));
+    a1 = insert_element(fp8x4VecTy, a1, int_val(8, 0), i32_val(0));
     a1 = insert_element(fp8x4VecTy, a1, v2, i32_val(1));
-    a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(2));
+    a1 = insert_element(fp8x4VecTy, a1, int_val(8, 0), i32_val(2));
     a1 = insert_element(fp8x4VecTy, a1, v3, i32_val(3));
     a1 = bitcast(a1, i32_ty);
 
@@ -154,11 +152,10 @@ struct FpToFpOpConversion
     bf16x2Vec0 = bitcast(bf16x2Vec0, bf16x2VecTy);
     bf16x2Vec1 = bitcast(bf16x2Vec1, bf16x2VecTy);
 
-    return { extract_element(i16_ty, bf16x2Vec0, i32_val(0)),
-             extract_element(i16_ty, bf16x2Vec0, i32_val(1)),
-             extract_element(i16_ty, bf16x2Vec1, i32_val(0)),
-             extract_element(i16_ty, bf16x2Vec1, i32_val(1))
-           };
+    return {extract_element(i16_ty, bf16x2Vec0, i32_val(0)),
+            extract_element(i16_ty, bf16x2Vec0, i32_val(1)),
+            extract_element(i16_ty, bf16x2Vec1, i32_val(0)),
+            extract_element(i16_ty, bf16x2Vec1, i32_val(1))};
 
 #else
     auto fp8x4VecTy = vec_ty(i8_ty, 4);
@@ -258,18 +255,17 @@ struct FpToFpOpConversion
     a1 = and_(i32_ty, a1, i32_val(0x7fff7fff));
     a0 = add(i32_ty, a0, i32_val(0x00800080));
     a1 = add(i32_ty, a1, i32_val(0x00800080));
-    Value b0 = or_( i32_ty, and_(i32_ty, fp16x2Vec0, i32_val(0x80008000)), a0 );
-    Value b1 = or_( i32_ty, and_(i32_ty, fp16x2Vec1, i32_val(0x80008000)), a1 );
+    Value b0 = or_(i32_ty, and_(i32_ty, fp16x2Vec0, i32_val(0x80008000)), a0);
+    Value b1 = or_(i32_ty, and_(i32_ty, fp16x2Vec1, i32_val(0x80008000)), a1);
 
     auto fp8x4VecTy = vec_ty(i8_ty, 4);
-    b0 = bitcast(b0, fp8x4VecTy); 
-    b1 = bitcast(b1, fp8x4VecTy); 
+    b0 = bitcast(b0, fp8x4VecTy);
+    b1 = bitcast(b1, fp8x4VecTy);
 
     return {extract_element(i8_ty, b0, i32_val(1)),
             extract_element(i8_ty, b0, i32_val(3)),
             extract_element(i8_ty, b1, i32_val(1)),
-            extract_element(i8_ty, b1, i32_val(3))
-            };
+            extract_element(i8_ty, b1, i32_val(3))};
 #else
     PTXBuilder builder;
     auto &ptxOp = *builder.create(ptxAsm);
@@ -368,10 +364,18 @@ struct FpToFpOpConversion
     Value sign = undef(fp8x4VecTy);
     sign0 = bitcast(sign0, fp8x4VecTy);
     sign1 = bitcast(sign1, fp8x4VecTy);
-    sign = insert_element( fp8x4VecTy, sign, extract_element(i8_ty, sign0, i32_val(1)), i32_val(0) );
-    sign = insert_element( fp8x4VecTy, sign, extract_element(i8_ty, sign0, i32_val(3)), i32_val(1) );
-    sign = insert_element( fp8x4VecTy, sign, extract_element(i8_ty, sign1, i32_val(1)), i32_val(2) );
-    sign = insert_element( fp8x4VecTy, sign, extract_element(i8_ty, sign1, i32_val(3)), i32_val(3) );
+    sign =
+        insert_element(fp8x4VecTy, sign,
+                       extract_element(i8_ty, sign0, i32_val(1)), i32_val(0));
+    sign =
+        insert_element(fp8x4VecTy, sign,
+                       extract_element(i8_ty, sign0, i32_val(3)), i32_val(1));
+    sign =
+        insert_element(fp8x4VecTy, sign,
+                       extract_element(i8_ty, sign1, i32_val(1)), i32_val(2));
+    sign =
+        insert_element(fp8x4VecTy, sign,
+                       extract_element(i8_ty, sign1, i32_val(3)), i32_val(3));
     sign = bitcast(sign, i32_ty);
 
     Value nosign0 = and_(i32_ty, bf16x2Vec0, i32_val(0x7fff7fff));
@@ -403,10 +407,18 @@ struct FpToFpOpConversion
     nosign0 = bitcast(nosign0, fp8x4VecTy);
     nosign1 = bitcast(nosign1, fp8x4VecTy);
     Value nosign = undef(fp8x4VecTy);
-    nosign = insert_element( fp8x4VecTy, nosign, extract_element(i8_ty, nosign0, i32_val(0)), i32_val(0) );
-    nosign = insert_element( fp8x4VecTy, nosign, extract_element(i8_ty, nosign0, i32_val(2)), i32_val(1) );
-    nosign = insert_element( fp8x4VecTy, nosign, extract_element(i8_ty, nosign1, i32_val(0)), i32_val(2) );
-    nosign = insert_element( fp8x4VecTy, nosign, extract_element(i8_ty, nosign1, i32_val(2)), i32_val(3) );
+    nosign =
+        insert_element(fp8x4VecTy, nosign,
+                       extract_element(i8_ty, nosign0, i32_val(0)), i32_val(0));
+    nosign =
+        insert_element(fp8x4VecTy, nosign,
+                       extract_element(i8_ty, nosign0, i32_val(2)), i32_val(1));
+    nosign =
+        insert_element(fp8x4VecTy, nosign,
+                       extract_element(i8_ty, nosign1, i32_val(0)), i32_val(2));
+    nosign =
+        insert_element(fp8x4VecTy, nosign,
+                       extract_element(i8_ty, nosign1, i32_val(2)), i32_val(3));
     nosign = bitcast(nosign, i32_ty);
 
     Value fp8x4Vec = or_(i32_ty, nosign, sign);
@@ -541,7 +553,7 @@ struct FpToFpOpConversion
     auto as_int16 = bitcast(v, i16_ty);
     auto as_int32 = zext(i32_ty, as_int16);
     auto shifted = shl(i32_ty, as_int32, i32_val(16));
-    return(bitcast(shifted, f32_ty));
+    return (bitcast(shifted, f32_ty));
 #else
     PTXBuilder builder;
     auto &cvt = *builder.create("cvt.f32.bf16");
@@ -570,7 +582,7 @@ struct FpToFpOpConversion
     auto as_int32 = bitcast(v, i32_ty);
     auto shifted = lshr(i32_ty, as_int32, i32_val(16));
     auto truncated = trunc(i16_ty, shifted);
-    return(bitcast(truncated, i16_ty));
+    return (bitcast(truncated, i16_ty));
 #else
     PTXBuilder builder;
     auto &cvt = *builder.create("cvt.rn.bf16.f32");
@@ -907,8 +919,7 @@ struct FDivOpConversion
                      ConversionPatternRewriter &rewriter, Type elemTy,
                      ValueRange operands, Location loc) const {
 #ifdef USE_ROCM
-    return rewriter.create<LLVM::FDivOp>(loc, elemTy, operands[0],
-                                         operands[1]);
+    return rewriter.create<LLVM::FDivOp>(loc, elemTy, operands[0], operands[1]);
 #else
     PTXBuilder ptxBuilder;
     auto &fdiv = *ptxBuilder.create<PTXInstr>("div");

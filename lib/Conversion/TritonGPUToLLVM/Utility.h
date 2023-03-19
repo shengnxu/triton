@@ -5,8 +5,8 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Analysis/Utility.h"
 #include "triton/Conversion/MLIRTypes.h"
-#include "triton/Conversion/TritonGPUToLLVM/PTXAsmFormat.h"
 #include "triton/Conversion/TritonGPUToLLVM/GCNAsmFormat.h"
+#include "triton/Conversion/TritonGPUToLLVM/PTXAsmFormat.h"
 
 // Shortcuts for some commonly used LLVM ops to keep code simple and intuitive
 // Operators

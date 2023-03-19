@@ -127,35 +127,41 @@ struct LoadOpConversion
       Value pred = mask ? maskElems[vecStart] : int_val(1, 1);
       for (size_t wordIdx = 0; wordIdx < nWords; ++wordIdx) {
         size_t elemOffset = vecStart + wordIdx * wordNElems;
-        Value ptr = addrspacecast(ptrElems[elemOffset], ptr_ty(IntegerType::get(getContext(), width)));
-        auto loaded = rewriter.create<scf::IfOp>(loc, pred,
-                                   [&](OpBuilder &builder, Location loc){
-                                     auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
-                                     builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
-                                   },
-                                   [&](OpBuilder &builder, Location loc){
-                                     Value zeroVal = bitcast(int_val(valueElemNbits, 0), IntegerType::get(getContext(), width));
-                                     Value otherVal;
-                                     if (other) {
-                                       auto vecTy = LLVM::getFixedVectorType(valueElemTy, wordNElems);
-                                       Value v = undef(vecTy);
-                                       for (size_t s = 0; s < wordNElems; ++s) {
-                                         Value falseVal = otherElems[elemOffset + s];
-                                         Value sVal = createIndexAttrConstant(
-                                             rewriter, loc, this->getTypeConverter()->getIndexType(), s);
-                                         v = insert_element(vecTy, v, falseVal, sVal);
-                                       }
-                                       otherVal = bitcast(v, IntegerType::get(getContext(), width));
-                                     }
-                                     Value falseVal = other ? otherVal : zeroVal;
-                                     builder.create<mlir::scf::YieldOp>(loc, ValueRange({falseVal}));
-                                   }
-                                  );
-        Value loadVal = bitcast(loaded->getResult(0), LLVM::getFixedVectorType(valueElemTy,
-                                                                               wordNElems));
+        Value ptr =
+            addrspacecast(ptrElems[elemOffset],
+                          ptr_ty(IntegerType::get(getContext(), width)));
+        auto loaded = rewriter.create<scf::IfOp>(
+            loc, pred,
+            [&](OpBuilder &builder, Location loc) {
+              auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
+              builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
+            },
+            [&](OpBuilder &builder, Location loc) {
+              Value zeroVal = bitcast(int_val(valueElemNbits, 0),
+                                      IntegerType::get(getContext(), width));
+              Value otherVal;
+              if (other) {
+                auto vecTy = LLVM::getFixedVectorType(valueElemTy, wordNElems);
+                Value v = undef(vecTy);
+                for (size_t s = 0; s < wordNElems; ++s) {
+                  Value falseVal = otherElems[elemOffset + s];
+                  Value sVal = createIndexAttrConstant(
+                      rewriter, loc, this->getTypeConverter()->getIndexType(),
+                      s);
+                  v = insert_element(vecTy, v, falseVal, sVal);
+                }
+                otherVal = bitcast(v, IntegerType::get(getContext(), width));
+              }
+              Value falseVal = other ? otherVal : zeroVal;
+              builder.create<mlir::scf::YieldOp>(loc, ValueRange({falseVal}));
+            });
+        Value loadVal =
+            bitcast(loaded->getResult(0),
+                    LLVM::getFixedVectorType(valueElemTy, wordNElems));
         for (size_t ii = 0; ii < wordNElems; ++ii) {
           Value vecIdx = createIndexAttrConstant(
-              rewriter, loc, this->getTypeConverter()->getIndexType(), ii % wordNElems);
+              rewriter, loc, this->getTypeConverter()->getIndexType(),
+              ii % wordNElems);
           Value loaded = extract_element(valueElemTy, loadVal, vecIdx);
           loadedVals.push_back(loaded);
         }
@@ -377,12 +383,14 @@ struct StoreOpConversion
         llWord = bitcast(llWord, valArgTy);
 #ifdef USE_ROCM
         Value maskVal = llMask ? and_(mask, maskElems[vecStart]) : mask;
-        rewriter.create<scf::IfOp>(loc, maskVal,
-                                     [&](OpBuilder &builder, Location loc){
-                                       auto storeOp = builder.create<LLVM::StoreOp>(loc, llWord, ptrElems[vecStart + wordIdx * wordNElems]);
-                                       builder.create<scf::YieldOp>(loc);
-                                     },
-                                     nullptr);
+        rewriter.create<scf::IfOp>(
+            loc, maskVal,
+            [&](OpBuilder &builder, Location loc) {
+              auto storeOp = builder.create<LLVM::StoreOp>(
+                  loc, llWord, ptrElems[vecStart + wordIdx * wordNElems]);
+              builder.create<scf::YieldOp>(loc);
+            },
+            nullptr);
 #else
         std::string constraint =
             (width == 64) ? "l" : ((width == 32) ? "r" : "c");
@@ -454,7 +462,7 @@ struct AtomicCASOpConversion
     auto TensorTy = op.getResult().getType().dyn_cast<RankedTensorType>();
     Type valueElemTy =
         TensorTy ? getTypeConverter()->convertType(TensorTy.getElementType())
-                : op.getResult().getType();
+                 : op.getResult().getType();
     auto tid = tid_val();
     Value pred = icmp_eq(tid, i32_val(0));
 
@@ -480,8 +488,8 @@ struct AtomicCASOpConversion
     auto successOrdering = LLVM::AtomicOrdering::acq_rel;
     auto failureOrdering = LLVM::AtomicOrdering::monotonic;
     auto cmpxchg = rewriter.create<LLVM::AtomicCmpXchgOp>(
-        loc, casPtr, casCmp, casVal, successOrdering,
-        failureOrdering, StringRef("agent"));
+        loc, casPtr, casCmp, casVal, successOrdering, failureOrdering,
+        StringRef("agent"));
     // Extract the new_loaded value from the pair.
     Value newLoaded = extract_val(valueElemTy, cmpxchg, 0);
 
@@ -501,7 +509,7 @@ struct AtomicCASOpConversion
     return success();
   }
 
-#else // USE_ROCM
+#else  // USE_ROCM
 
   LogicalResult
   matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
@@ -638,7 +646,7 @@ struct AtomicRMWOpConversion
     auto tensorTy = opResult.getType().dyn_cast<RankedTensorType>();
     Type valueElemTy =
         tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
-                : opResult.getType();
+                 : opResult.getType();
     const size_t valueElemNbits = valueElemTy.getIntOrFloatBitWidth();
     auto elemsPerThread = getElemsPerThread(val.getType());
     // vec = 1, numElements = 1 for scalar
@@ -1079,7 +1087,7 @@ struct InsertSliceAsyncOpConversion
           // remaining slots with 0 if cp-size > src-size.
           // XXX(Keren): Always assume other = 0 for now.
           auto selectOp = selectOp(maskElems[elemIdx + wordElemIdx],
-                                 i32_val(byteWidth), i32_val(0));
+                                   i32_val(byteWidth), i32_val(0));
           srcSize = ptxBuilder.newOperand(selectOp, "r");
         }
         copyAsyncOp(dstOperand, srcOperand, copySize, srcSize);

@@ -6,6 +6,7 @@ from torch.testing import assert_close
 import triton
 import triton.language as tl
 
+
 @pytest.mark.parametrize('num_warps, block_size, iter_size', [
     [4, 256, 1],
     [4, 1024, 256],
@@ -201,8 +202,8 @@ def kernel(X, Y, BLOCK: tl.constexpr):
     # triton result
     y = torch.zeros(shape, dtype=x.dtype, device="cuda")
     if torch.version.hip is not None:
-      kernel[(1,)](x, y, BLOCK=shape[0], extern_libs=None)
+        kernel[(1,)](x, y, BLOCK=shape[0], extern_libs=None)
     else:
-      kernel[(1,)](x, y, BLOCK=shape[0], extern_libs={"libdevice": lib_path})
+        kernel[(1,)](x, y, BLOCK=shape[0], extern_libs={"libdevice": lib_path})
     # compare
     assert_close(y, y_ref)

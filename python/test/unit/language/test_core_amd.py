@@ -874,8 +874,8 @@ def test_load_store_same_ptr():
         assert torch.all(x == 2)
 
 
-@pytest.mark.parametrize("in_dtype", [tl.float8e4]) # TODO: support tl.float8e5
-@pytest.mark.parametrize("out_dtype", [torch.float16]) # TODO: support torch.float32
+@pytest.mark.parametrize("in_dtype", [tl.float8e4])  # TODO: support tl.float8e5
+@pytest.mark.parametrize("out_dtype", [torch.float16])  # TODO: support torch.float32
 def test_f8_xf16_roundtrip(in_dtype, out_dtype):
     """Tests that converting an f8 to f16 and back to f8 doesn't change its value"""
     check_type_supported(out_dtype)
@@ -1983,6 +1983,7 @@ class BlockedLayout:
     def __str__(self):
         return f"#triton_gpu.blocked<{{sizePerThread={self.sz_per_thread}, threadsPerWarp={self.threads_per_warp}, warpsPerCTA={self.warps_per_cta}, order={self.order}}}>"
 
+
 if torch.version.hip is not None:
     layouts = [
         # MmaLayout(version=1, warps_per_cta=[1, 4]),
@@ -2011,6 +2012,7 @@ else:
         BlockedLayout([1, 1], [32, 1], [2, 2], [0, 1]),
         BlockedLayout([4, 4], [1, 32], [4, 1], [1, 0])
     ]
+
 
 @pytest.mark.parametrize("shape", [(128, 128)])
 @pytest.mark.parametrize("dtype", ['float16'])

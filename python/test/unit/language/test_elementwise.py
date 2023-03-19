@@ -33,9 +33,10 @@ torch_ops = {
 }
 
 if torch.version.hip is not None:
-  e_libs = None
+    e_libs = None
 else:
-  e_libs = {"libdevice": '/usr/local/cuda/nvvm/libdevice/libdevice.10.bc'}
+    e_libs = {"libdevice": '/usr/local/cuda/nvvm/libdevice/libdevice.10.bc'}
+
 
 def get_tensor(shape, data_type, b_positive=False):
     x = None

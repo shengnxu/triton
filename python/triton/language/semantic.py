@@ -511,7 +511,6 @@ def full(shape: List[int], value, dtype: tl.dtype, builder: ir.builder) -> tl.te
         return tl.tensor(builder.create_splat(value, shape), ret_ty)
 
 
-
 def ones(shape: List[int], dtype: tl.dtype, builder: ir.builder) -> tl.tensor:
     _1 = builder.get_one_value(dtype.to_ir(builder))
     ret_ty = tl.block_type(dtype, shape)

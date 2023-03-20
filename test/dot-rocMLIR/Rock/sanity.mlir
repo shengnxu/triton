@@ -9,9 +9,9 @@
 // RUN: triton-opt -rock-blockwise-gemm-to-threadwise -rock-threadwise-gemm-lowering -rock-sugar-to-loops -rock-clean-math -rock-buffer-load-merge -rock-loops-to-cf %s
 
 
-#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 2], warpsPerCTA = [1, 8], order = [0, 1]}>
-#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 32], warpsPerCTA = [8, 1], order = [1, 0]}>
-#blocked2 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [8, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [2, 32], warpsPerCTA = [8, 1], order = [1, 0]}>
+#blocked2 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [8, 8], warpsPerCTA = [1, 8], order = [0, 1]}>
 #lds = #triton_gpu.lds<{kpack = 4, order = [1, 0]}>
 #lds1 = #triton_gpu.lds<{kpack = 4, order = [0, 1]}>
 #xdlops_gemm_params = #rock.xdlops_gemm_params<kPerBlock = 16, mPerBlock = 128, nPerBlock = 256, kpack = 4, mPerWave = 64, nPerWave = 64, forceUnroll = true>
@@ -53,31 +53,32 @@ module attributes {"triton_gpu.num-warps" = 8 : i32} {
     %32 = tt.addptr %30, %31 : tensor<128x256x!tt.ptr<f16>, #blocked1>, tensor<128x256xi32, #blocked1>
     %33 = tt.load %12 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<128x64xf16, #blocked>
     %34 = tt.load %25 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<64x256xf16, #blocked2>
-    %35 = triton_gpu.convert_layout %33 : (tensor<128x64xf16, #blocked>) -> tensor<128x64xf16, #lds>
-    %36 = triton_gpu.convert_layout %34 : (tensor<64x256xf16, #blocked2>) -> tensor<64x256xf16, #lds1>
-    %37 = triton_gpu.tensor_to_memref %35 : tensor<128x64xf16, #lds> -> memref<8192xf16, #gpu.address_space<workgroup>>
-    %38 = triton_gpu.tensor_to_memref %36 : tensor<64x256xf16, #lds1> -> memref<16384xf16, #gpu.address_space<workgroup>>
+    %35 = arith.extf %33 : tensor<128x64xf16, #blocked> to tensor<128x64xf32, #blocked>
+    %36 = arith.extf %34 : tensor<64x256xf16, #blocked2> to tensor<64x256xf32, #blocked2>
+    %37 = triton_gpu.convert_layout %35 : (tensor<128x64xf32, #blocked>) -> tensor<128x64xf32, #lds>
+    %38 = triton_gpu.convert_layout %36 : (tensor<64x256xf32, #blocked2>) -> tensor<64x256xf32, #lds1>
+    %39 = triton_gpu.tensor_to_memref %37 : tensor<128x64xf32, #lds> -> memref<8192xf32, #gpu.address_space<workgroup>>
+    %40 = triton_gpu.tensor_to_memref %38 : tensor<64x256xf32, #lds1> -> memref<16384xf32, #gpu.address_space<workgroup>>
     %c64 = arith.constant 64 : index
     %c64_0 = arith.constant 64 : index
     %c64_1 = arith.constant 64 : index
     %c4 = arith.constant 4 : index
-    %39 = rock.workgroup_id : index
-    %40 = rock.workitem_id : index
-    %41 = arith.divui %40, %c64 : index
-    %42 = arith.divui %41, %c4 : index
-    %43 = arith.remui %41, %c4 : index
-    %44 = arith.muli %42, %c64_0 : index
-    %45 = arith.muli %43, %c64_1 : index
-    %46 = rock.alloc() : memref<16xvector<4xf16>, #gpu.address_space<private>>
-    %47 = rock.alloc() : memref<16xvector<4xf16>, #gpu.address_space<private>>
-    %48 = rock.alloc() : memref<4xvector<16xf32>, #gpu.address_space<private>>
+    %41 = rock.workitem_id : index
+    %42 = arith.divui %41, %c64 : index
+    %43 = arith.divui %42, %c4 : index
+    %44 = arith.remui %42, %c4 : index
+    %45 = arith.muli %43, %c64_0 : index
+    %46 = arith.muli %44, %c64_1 : index
+    %47 = rock.alloc() : memref<16xvector<4xf32>, #gpu.address_space<private>>
+    %48 = rock.alloc() : memref<16xvector<4xf32>, #gpu.address_space<private>>
+    %49 = rock.alloc() : memref<4xvector<16xf32>, #gpu.address_space<private>>
     %cst_2 = arith.constant dense<0.000000e+00> : vector<16xf32>
-    rock.fill(%48, %cst_2) : memref<4xvector<16xf32>, #gpu.address_space<private>>, vector<16xf32>
-    rock.blockwise_gemm_v2 %48 += %46 from %37[%44] * %47 from %38[%45] {blockSize = 512 : i32, ldsBufferOffsetA = 0 : index, ldsBufferOffsetB = 0 : index, params = #xdlops_gemm_params} : memref<4xvector<16xf32>, #gpu.address_space<private>> += memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<8192xf16, #gpu.address_space<workgroup>> * memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<16384xf16, #gpu.address_space<workgroup>>
-    %49 = triton_gpu.memref_to_tensor %48 : memref<4xvector<16xf32>, #gpu.address_space<private>> -> tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>
-    %50 = triton_gpu.convert_layout %49 : (tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>) -> tensor<128x256xf32, #blocked1>
-    %51 = arith.truncf %50 : tensor<128x256xf32, #blocked1> to tensor<128x256xf16, #blocked1>
-    tt.store %32, %51 {cache = 1 : i32, evict = 1 : i32} : tensor<128x256xf16, #blocked1>
+    rock.fill(%49, %cst_2) : memref<4xvector<16xf32>, #gpu.address_space<private>>, vector<16xf32>
+    rock.blockwise_gemm_v2 %49 += %47 from %39[%45] * %48 from %40[%46] {blockSize = 512 : i32, ldsBufferOffsetA = 0 : index, ldsBufferOffsetB = 0 : index, params = #xdlops_gemm_params} : memref<4xvector<16xf32>, #gpu.address_space<private>> += memref<16xvector<4xf32>, #gpu.address_space<private>> from memref<8192xf32, #gpu.address_space<workgroup>> * memref<16xvector<4xf32>, #gpu.address_space<private>> from memref<16384xf32, #gpu.address_space<workgroup>>
+    %50 = triton_gpu.memref_to_tensor %49 : memref<4xvector<16xf32>, #gpu.address_space<private>> -> tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>
+    %51 = triton_gpu.convert_layout %50 : (tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>) -> tensor<128x256xf32, #blocked1>
+    %52 = arith.truncf %51 : tensor<128x256xf32, #blocked1> to tensor<128x256xf16, #blocked1>
+    tt.store %32, %52 {cache = 1 : i32, evict = 1 : i32} : tensor<128x256xf16, #blocked1>
     return
   }
 }

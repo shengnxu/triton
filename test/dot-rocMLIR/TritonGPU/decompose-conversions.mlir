@@ -1,7 +1,7 @@
 // RUN: triton-opt %s -split-input-file --tritongpu-decompose-conversions 2>&1 | FileCheck %s
 
-#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 2], warpsPerCTA = [1, 8], order = [0, 1]}>
-#blocked1 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [8, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [32, 2], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
 // CHECK: #lds{{.*}} = #triton_gpu.lds{{.*}}
 // CHECK: #lds{{.*}} = #triton_gpu.lds{{.*}}
 module attributes {"triton_gpu.num-warps" = 8 : i32} {

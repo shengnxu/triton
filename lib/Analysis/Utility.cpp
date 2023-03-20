@@ -103,6 +103,15 @@ bool isSharedEncoding(Value value) {
   return false;
 }
 
+bool isLDSEncoding(Value value) {
+  auto type = value.getType();
+  if (auto tensorType = type.dyn_cast<RankedTensorType>()) {
+    auto encoding = tensorType.getEncoding();
+    return encoding && encoding.isa<triton::gpu::LDSEncodingAttr>();
+  }
+  return false;
+}
+
 bool isMfmaEncoding(Value value) {
   auto type = value.getType();
   if (auto tensorType = type.dyn_cast<RankedTensorType>()) {

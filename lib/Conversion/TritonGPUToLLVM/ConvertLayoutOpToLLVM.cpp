@@ -14,6 +14,7 @@ using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getSizePerThread;
 using ::mlir::triton::gpu::isaDistributedLayout;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 struct ConvertLayoutOpConversion
@@ -34,6 +35,9 @@ public:
     if (isaDistributedLayout(srcLayout) &&
         dstLayout.isa<SharedEncodingAttr>()) {
       return lowerDistributedToShared(op, adaptor, rewriter);
+    }
+    if (isaDistributedLayout(srcLayout) && dstLayout.isa<LDSEncodingAttr>()) {
+      return lowerDistributedToLds(op, adaptor, rewriter);
     }
     if (srcLayout.isa<SharedEncodingAttr>() &&
         dstLayout.isa<DotOperandEncodingAttr>()) {
@@ -484,6 +488,41 @@ private:
     auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTy);
     storeDistributedToShared(src, adaptor.getSrc(), dstStrides, srcIndices, dst,
                              smemBase, elemTy, loc, rewriter);
+    auto smemObj =
+        SharedMemoryObject(smemBase, dstShape, outOrd, loc, rewriter);
+    auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
+    rewriter.replaceOp(op, retVal);
+    return success();
+  }
+
+  // blocked -> LDS
+  // Special requirements for data layouts in LDS from blockwise_gemm_v2
+  LogicalResult
+  lowerDistributedToLds(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
+                        ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    Value src = op.getSrc();
+    Value dst = op.getResult();
+    auto srcTy = src.getType().cast<RankedTensorType>();
+    auto srcShape = srcTy.getShape();
+    auto dstTy = dst.getType().cast<RankedTensorType>();
+    auto dstShape = dstTy.getShape();
+    assert(srcShape.size() == 2 &&
+           "Unexpected rank of ConvertLayout(blocked->lds)");
+    auto srcLayout = srcTy.getEncoding();
+    auto dstLDSLayout = dstTy.getEncoding().cast<LDSEncodingAttr>();
+    auto inOrd = getOrder(srcLayout);
+    auto outOrd = dstLDSLayout.getOrder();
+    Value smemBase = getSharedMemoryBase(loc, rewriter, dst);
+    auto elemTy = getTypeConverter()->convertType(srcTy.getElementType());
+    auto elemPtrTy = ptr_ty(getTypeConverter()->convertType(elemTy), 3);
+    smemBase = bitcast(smemBase, elemPtrTy);
+
+    auto dstStrides =
+        getStridesFromShapeAndOrder(dstShape, outOrd, loc, rewriter);
+    auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTy);
+    storeDistributedToLds(src, adaptor.getSrc(), dstStrides, srcIndices, dst,
+                          smemBase, elemTy, loc, rewriter);
     auto smemObj =
         SharedMemoryObject(smemBase, dstShape, outOrd, loc, rewriter);
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);

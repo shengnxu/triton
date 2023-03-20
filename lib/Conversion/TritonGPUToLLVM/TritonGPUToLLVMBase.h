@@ -349,6 +349,75 @@ public:
     return ret;
   }
 
+  DenseMap<unsigned, Value>
+  getLDSPtrs(Location loc, unsigned inVec, RankedTensorType srcTy,
+             triton::gpu::LDSEncodingAttr resLDSLayout, Type resElemTy,
+             SharedMemoryObject smemObj, ConversionPatternRewriter &rewriter,
+             SmallVectorImpl<Value> &offsetVals,
+             SmallVectorImpl<Value> &srcStrides) const {
+    // This utililty computes the pointers for accessing the provided swizzled
+    // LDS memory layout `resLDSLayout`. More specifically, it computes,
+    // for all indices (row, col) of `srcEncoding` such that idx % inVec = 0,
+    // the pointer: ptr[(row, col)] = base + offset
+    // where :
+    //   offset = superColId * kpack x nonKDim + rowInSuperCol * kpack + idInRow
+    //     superColId = newCol // kpack
+    //     rowInSuperCol = newRow
+    //     idInRow = newCol % kpack
+    //     When srcTy.order == resLDSLayout.order, [newRow, newCol] = [row, col]
+    //     Else, [newRow, newCol] = [col, row]
+    //
+    // Note 1:
+    // -------
+    // In LDS, both tile A and tile B are store as a kpacksPerBlock x m|n x
+    // kpack, where kpacksPerBlock x kpack = k. The data layout is similar to a
+    // column major layout, except each column is a super-column of [m|n] x
+    // kpack. For each super-column, the data layout is row major.
+    //
+    // Note 2:
+    // -------
+    // When the order of src and dst do not match, we need to "transpose"
+    // the tile before storing it into the LDS.
+    auto dstPtrTy = ptr_ty(resElemTy, 3);
+    auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
+    Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);
+
+    auto srcEncoding = srcTy.getEncoding();
+    auto srcShape = srcTy.getShape();
+    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    unsigned kpack = resLDSLayout.getKpack();
+    // order
+    auto inOrder = triton::gpu::getOrder(srcEncoding);
+    auto outOrder = triton::gpu::getOrder(resLDSLayout);
+    // get nonKDim
+    unsigned nonKDim = srcShape[outOrder[1]];
+    // tensor indices held by the current thread, as LLVM values
+    auto srcIndices = emitIndices(loc, rewriter, srcEncoding, srcTy);
+    // return values
+    DenseMap<unsigned, Value> ret;
+    unsigned minVec = std::min(kpack, inVec);
+    for (unsigned elemIdx = 0; elemIdx < numElems; elemIdx += minVec) {
+      // extract multi dimensional index for current element
+      auto idx = srcIndices[elemIdx];
+      Value idxCol = idx[outOrder[0]]; // contiguous dimension
+      Value idxRow = idx[outOrder[1]]; // discontiguous dimension
+      // "transpose" if orders do not match
+      if (inOrder != outOrder) {
+        idxCol = idx[outOrder[1]];
+        idxRow = idx[outOrder[0]];
+      }
+      Value superColId = udiv(idxCol, i32_val(kpack));
+      Value rowInSuperCol = idxRow;
+      Value idInRow = urem(idxCol, i32_val(kpack));
+      Value superColOff =
+          mul(superColId, mul(i32_val(kpack), i32_val(nonKDim)));
+      Value offInSuperCol = add(mul(rowInSuperCol, i32_val(kpack)), idInRow);
+      Value offset = add(superColOff, offInSuperCol);
+      ret[elemIdx] = gep(dstPtrTy, dstPtrBase, offset);
+    }
+    return ret;
+  }
+
   void storeDistributedToShared(Value src, Value llSrc,
                                 ArrayRef<Value> dstStrides,
                                 ArrayRef<SmallVector<Value>> srcIndices,
@@ -395,6 +464,57 @@ public:
     DenseMap<unsigned, Value> sharedPtrs =
         getSwizzledSharedPtrs(loc, inVec, srcTy, dstSharedLayout, dstElemTy,
                               smemObj, rewriter, offsetVals, srcStrides);
+
+    for (unsigned i = 0; i < numElems; ++i) {
+      if (i % minVec == 0)
+        word = undef(wordTy);
+      word = insert_element(wordTy, word, inVals[i], i32_val(i % minVec));
+      if (i % minVec == minVec - 1) {
+        Value smemAddr = sharedPtrs[i / minVec * minVec];
+        smemAddr = bitcast(smemAddr, ptr_ty(wordTy, 3));
+        store(word, smemAddr);
+      }
+    }
+  }
+
+  void storeDistributedToLds(Value src, Value llSrc, ArrayRef<Value> dstStrides,
+                             ArrayRef<SmallVector<Value>> srcIndices, Value dst,
+                             Value smemBase, Type elemTy, Location loc,
+                             ConversionPatternRewriter &rewriter) const {
+    auto srcTy = src.getType().cast<RankedTensorType>();
+    auto srcShape = srcTy.getShape();
+    assert(srcShape.size() == 2 && "Unexpected rank of storeDistributedToLds");
+    auto dstTy = dst.getType().cast<RankedTensorType>();
+    auto srcDistributedLayout = srcTy.getEncoding();
+    if (auto mmaLayout = srcDistributedLayout.dyn_cast<MmaEncodingAttr>()) {
+      assert((!mmaLayout.isVolta()) &&
+             "ConvertLayout MMAv1->Shared is not suppported yet");
+    }
+    auto dstLDSLayout =
+        dstTy.getEncoding().cast<triton::gpu::LDSEncodingAttr>();
+    auto dstElemTy = dstTy.getElementType();
+    auto inOrd = triton::gpu::getOrder(srcDistributedLayout);
+    auto outOrd = dstLDSLayout.getOrder();
+    unsigned inVec =
+        inOrd == outOrd
+            ? triton::gpu::getContigPerThread(srcDistributedLayout)[inOrd[0]]
+            : 1;
+    unsigned outVec = dstLDSLayout.getKpack();
+    unsigned minVec = std::min(outVec, inVec);
+    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    assert(numElems == srcIndices.size());
+    auto inVals =
+        getTypeConverter()->unpackLLElements(loc, llSrc, rewriter, srcTy);
+    auto wordTy = vec_ty(elemTy, minVec);
+    Value word;
+
+    SmallVector<Value> srcStrides = {dstStrides[0], dstStrides[1]};
+    SmallVector<Value> offsetVals = {i32_val(0), i32_val(0)};
+    SharedMemoryObject smemObj(smemBase, srcStrides, offsetVals);
+
+    DenseMap<unsigned, Value> sharedPtrs =
+        getLDSPtrs(loc, inVec, srcTy, dstLDSLayout, dstElemTy, smemObj,
+                   rewriter, offsetVals, srcStrides);
 
     for (unsigned i = 0; i < numElems; ++i) {
       if (i % minVec == 0)

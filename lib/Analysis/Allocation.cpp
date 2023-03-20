@@ -18,9 +18,9 @@ using ::mlir::triton::gpu::getContigPerThread;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getSizePerThread;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::MmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
-using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 
 namespace mlir {

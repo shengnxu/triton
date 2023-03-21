@@ -54,6 +54,8 @@ unsigned getElemsPerThread(Attribute layout, ArrayRef<int64_t> shape,
     return sliceLayout.getElemsPerThread(shape, eltTy);
   } else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return mmaLayout.getElemsPerThread(shape, eltTy);
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return mfmaLayout.getElemsPerThread(shape, eltTy);
   } else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>()) {
     return sharedLayout.getElemsPerThread(shape, eltTy);
   } else if (auto ldsLayout = layout.dyn_cast<LDSEncodingAttr>()) {
@@ -98,6 +100,10 @@ SmallVector<unsigned> getWarpsPerCTA(const Attribute &layout) {
     return SmallVector<unsigned>(mmaLayout.getWarpsPerCTA().begin(),
                                  mmaLayout.getWarpsPerCTA().end());
   }
+  if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return SmallVector<unsigned>(mfmaLayout.getWarpsPerCTA().begin(),
+                                 mfmaLayout.getWarpsPerCTA().end());
+  }
   assert(0 && "getWarpsPerCTA not implemented");
   return {};
 }
@@ -119,6 +125,8 @@ SmallVector<unsigned> getSizePerThread(const Attribute &layout) {
     } else {
       llvm_unreachable("Unexpected mma version");
     }
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return {1, 4};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     assert(parentLayout && "DotOperandEncodingAttr must have a parent");
@@ -150,6 +158,8 @@ SmallVector<unsigned> getContigPerThread(const Attribute &layout) {
   if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     assert(mmaLayout.isVolta() || mmaLayout.isAmpere());
     return {1, 2};
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return {1, 4};
   } else {
     return getSizePerThread(layout);
   }
@@ -168,7 +178,7 @@ SmallVector<unsigned> getThreadsPerCTA(const Attribute &layout) {
     } else
       assert(0 && "Unimplemented usage of MmaEncodingAttr");
   } else {
-    assert(0 && "Unimplemented usage of getShapePerCTA");
+    assert(0 && "Unimplemented usage of getThreadsPerCTA");
   }
 
   return threads;
@@ -203,6 +213,9 @@ SmallVector<unsigned> getShapePerCTA(const Attribute &layout,
               static_cast<unsigned>(tensorShape[1])};
     }
     assert(0 && "Unexpected MMA layout version found");
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return {static_cast<unsigned>(tensorShape[0]),
+            static_cast<unsigned>(tensorShape[1])};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     assert(parentLayout && "DotOperandEncodingAttr must have a parent");
@@ -234,6 +247,8 @@ SmallVector<unsigned> getOrder(const Attribute &layout) {
                                  blockedLayout.getOrder().end());
   } else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return {1, 0};
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return {1, 0};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return {1, 0};
   } else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
@@ -263,7 +278,7 @@ SmallVector<unsigned> getOrder(const Attribute &layout) {
 
 bool isaDistributedLayout(const Attribute &layout) {
   return layout.isa<BlockedEncodingAttr>() || layout.isa<MmaEncodingAttr>() ||
-         layout.isa<SliceEncodingAttr>();
+         layout.isa<SliceEncodingAttr>() || layout.isa<MfmaEncodingAttr>();
 }
 
 } // namespace gpu
@@ -408,6 +423,20 @@ unsigned MmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape,
   }
 
   return res;
+}
+
+unsigned MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape,
+                                             Type eltTy) const {
+  size_t rank = shape.size();
+  assert(rank == 2 && "Unexpected rank of mfma layout");
+
+  unsigned warpSize = 64;
+  unsigned elemsInTensor = static_cast<unsigned>(product<int64_t>(shape));
+  unsigned threadsInCTA = product<unsigned>(getWarpsPerCTA()) * warpSize;
+  if (elemsInTensor % threadsInCTA != 0) {
+      llvm_unreachable("Unexpected tensor shape");
+  }
+  return elemsInTensor / threadsInCTA;
 }
 
 unsigned SharedEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape,

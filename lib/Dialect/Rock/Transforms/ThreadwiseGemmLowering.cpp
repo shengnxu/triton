@@ -332,7 +332,7 @@ struct XdlopsGemmV2RewritePattern : public OpConversionPattern<XdlopsGemmV2Op> {
 
         auto outerLoop = b.create<AffineForOp>(loc, 0, outerLoopUpperBound);
         auto outerLoopb = ConversionPatternRewriter::atBlockBegin(
-            outerLoop.getBody(), b.getListener());
+            outerLoop.getBody());
         auto outerLoopiv = outerLoop.getInductionVar();
 
         auto loadSingleKPack = [&](Value regOffset, Type elementType,

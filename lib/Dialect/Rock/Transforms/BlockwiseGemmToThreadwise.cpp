@@ -470,8 +470,7 @@ struct BlockwiseGemmV2RewritePattern
     //   for(index_t k_i = 0; k_i < KPerThread; ++k_i)
     //       ldsToRegisterCopy[m_i, k_i]
     auto outerLoopM = b.create<AffineForOp>(loc, 0, mRepeats);
-    auto olmb = ConversionPatternRewriter::atBlockBegin(outerLoopM.getBody(),
-                                                        b.getListener());
+    auto olmb = ConversionPatternRewriter::atBlockBegin(outerLoopM.getBody());
     auto innerLoopMK = olmb.create<AffineForOp>(loc, 0, KPerThread);
     auto ilmkb = ConversionPatternRewriter::atBlockBegin(innerLoopMK.getBody(),
                                                          olmb.getListener());
@@ -490,8 +489,7 @@ struct BlockwiseGemmV2RewritePattern
     //   for(index_t k_i = 0; k_i < KPerThread; ++k_i)
     //       ldsToRegisterCopy[n_i, k_i]
     auto outerLoopN = b.create<AffineForOp>(loc, 0, nRepeats);
-    auto olnb = ConversionPatternRewriter::atBlockBegin(outerLoopN.getBody(),
-                                                        b.getListener());
+    auto olnb = ConversionPatternRewriter::atBlockBegin(outerLoopN.getBody());
     auto innerLoopNK = olnb.create<AffineForOp>(loc, 0, KPerThread);
     auto ilnkb = ConversionPatternRewriter::atBlockBegin(innerLoopNK.getBody(),
                                                          olnb.getListener());

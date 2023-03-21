@@ -13,6 +13,8 @@ using ::mlir::LLVM::MMA16816ConversionHelper;
 using ::mlir::triton::gpu::BlockedEncodingAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getElemsPerThread;
+using ::mlir::triton::gpu::LDSEncodingAttr;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::MmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
@@ -90,13 +92,13 @@ TritonGPUToLLVMTypeConverter::convertTritonTensorType(RankedTensorType type) {
 
   if (layout &&
       (layout.isa<BlockedEncodingAttr>() || layout.isa<SliceEncodingAttr>() ||
-       layout.isa<MmaEncodingAttr>())) {
+       layout.isa<MmaEncodingAttr>() || layout.isa<MfmaEncodingAttr>())) {
     unsigned numElementsPerThread = getElemsPerThread(type);
     SmallVector<Type, 4> types(numElementsPerThread,
                                convertType(type.getElementType()));
     return LLVM::LLVMStructType::getLiteral(ctx, types);
-  } else if (auto shared_layout =
-                 layout.dyn_cast_or_null<SharedEncodingAttr>()) {
+  } else if (layout.isa<SharedEncodingAttr>() ||
+             layout.isa<LDSEncodingAttr>()) {
     SmallVector<Type, 4> types;
     // base ptr
     auto ptrType =

@@ -159,7 +159,7 @@ SmallVector<unsigned> getContigPerThread(const Attribute &layout) {
     assert(mmaLayout.isVolta() || mmaLayout.isAmpere());
     return {1, 2};
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {1, 4};
+    return {4, 1};
   } else {
     return getSizePerThread(layout);
   }

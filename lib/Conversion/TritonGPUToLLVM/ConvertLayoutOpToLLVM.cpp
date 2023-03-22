@@ -15,6 +15,7 @@ using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getSizePerThread;
 using ::mlir::triton::gpu::isaDistributedLayout;
 using ::mlir::triton::gpu::LDSEncodingAttr;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 struct ConvertLayoutOpConversion
@@ -75,6 +76,41 @@ private:
                                         multiDimElemId[d]));
       }
       return multiDimOffset;
+    }
+    if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+      // First locate the current wave in the CTA
+      auto multiDimOffsetFirstElem =
+          emitBaseIndexForLayout(loc, rewriter, mfmaLayout, type);
+      // Second loacate the xdlops within the warp
+      auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
+      auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+      unsigned nonKDim = mfmaLayout.getNonKDim();
+      auto order = getOrder(mfmaLayout);
+      unsigned warpSize = 64;
+      unsigned m = shape[order[1]];
+      unsigned n = shape[order[0]];
+      unsigned mPerWave = m / warpsPerCTA[order[1]];
+      unsigned nPerWave = n / warpsPerCTA[order[0]];
+      unsigned mPerXdlop = mPerWave / xdlopsPerWarp[order[1]];
+      unsigned nPerXdlop = nPerWave / xdlopsPerWarp[order[0]];
+      unsigned elemsPerXdlops = mPerXdlop * nPerXdlop / warpSize;
+      unsigned xdlopId = elemId / elemsPerXdlops;
+      SmallVector<unsigned> multiDimXdlopId =
+          getMultiDimIndex<unsigned>(xdlopId, xdlopsPerWarp, order);
+      // At last, locate the element within the xdlop
+      // Note that the indices of the unit [4,1] block within the 4 x 64 group
+      // is already included in multiDimOffsetFirstElem.
+      // Here we need to locate the 4 x 64 group in the xdlop and add
+      // the element offset within the [4,1] unit block.
+      unsigned elemIdInXdlop = elemId % elemsPerXdlops;
+      unsigned groupId = elemIdInXdlop / 4;
+      unsigned groupRowOff = warpSize / nonKDim * groupId;
+      unsigned elemIdInUnitBlock = elemIdInXdlop % 4;
+      unsigned rowOff = elemIdInUnitBlock + groupRowOff;
+
+      multiDimOffsetFirstElem[order[1]] =
+          add(multiDimOffsetFirstElem[order[1]], i32_val(rowOff));
+      return multiDimOffsetFirstElem;
     }
     if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
       unsigned dim = sliceLayout.getDim();
@@ -172,6 +208,16 @@ private:
     auto rank = type.getRank();
     auto sizePerThread = getSizePerThread(layout);
     auto accumSizePerThread = product<unsigned>(sizePerThread);
+    // For MfmaEncodingAttr, the CTA always covers the whole tensor.
+    // And sizePerThread is set to [4,1], which does not represent
+    // the total number of element each thread needs to handle.
+    // Therefore, we use getElemsPerThread to obtain the number of
+    // elements each thread handles within one CTA.
+    if (type.getEncoding().isa<MfmaEncodingAttr>()) {
+      auto mfmaLayout = type.getEncoding().dyn_cast<MfmaEncodingAttr>();
+      accumSizePerThread =
+          mfmaLayout.getElemsPerThread(type.getShape(), type.getElementType());
+    }
     SmallVector<unsigned> numCTAs(rank);
     auto shapePerCTA = getShapePerCTA(layout, type.getShape());
     auto order = getOrder(layout);
@@ -370,7 +416,7 @@ private:
     auto dstShapePerCTA = getShapePerCTA(dstLayout, shape);
 
     // For Volta, all the coords for a CTA are calculated.
-    bool isSrcMmaV1{}, isDstMmaV1{};
+    bool isSrcMmaV1{}, isDstMmaV1{}, isSrcMfma{};
     if (auto mmaLayout = srcLayout.dyn_cast<MmaEncodingAttr>()) {
       isSrcMmaV1 = mmaLayout.isVolta();
     }
@@ -384,6 +430,9 @@ private:
     if (auto sliceLayout = dstLayout.dyn_cast<SliceEncodingAttr>()) {
       isDstMmaV1 = sliceLayout.getParent().isa<MmaEncodingAttr>() &&
                    sliceLayout.getParent().cast<MmaEncodingAttr>().isVolta();
+    }
+    if (auto mfmaLayout = srcLayout.dyn_cast<MfmaEncodingAttr>()) {
+      isSrcMfma = true;
     }
 
     for (unsigned d = 0; d < rank; ++d) {
@@ -410,6 +459,9 @@ private:
     auto outOrd = getOrder(dstLayout);
     SmallVector<Value> outVals(outElems);
 
+    auto mfmaLayout = srcLayout.dyn_cast<MfmaEncodingAttr>();
+    auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+    auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
     for (unsigned repId = 0; repId < accumNumReplicates; ++repId) {
       auto multiDimRepId =
           getMultiDimIndex<unsigned>(repId, numReplicates, outOrd);
@@ -417,7 +469,8 @@ private:
         barrier();
       if (srcLayout.isa<BlockedEncodingAttr>() ||
           srcLayout.isa<SliceEncodingAttr>() ||
-          srcLayout.isa<MmaEncodingAttr>()) {
+          srcLayout.isa<MmaEncodingAttr>() ||
+          srcLayout.isa<MfmaEncodingAttr>()) {
         if (isSrcMmaV1)
           processReplicaForMMAV1(loc, rewriter, /*stNotRd*/ true, srcTy,
                                  multiDimRepId, inVec, paddedRepShape, outOrd,

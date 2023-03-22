@@ -20,6 +20,7 @@ using namespace mlir::triton;
 using ::mlir::LLVM::SharedMemoryObject;
 using ::mlir::triton::gpu::BlockedEncodingAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::MmaEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 
@@ -643,6 +644,8 @@ public:
           result = emitBaseIndexForMmaLayoutV1(loc, rewriter, mmaLayout, type);
         if (mmaLayout.isAmpere())
           result = emitBaseIndexForMmaLayoutV2(loc, rewriter, mmaLayout, type);
+      } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+        result = emitBaseIndexForMfmaLayout(loc, rewriter, mfmaLayout, type);
       } else {
         llvm_unreachable("unsupported emitBaseIndexForLayout");
       }
@@ -709,6 +712,52 @@ private:
           rewriter.getInsertionPoint()->getParentOfType<LLVM::LLVMFuncOp>();
       rewriter.setInsertionPointToStart(&func.getBody().front());
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Mfma layout indices
+  // -----------------------------------------------------------------------
+
+  // For an mfma layout, this functin gives the 2d coordinates of the top-left
+  // element in the current warp/wave
+  SmallVector<Value>
+  emitBaseIndexForMfmaLayout(Location loc, ConversionPatternRewriter &rewriter,
+                             const MfmaEncodingAttr &mfma_layout,
+                             RankedTensorType type) const {
+    auto shape = type.getShape();
+    Value threadId = getThreadId(rewriter, loc);
+    Value warpSize = i32_val(64);
+    Value warpId = udiv(threadId, warpSize);
+    auto warpsPerCTA = mfma_layout.getWarpsPerCTA();
+    unsigned nonKDim = mfma_layout.getNonKDim();
+    auto order = getOrder(mfma_layout);
+    unsigned rank = shape.size();
+
+    unsigned m = shape[order[1]];
+    unsigned n = shape[order[0]];
+    unsigned mPerWave = m / warpsPerCTA[order[1]];
+    unsigned nPerWave = n / warpsPerCTA[order[0]];
+    SmallVector<unsigned, 2> sizePerWarp{mPerWave, nPerWave};
+
+    // delinearize threadId to get the base index
+    SmallVector<Value> multiDimWarpId =
+        delinearize(rewriter, loc, warpId, warpsPerCTA, order);
+
+    SmallVector<Value> multiDimBase(rank);
+    for (unsigned k = 0; k < rank; ++k) {
+      multiDimBase[k] = mul(multiDimWarpId[k], i32_val(sizePerWarp[k]));
+    }
+
+    // figure out the offset of the unit [4,1] elements of the thread
+    // within the 4 x 64 group
+    Value laneId = urem(threadId, warpSize);
+    Value colOff = urem(laneId, i32_val(nonKDim));
+    multiDimBase[order[0]] = add(multiDimBase[order[0]], colOff);
+    Value rowOff = udiv(laneId, i32_val(nonKDim));
+    rowOff = mul(rowOff, i32_val(4));
+    multiDimBase[order[1]] = add(multiDimBase[order[1]], rowOff);
+
+    return multiDimBase;
   }
 
   // -----------------------------------------------------------------------

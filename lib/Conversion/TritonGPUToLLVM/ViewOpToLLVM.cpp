@@ -60,6 +60,9 @@ struct ArithConstantSplatOpConversion
     if (!value.dyn_cast<SplatElementsAttr>())
       return failure();
 
+    if (!op.getType().isa<RankedTensorType>())
+      return failure();
+
     auto loc = op->getLoc();
 
     LLVM::ConstantOp arithConstantOp;

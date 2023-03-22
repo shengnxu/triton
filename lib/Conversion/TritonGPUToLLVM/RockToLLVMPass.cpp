@@ -26,6 +26,7 @@
 #include "ElementwiseOpToLLVM.h"
 #include "LoadStoreOpToLLVM.h"
 #include "ReduceOpToLLVM.h"
+#include "TensorMemRefOpToLLVM.h"
 #include "TritonGPUToLLVM.h"
 #include "TypeConverter.h"
 #include "ViewOpToLLVM.h"
@@ -209,8 +210,9 @@ public:
                    &allocation, smem, /*benefit*/ 1);
     };
     populatePatterns1(populateTritonGPUToLLVMPatterns);
+    populatePatterns1(populateTensorMemRefOpToLLVMPatterns);
     populatePatterns1(populateConvertLayoutOpToLLVMPatterns);
-    populatePatterns2(populateDotOpToLLVMPatterns);
+    // populatePatterns2(populateDotOpToLLVMPatterns);
     populatePatterns2(populateElementwiseOpToLLVMPatterns);
     populatePatterns1(populateLoadStoreOpToLLVMPatterns);
     populatePatterns1(populateReduceOpToLLVMPatterns);

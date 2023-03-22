@@ -331,8 +331,8 @@ struct XdlopsGemmV2RewritePattern : public OpConversionPattern<XdlopsGemmV2Op> {
         int64_t KRepeats = KPack / k_base;
 
         auto outerLoop = b.create<AffineForOp>(loc, 0, outerLoopUpperBound);
-        auto outerLoopb = ConversionPatternRewriter::atBlockBegin(
-            outerLoop.getBody());
+        auto outerLoopb =
+            ConversionPatternRewriter::atBlockBegin(outerLoop.getBody());
         auto outerLoopiv = outerLoop.getInductionVar();
 
         auto loadSingleKPack = [&](Value regOffset, Type elementType,

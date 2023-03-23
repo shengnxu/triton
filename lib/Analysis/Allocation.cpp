@@ -133,7 +133,9 @@ private:
   using GraphT = DenseMap<BufferT *, DenseSet<BufferT *>>;
 
   void run() {
+    llvm::outs()<<"get values and sizes\n";
     getValuesAndSizes();
+    llvm::outs()<<"resolve liveness\n";
     resolveLiveness();
     computeOffsets();
   }
@@ -241,10 +243,12 @@ private:
   /// Extract all shared memory values and their sizes
   void getValuesAndSizes() {
     // Get the alloc values
+    llvm::outs()<<"right before traverse alloc op\n";
     operation->walk<WalkOrder::PreOrder>([&](Operation *op) {
       getExplicitValueSize(op);
       getScratchValueSize(op);
     });
+    llvm::outs()<<"traversed alloc op\n";
     // Get the alias values
     std::unique_ptr<DataFlowSolver> solver = createDataFlowSolver();
     SharedMemoryAliasAnalysis *aliasAnalysis =
@@ -501,6 +505,6 @@ private:
 };
 } // namespace triton
 
-void Allocation::run() { triton::AllocationAnalysis(getOperation(), this); }
+void Allocation::run() { llvm::outs()<<"run shared memory analysis\n";triton::AllocationAnalysis(getOperation(), this); }
 
 } // namespace mlir

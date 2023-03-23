@@ -99,4 +99,44 @@ def ConvertRockToGPUPass : Pass<"convert-rock-to-gpu", "mlir::ModuleOp"> {
 }
 
 
+// def TritonConvertArithToIndex : Pass<"triton-convert-arith-to-index", "mlir::ModuleOp"> {
+// 
+//     let summary = "Convert arith to index";
+//     
+//     let constructor = "mlir::triton::createTritonConvertArithToIndexPass()";
+// 
+//     let description = [{
+//       Convert arith operation on index values to corresponding ops in the index dialect.
+//       We need this because SCFToCF conversion currently generates arith ops on indices.
+//     }];
+// 
+//     let dependentDialects = ["mlir::index::IndexDialect"];
+// }
+
+// def ConvertTensorMemRefToLLVM : Pass<"convert-tensor-memref", "mlir::ModuleOp"> {
+//     let summary = "lower tensor <=> memref Op";
+//     let description = [{
+// 
+//     }];
+//     let constructor = "mlir::triton::createConvertTensorMemRefToLLVMPass()";
+// 
+//     let dependentDialects = ["mlir::arith::ArithDialect",
+//                              "mlir::math::MathDialect",
+//                              "mlir::gpu::GPUDialect",
+//                              "mlir::scf::SCFDialect",
+//                              "mlir::LLVM::LLVMDialect",
+//                              "mlir::tensor::TensorDialect",
+//                              "mlir::triton::TritonDialect",
+//                              "mlir::triton::gpu::TritonGPUDialect",
+//                              "mlir::memref::MemRefDialect",
+//                              "mlir::ROCDL::ROCDLDialect",
+//                              "mlir::NVVM::NVVMDialect"];
+// 
+//     let options = [
+//         Option<"computeCapability", "compute-capability",
+//                "int32_t", /*default*/"80",
+//                "device compute capability">
+//     ];
+// }
+
 #endif

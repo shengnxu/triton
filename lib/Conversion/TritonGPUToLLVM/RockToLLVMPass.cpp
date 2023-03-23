@@ -29,6 +29,7 @@
 #include "TritonGPUToLLVM.h"
 #include "TypeConverter.h"
 #include "ViewOpToLLVM.h"
+#include "TensorMemRefOpToLLVM.h"
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 
@@ -156,6 +157,7 @@ public:
       : computeCapability(computeCapability) {}
 
   void runOnOperation() override {
+    llvm::outs()<<"start runOnOperation ConvertRockToLLVM\n";
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
     mlir::LowerToLLVMOptions option(context);
@@ -166,8 +168,10 @@ public:
 
     /* allocate shared memory and set barrier */
     Allocation allocation(mod);
+    llvm::outs()<<"done allocation\n";
     MembarAnalysis membarPass(&allocation);
     membarPass.run();
+    llvm::outs()<<"end of memory analysis.\n";
 
     /* lower functions */
     {
@@ -210,12 +214,13 @@ public:
     };
     populatePatterns1(populateTritonGPUToLLVMPatterns);
     populatePatterns1(populateConvertLayoutOpToLLVMPatterns);
+    populatePatterns1(populateTensorMemRefOpToLLVMPatterns);
     populatePatterns2(populateDotOpToLLVMPatterns);
     populatePatterns2(populateElementwiseOpToLLVMPatterns);
     populatePatterns1(populateLoadStoreOpToLLVMPatterns);
     populatePatterns1(populateReduceOpToLLVMPatterns);
     populatePatterns2(populateViewOpToLLVMPatterns);
-    // Native lowering patterns
+
 #ifdef USE_ROCM
     mlir::populateGpuToROCDLConversionPatterns(typeConverter, patterns,
                                                mlir::gpu::amd::HIP);
@@ -224,6 +229,7 @@ public:
 #endif
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           patterns);
+    
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
 

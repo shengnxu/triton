@@ -277,8 +277,7 @@ private:
            "Inliner pass is expected before TritonGPUToLLVM");
     b.setInsertionPointToStart(&funcs[0].getBody().front());
     smem = b.create<LLVM::AddressOfOp>(loc, global);
-    auto ptrTy =
-        LLVM::LLVMPointerType::get(typeConverter.convertType(b.getI8Type()), 3);
+    auto ptrTy = LLVM::LLVMPointerType::get(b.getContext(), 3);
     smem = b.create<LLVM::BitcastOp>(loc, ptrTy, smem);
   }
 };

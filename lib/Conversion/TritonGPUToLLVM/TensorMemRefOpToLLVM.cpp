@@ -53,6 +53,7 @@ public:
     auto srcRank = srcTy.getRank();
     auto srcShape = srcTy.getShape();
     auto srcElemTy = srcTy.getElementType().dyn_cast<VectorType>();
+    auto vecElemTy = srcElemTy.getElementType();
     Type llSrcElemTy = typeConverter->convertType(srcElemTy);
     auto srcElemSize = srcElemTy.getNumElements();
 
@@ -73,20 +74,22 @@ public:
       return failure();
     }
 
-    unsigned numElems = getElemsPerThread(resTy);
+    unsigned numElems = srcTy.getNumElements();
 
     MemRefDescriptor desc{adaptor.getSrc()};
     Value srcPtr = desc.alignedPtr(rewriter, loc);
 
+    // bitcast the llvm.ptr<5> to llvm.ptr<f32, 5>
+    srcPtr = bitcast(srcPtr, ptr_ty(vecElemTy, 5));
+    auto vecElemPtrTy = ptr_ty(vecElemTy, 5);
+
     SmallVector<Value> valVec;
 
-    for (auto i = 0; i < numElems; i++) {
-      Value vec = extract_val(llSrcElemTy, srcPtr, i);
-      for (auto j = 0; j < srcElemSize; j++) {
-        valVec.push_back(extract_val(resElemTy, vec, j));
-      }
+    for (auto i = 0; i < numElems * srcElemSize; i++) {
+      Value elemPtr = gep(vecElemPtrTy, srcPtr, i32_val(i));
+      Value elem = load(elemPtr);
+      valVec.push_back(elem);
     }
-
     Type llvmResultStructTy = getTypeConverter()->convertType(resTy);
     Value resultStruct = getTypeConverter()->packLLElements(
         loc, valVec, rewriter, llvmResultStructTy);

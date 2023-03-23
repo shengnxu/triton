@@ -229,13 +229,13 @@ public:
   template <typename T>
   Value getSharedMemoryBase(Location loc, ConversionPatternRewriter &rewriter,
                             T value) const {
-    auto ptrTy = LLVM::LLVMPointerType::get(
-        this->getTypeConverter()->convertType(rewriter.getI8Type()), 3);
+    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(), 3);
     auto bufferId = allocation->getBufferId(value);
     assert(bufferId != Allocation::InvalidBufferId && "BufferId not found");
     size_t offset = allocation->getOffset(bufferId);
     Value offVal = i32_val(offset);
-    Value base = gep(ptrTy, smem, offVal);
+    auto elemTy = rewriter.getI8Type();
+    Value base = gep(ptrTy, elemTy, smem, offVal);
     return base;
   }
 

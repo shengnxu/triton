@@ -18,6 +18,7 @@ using ::mlir::triton::gpu::getContigPerThread;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getSizePerThread;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::MmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
@@ -149,7 +150,7 @@ private:
     }
 
     for (Value result : op->getResults()) {
-      if (isSharedEncoding(result)) {
+      if (isSharedEncoding(result) || isLDSEncoding(result)) {
         // Bytes could be a different value once we support padding or other
         // allocation policies.
         auto tensorType = result.getType().dyn_cast<RankedTensorType>();
@@ -172,7 +173,9 @@ private:
       auto srcEncoding = srcTy.getEncoding();
       auto dstEncoding = dstTy.getEncoding();
       if (srcEncoding.isa<SharedEncodingAttr>() ||
-          dstEncoding.isa<SharedEncodingAttr>()) {
+          dstEncoding.isa<SharedEncodingAttr>() ||
+          srcEncoding.isa<LDSEncodingAttr>() ||
+          dstEncoding.isa<LDSEncodingAttr>()) {
         // Conversions from/to shared memory do not need scratch memory.
         return;
       }

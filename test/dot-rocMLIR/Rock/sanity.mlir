@@ -9,9 +9,9 @@
 // RUN: triton-opt -rock-blockwise-gemm-to-threadwise -rock-threadwise-gemm-lowering -rock-sugar-to-loops -rock-clean-math -rock-buffer-load-merge -rock-loops-to-cf %s
 
 
-#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 2], warpsPerCTA = [1, 8], order = [0, 1]}>
-#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [1, 32], warpsPerCTA = [8, 1], order = [1, 0]}>
-#blocked2 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [8, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [16, 4], warpsPerCTA = [1, 8], order = [0, 1]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [2, 32], warpsPerCTA = [8, 1], order = [1, 0]}>
+#blocked2 = #triton_gpu.blocked<{sizePerThread = [8, 1], threadsPerWarp = [8, 8], warpsPerCTA = [1, 8], order = [0, 1]}>
 #lds = #triton_gpu.lds<{kpack = 4, order = [1, 0]}>
 #lds1 = #triton_gpu.lds<{kpack = 4, order = [0, 1]}>
 #xdlops_gemm_params = #rock.xdlops_gemm_params<kPerBlock = 16, mPerBlock = 128, nPerBlock = 256, kpack = 4, mPerWave = 64, nPerWave = 64, forceUnroll = true>
@@ -61,23 +61,22 @@ module attributes {"triton_gpu.num-warps" = 8 : i32} {
     %c64_0 = arith.constant 64 : index
     %c64_1 = arith.constant 64 : index
     %c4 = arith.constant 4 : index
-    %39 = rock.workgroup_id : index
-    %40 = rock.workitem_id : index
-    %41 = arith.divui %40, %c64 : index
-    %42 = arith.divui %41, %c4 : index
-    %43 = arith.remui %41, %c4 : index
-    %44 = arith.muli %42, %c64_0 : index
-    %45 = arith.muli %43, %c64_1 : index
+    %39 = rock.workitem_id : index
+    %40 = arith.divui %39, %c64 : index
+    %41 = arith.divui %40, %c4 : index
+    %42 = arith.remui %40, %c4 : index
+    %43 = arith.muli %41, %c64_0 : index
+    %44 = arith.muli %42, %c64_1 : index
+    %45 = rock.alloc() : memref<16xvector<4xf16>, #gpu.address_space<private>>
     %46 = rock.alloc() : memref<16xvector<4xf16>, #gpu.address_space<private>>
-    %47 = rock.alloc() : memref<16xvector<4xf16>, #gpu.address_space<private>>
-    %48 = rock.alloc() : memref<4xvector<16xf32>, #gpu.address_space<private>>
+    %47 = rock.alloc() : memref<4xvector<16xf32>, #gpu.address_space<private>>
     %cst_2 = arith.constant dense<0.000000e+00> : vector<16xf32>
-    rock.fill(%48, %cst_2) : memref<4xvector<16xf32>, #gpu.address_space<private>>, vector<16xf32>
-    rock.blockwise_gemm_v2 %48 += %46 from %37[%44] * %47 from %38[%45] {blockSize = 512 : i32, ldsBufferOffsetA = 0 : index, ldsBufferOffsetB = 0 : index, params = #xdlops_gemm_params} : memref<4xvector<16xf32>, #gpu.address_space<private>> += memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<8192xf16, #gpu.address_space<workgroup>> * memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<16384xf16, #gpu.address_space<workgroup>>
-    %49 = triton_gpu.memref_to_tensor %48 : memref<4xvector<16xf32>, #gpu.address_space<private>> -> tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>
-    %50 = triton_gpu.convert_layout %49 : (tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>) -> tensor<128x256xf32, #blocked1>
-    %51 = arith.truncf %50 : tensor<128x256xf32, #blocked1> to tensor<128x256xf16, #blocked1>
-    tt.store %32, %51 {cache = 1 : i32, evict = 1 : i32} : tensor<128x256xf16, #blocked1>
+    rock.fill(%47, %cst_2) : memref<4xvector<16xf32>, #gpu.address_space<private>>, vector<16xf32>
+    rock.blockwise_gemm_v2 %47 += %45 from %37[%43] * %46 from %38[%44] {blockSize = 512 : i32, ldsBufferOffsetA = 0 : index, ldsBufferOffsetB = 0 : index, params = #xdlops_gemm_params} : memref<4xvector<16xf32>, #gpu.address_space<private>> += memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<8192xf16, #gpu.address_space<workgroup>> * memref<16xvector<4xf16>, #gpu.address_space<private>> from memref<16384xf16, #gpu.address_space<workgroup>>
+    %48 = triton_gpu.memref_to_tensor %47 : memref<4xvector<16xf32>, #gpu.address_space<private>> -> tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>
+    %49 = triton_gpu.convert_layout %48 : (tensor<128x256xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [2, 4], xdlopsPerWarp = [2, 2]}>>) -> tensor<128x256xf32, #blocked1>
+    %50 = arith.truncf %49 : tensor<128x256xf32, #blocked1> to tensor<128x256xf16, #blocked1>
+    tt.store %32, %50 {cache = 1 : i32, evict = 1 : i32} : tensor<128x256xf16, #blocked1>
     return
   }
 }

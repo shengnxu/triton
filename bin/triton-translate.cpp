@@ -1,8 +1,3 @@
-#include "triton/Dialect/Triton/IR/Dialect.h"
-#include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Target/LLVMIR/LLVMIRTranslation.h"
-#include "triton/Target/PTX/PTXTranslation.h"
-#include "triton/Target/HSACO/HSACOTranslation.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
@@ -14,6 +9,11 @@
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "triton/Conversion/TritonToTritonGPU/TritonToTritonGPUPass.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Target/HSACO/HSACOTranslation.h"
+#include "triton/Target/LLVMIR/LLVMIRTranslation.h"
+#include "triton/Target/PTX/PTXTranslation.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -77,7 +77,8 @@ LogicalResult tritonTranslateMain(int argc, char **argv,
       llvm::cl::init("-"));
 
   static llvm::cl::opt<std::string> targetKind(
-      "target", llvm::cl::desc("<translation target, options: llvmir/ptx/hsaco>"),
+      "target",
+      llvm::cl::desc("<translation target, options: llvmir/ptx/hsaco>"),
       llvm::cl::value_desc("target"), llvm::cl::init("llvmir"));
 
   static llvm::cl::opt<int> SMArch("sm", llvm::cl::desc("sm arch"),
@@ -91,7 +92,8 @@ LogicalResult tritonTranslateMain(int argc, char **argv,
       llvm::cl::value_desc("architecture"), llvm::cl::init("90a"));
 
   static llvm::cl::opt<std::string> GCNTriple(
-      "amdgcn", llvm::cl::desc("AMDGCN triple vendor and platfom. e.g. '-amd-amdhsa'"),
+      "amdgcn",
+      llvm::cl::desc("AMDGCN triple vendor and platfom. e.g. '-amd-amdhsa'"),
       llvm::cl::value_desc("target triple"), llvm::cl::init("-amd-amdhsa"));
 
   static llvm::cl::opt<std::string> GCNFeatures(

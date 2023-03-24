@@ -24,6 +24,7 @@
 #include "ConvertLayoutOpToLLVM.h"
 #include "DotOpToLLVM.h"
 #include "ElementwiseOpToLLVM.h"
+#include "GpuAllocOpToLLVM.h"
 #include "LoadStoreOpToLLVM.h"
 #include "ReduceOpToLLVM.h"
 #include "TensorMemRefOpToLLVM.h"
@@ -209,6 +210,9 @@ public:
       populateFunc(typeConverter, patterns, numWarps, *axisInfoAnalysis,
                    &allocation, smem, /*benefit*/ 1);
     };
+    populateGpuAllocOpToLLVMPatterns(typeConverter, patterns, numWarps,
+                                     *axisInfoAnalysis, &allocation, smem,
+                                     /*benefit*/ 1, context);
     populatePatterns1(populateTritonGPUToLLVMPatterns);
     populatePatterns1(populateTensorMemRefOpToLLVMPatterns);
     populatePatterns1(populateConvertLayoutOpToLLVMPatterns);

@@ -1,13 +1,15 @@
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
 
 #include "mlir/Analysis/DataFlowFramework.h"
-#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/AMDGPUToROCDL/AMDGPUToROCDL.h"
 #include "mlir/Conversion/ControlFlowToLLVM//ControlFlowToLLVM.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"
 #include "mlir/Conversion/LLVMCommon/VectorPattern.h"
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/Conversion/VectorToLLVM/ConvertVectorToLLVM.h"
 #include "mlir/Dialect/Index/IR/IndexDialect.h"
 #include "mlir/Dialect/Index/IR/IndexOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -174,6 +176,7 @@ public:
     /* lower functions */
     {
       mlir::LowerToLLVMOptions option(context);
+      option.overrideIndexBitwidth(32);
       TritonGPUToLLVMTypeConverter typeConverter(context, option);
       TritonLLVMFunctionConversionTarget funcTarget(*context);
       RewritePatternSet funcPatterns(context);
@@ -210,6 +213,23 @@ public:
       populateFunc(typeConverter, patterns, numWarps, *axisInfoAnalysis,
                    &allocation, smem, /*benefit*/ 1);
     };
+    // Copied from LowerGpuOpsToROCDLOps.cpp
+    // We need this function to teach the typeConverter how to lower the
+    // enum-style gpu memory space into integers. Otherwise, fromStaticShape
+    // will complain.
+    populateGpuMemorySpaceAttributeConversions(
+        typeConverter, [](mlir::gpu::AddressSpace space) {
+          switch (space) {
+          case mlir::gpu::AddressSpace::Global:
+            return 1;
+          case mlir::gpu::AddressSpace::Workgroup:
+            return 3;
+          case mlir::gpu::AddressSpace::Private:
+            return 5;
+          }
+          llvm_unreachable("unknown address space enum value");
+          return 0;
+        });
     populateGpuAllocOpToLLVMPatterns(typeConverter, patterns, numWarps,
                                      *axisInfoAnalysis, &allocation, smem,
                                      /*benefit*/ 1, context);
@@ -223,6 +243,13 @@ public:
     populatePatterns2(populateViewOpToLLVMPatterns);
     // Native lowering patterns
 #ifdef USE_ROCM
+    // GPUToROCDL lowering patterns
+    FailureOr<mlir::amdgpu::Chipset> maybeChipset =
+        mlir::amdgpu::Chipset::parse("gfx90a");
+    populateAMDGPUToROCDLConversionPatterns(typeConverter, patterns,
+                                            *maybeChipset);
+    populateVectorToLLVMConversionPatterns(typeConverter, patterns);
+    populateFinalizeMemRefToLLVMConversionPatterns(typeConverter, patterns);
     mlir::populateGpuToROCDLConversionPatterns(typeConverter, patterns,
                                                mlir::gpu::amd::HIP);
 #else

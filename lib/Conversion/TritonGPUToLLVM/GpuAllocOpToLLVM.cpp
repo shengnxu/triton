@@ -31,7 +31,7 @@ struct MIGPUAllocRewritePattern
           ptr_ty(op.getContext(),
                  mlir::ROCDL::ROCDLDialect::kPrivateMemoryAddressSpace);
       Value numElements =
-          rewriter.create<LLVM::ConstantOp>(loc, i64_ty, type.getNumElements());
+          rewriter.create<LLVM::ConstantOp>(loc, i32_ty, type.getNumElements());
       Value allocated = rewriter.create<LLVM::AllocaOp>(
           loc, ptrType, elementType, numElements, /*alignment=*/0);
       auto descr = MemRefDescriptor::fromStaticShape(

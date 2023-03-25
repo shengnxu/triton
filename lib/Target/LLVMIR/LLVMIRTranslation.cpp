@@ -1,6 +1,7 @@
 #include "triton/Target/LLVMIR/LLVMIRTranslation.h"
 
 #include "mlir/Conversion/Passes.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
@@ -15,6 +16,7 @@
 #include "mlir/Transforms/Passes.h"
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
 #include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
+#include "triton/Dialect/Rock/Passes.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -312,15 +314,30 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createConvertSCFToCFPass());
   pm.addPass(mlir::createConvertIndexToLLVMPass());
   pm.addPass(createConvertTritonGPUToRockPass(computeCapability));
+  // Rock in-dialect transforms
+  pm.addNestedPass<func::FuncOp>(
+      mlir::rock::createRockBlockwiseGemmToThreadwisePass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::rock::createRockThreadwiseGemmLoweringPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::rock::createRockSugarToLoopsPass());
+  pm.addNestedPass<mlir::func::FuncOp>(mlir::rock::createRockCleanMathPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      mlir::rock::createRockBufferLoadMergePass());
+  pm.addPass(mlir::rock::createRockLoopsToCfPass());
   pm.addPass(createConvertRockToLLVMPass(computeCapability));
-  pm.addPass(mlir::createArithToLLVMConversionPass());
+  ArithToLLVMConversionPassOptions arithToLLVMOption;
+  arithToLLVMOption.indexBitwidth = 32;
+  pm.addPass(mlir::createArithToLLVMConversionPass(arithToLLVMOption));
+  ConvertControlFlowToLLVMPassOptions cfToLLVMOption;
+  cfToLLVMOption.indexBitwidth = 32;
   pm.addPass(mlir::createCanonicalizerPass());
   // Simplify the IR
   pm.addPass(mlir::createCSEPass());
   pm.addPass(mlir::createSymbolDCEPass());
 #ifdef USE_ROCM
   pm.addPass(mlir::createConvertSCFToCFPass());
-  pm.addPass(createConvertControlFlowToLLVMPass());
+  pm.addPass(createConvertControlFlowToLLVMPass(cfToLLVMOption));
 #endif
 
   if (failed(pm.run(module))) {

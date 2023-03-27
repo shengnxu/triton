@@ -9,6 +9,7 @@
 
 #include "triton/Conversion/Passes.h"
 
+#include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
@@ -45,6 +46,7 @@ int main(int argc, char **argv) {
   // Register dialects used by Rock
   registry.insert<mlir::rock::RockDialect, mlir::memref::MemRefDialect,
                   mlir::amdgpu::AMDGPUDialect, mlir::vector::VectorDialect>();
+  registry.insert<mlir::LLVM::LLVMDialect, mlir::ROCDL::ROCDLDialect>();
 
   return mlir::asMainReturnCode(mlir::MlirOptMain(
       argc, argv, "Triton (GPU) optimizer driver\n", registry));

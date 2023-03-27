@@ -163,3 +163,16 @@ TritonGPUToLLVMTypeConverter::convertTritonTensorType(RankedTensorType type) {
 
   return std::nullopt;
 }
+
+// Copied from GpuOpsLowering.cpp
+void populateGpuMemorySpaceAttributeConversions(
+    TypeConverter &typeConverter, const MemorySpaceMapping &mapping) {
+  typeConverter.addTypeAttributeConversion(
+      [mapping](BaseMemRefType type,
+                mlir::gpu::AddressSpaceAttr memorySpaceAttr) {
+        mlir::gpu::AddressSpace memorySpace = memorySpaceAttr.getValue();
+        unsigned addressSpace = mapping(memorySpace);
+        return wrapNumericMemorySpace(memorySpaceAttr.getContext(),
+                                      addressSpace);
+      });
+}

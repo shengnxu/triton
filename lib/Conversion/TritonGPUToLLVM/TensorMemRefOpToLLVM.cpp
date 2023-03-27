@@ -98,52 +98,12 @@ public:
   }
 };
 
-// Copied from GpuOpsLowering.h
-/// A function that maps a MemorySpace enum to a target-specific integer value.
-using MemorySpaceMapping =
-    std::function<unsigned(mlir::gpu::AddressSpace gpuAddressSpace)>;
-
-/// Copied from GpuOpsLowering.cpp
-static IntegerAttr wrapNumericMemorySpace(MLIRContext *ctx, unsigned space) {
-  return IntegerAttr::get(IntegerType::get(ctx, 64), space);
-}
-
-// Copied from GpuOpsLowering.cpp
-void populateGpuMemorySpaceAttributeConversions(
-    TypeConverter &typeConverter, const MemorySpaceMapping &mapping) {
-  typeConverter.addTypeAttributeConversion(
-      [mapping](BaseMemRefType type,
-                mlir::gpu::AddressSpaceAttr memorySpaceAttr) {
-        mlir::gpu::AddressSpace memorySpace = memorySpaceAttr.getValue();
-        unsigned addressSpace = mapping(memorySpace);
-        return wrapNumericMemorySpace(memorySpaceAttr.getContext(),
-                                      addressSpace);
-      });
-}
-
 void populateTensorMemRefOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, AxisInfoAnalysis &axisInfoAnalysis,
     const Allocation *allocation, Value smem,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
-  // Copied from LowerGpuOpsToROCDLOps.cpp
-  // We need this function to teach the typeConverter how to lower the
-  // enum-style gpu memory space into integers. Otherwise, fromStaticShape
-  // will complain.
-  populateGpuMemorySpaceAttributeConversions(
-      typeConverter, [](mlir::gpu::AddressSpace space) {
-        switch (space) {
-        case mlir::gpu::AddressSpace::Global:
-          return 1;
-        case mlir::gpu::AddressSpace::Workgroup:
-          return 3;
-        case mlir::gpu::AddressSpace::Private:
-          return 5;
-        }
-        llvm_unreachable("unknown address space enum value");
-        return 0;
-      });
   patterns.add<TensorToMemRefOpConversion>(typeConverter, allocation, smem,
                                            indexCacheInfo, benefit);
   patterns.add<MemRefToTensorOpConversion>(typeConverter, allocation, smem,

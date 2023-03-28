@@ -727,7 +727,6 @@ private:
     unsigned nPerWave = n / warpsPerCTA[order[0]];
     SmallVector<unsigned, 2> sizePerWarp{mPerWave, nPerWave};
 
-    // delinearize threadId to get the base index
     SmallVector<Value> multiDimWarpId =
         delinearize(rewriter, loc, warpId, warpsPerCTA, order);
 

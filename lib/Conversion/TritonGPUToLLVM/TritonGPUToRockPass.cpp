@@ -131,7 +131,7 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     // Therefore, mPerWave and nPerWave need to be derived.
     // TODO: this is a duplicate from BlockedToMFMA in the tritongpu-combineop
     // pass. We should unify them in the future.
-    uint32_t mPerWave = std::min<uint32_t>(64, mPerBlock);
+    uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (mPerBlock * nPerBlock / (mPerWave * nPerWave) != numWaves)
       return emitError(loc) << "Need to pick another [m|n]PerWave!\n";

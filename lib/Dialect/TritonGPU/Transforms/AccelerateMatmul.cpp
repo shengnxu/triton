@@ -228,7 +228,7 @@ public:
     // TODO: Check the validity of these parameters
     uint32_t mPerBlock = retShape[0];
     uint32_t nPerBlock = retShape[1];
-    uint32_t mPerWave = std::min<uint32_t>(64, mPerBlock);
+    uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     SmallVector<unsigned> warpsPerCTA(2), xdlopsPerWarp(2);
     warpsPerCTA[0] = mPerBlock / mPerWave;

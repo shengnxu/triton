@@ -232,6 +232,11 @@ public:
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (nPerWave < 32)
       return emitError(loc) << "numWarps too large.\n";
+    // When numWarps are too small, we need larger mPerWave and nPerWave
+    if (nPerWave > nPerBlock) {
+      nPerWave = nPerBlock;
+      mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
+    }
     SmallVector<unsigned> warpsPerCTA(2), xdlopsPerWarp(2);
     warpsPerCTA[0] = mPerBlock / mPerWave;
     warpsPerCTA[1] = nPerBlock / nPerWave;

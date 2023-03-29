@@ -135,6 +135,11 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (mPerBlock * nPerBlock / (mPerWave * nPerWave) != numWaves)
       return emitError(loc) << "Need to pick another [m|n]PerWave!\n";
+    // When numWarps are too small, we need larger mPerWave and nPerWave
+    if (nPerWave > nPerBlock) {
+      nPerWave = nPerBlock;
+      mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
+    }
     int64_t nWaves = nPerBlock / nPerWave;
 
     LLVM_DEBUG(llvm::dbgs() << "mPerBlock:      " << mPerBlock << "\n"

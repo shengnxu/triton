@@ -365,8 +365,8 @@ struct BlockwiseGemmV2RewritePattern
     int64_t mRepeats = mfmaGroup.getMRepeats(mPerWave);
     int64_t nRepeats = mfmaGroup.getNRepeats(nPerWave);
 
-    int64_t mPerMfmaGroup = mfmaGroup.getLenPerMfmaGroup(mPerWave);
-    int64_t nPerMfmaGroup = mfmaGroup.getLenPerMfmaGroup(nPerWave);
+    int64_t mPerMfmaGroup = mfmaGroup.getLenPerMfmaGroup(dataType, mPerWave);
+    int64_t nPerMfmaGroup = mfmaGroup.getLenPerMfmaGroup(dataType, nPerWave);
 
     bool IsKReduction = (blocksInOutRegs == 1) && (inputSpansPerMfmaIn > 1);
 

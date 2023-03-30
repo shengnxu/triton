@@ -158,9 +158,9 @@ def to_numpy(x):
                           for allow_tf32 in [True]
                           for col_a in [True, False]
                           for col_b in [True, False]
-                          for dtype in ['float16', 'float32']] +
+                          for dtype in ['int8', 'float16', 'float32']] +
                          # The following configs use too much LDS for float32
-                         [(*shape_nw, col_a, col_b, epilogue, allow_tf32, 'float16')
+                         [(*shape_nw, col_a, col_b, epilogue, allow_tf32, dtype)
                           for shape_nw in [[128, 64, 128, 8],
                                            [128, 64, 128, 4],
                                            [128, 64, 128, 2],
@@ -186,7 +186,8 @@ def to_numpy(x):
                           for epilogue in ['none']
                           for allow_tf32 in [True]
                           for col_a in [True, False]
-                          for col_b in [True, False]])
+                          for col_b in [True, False]
+                          for dtype in ['int8', 'float16']])
 def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype, device='cuda'):
     capability = torch.cuda.get_device_capability()
     if capability[0] < 7:

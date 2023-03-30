@@ -230,7 +230,7 @@ public:
     uint32_t nPerBlock = retShape[1];
     uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
-    if (nPerWave < 32)
+    if (nPerWave < 16)
       return emitError(loc) << "numWarps too large.\n";
     // When numWarps are too small, we need larger mPerWave and nPerWave
     if (nPerWave > nPerBlock) {

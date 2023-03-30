@@ -316,6 +316,19 @@ FailureOr<MfmaInsnGroup> MfmaInsnGroup::select(mlir::Type elementType,
   // Use 32x32 as base unit in large waves for int8
   int64_t mPerMfmaGroup = getLenPerMfmaGroup(elementType, mPerWave);
   int64_t nPerMfmaGroup = getLenPerMfmaGroup(elementType, nPerWave);
+  if (elementType.isInteger(8)) {
+    if (mPerMfmaGroup != nPerMfmaGroup) {
+      if (mPerMfmaGroup > nPerMfmaGroup)
+        mPerMfmaGroup = 16;
+      else
+        nPerMfmaGroup = 16;
+    }
+  } else {
+    if ((mPerMfmaGroup == 16) && (nPerMfmaGroup == 32))
+      nPerMfmaGroup = 16;
+    if ((mPerMfmaGroup == 32) && (nPerMfmaGroup == 16))
+      mPerMfmaGroup = 16;
+  }
 
   MfmaInsnGroupSelectKey key = {convertTypeToId(elementType), mPerMfmaGroup,
                                 nPerMfmaGroup};

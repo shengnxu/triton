@@ -104,12 +104,16 @@ private:
       // the element offset within the [4,1] unit block.
       unsigned elemIdInXdlop = elemId % elemsPerXdlops;
       unsigned groupId = elemIdInXdlop / 4;
-      unsigned groupRowOff = warpSize / nonKDim * groupId;
+      unsigned groupRowOff = warpSize / nonKDim * groupId * 4;
       unsigned elemIdInUnitBlock = elemIdInXdlop % 4;
-      unsigned rowOff = elemIdInUnitBlock + groupRowOff;
+      unsigned rowOff =
+          elemIdInUnitBlock + groupRowOff + nonKDim * multiDimXdlopId[order[1]];
+      unsigned colOff = nonKDim * multiDimXdlopId[order[0]];
 
       multiDimOffsetFirstElem[order[1]] =
           add(multiDimOffsetFirstElem[order[1]], i32_val(rowOff));
+      multiDimOffsetFirstElem[order[0]] =
+          add(multiDimOffsetFirstElem[order[0]], i32_val(colOff));
       return multiDimOffsetFirstElem;
     }
     if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
@@ -416,7 +420,7 @@ private:
     auto dstShapePerCTA = getShapePerCTA(dstLayout, shape);
 
     // For Volta, all the coords for a CTA are calculated.
-    bool isSrcMmaV1{}, isDstMmaV1{}, isSrcMfma{};
+    bool isSrcMmaV1{}, isDstMmaV1{};
     if (auto mmaLayout = srcLayout.dyn_cast<MmaEncodingAttr>()) {
       isSrcMmaV1 = mmaLayout.isVolta();
     }
@@ -430,9 +434,6 @@ private:
     if (auto sliceLayout = dstLayout.dyn_cast<SliceEncodingAttr>()) {
       isDstMmaV1 = sliceLayout.getParent().isa<MmaEncodingAttr>() &&
                    sliceLayout.getParent().cast<MmaEncodingAttr>().isVolta();
-    }
-    if (auto mfmaLayout = srcLayout.dyn_cast<MfmaEncodingAttr>()) {
-      isSrcMfma = true;
     }
 
     for (unsigned d = 0; d < rank; ++d) {
@@ -459,9 +460,6 @@ private:
     auto outOrd = getOrder(dstLayout);
     SmallVector<Value> outVals(outElems);
 
-    auto mfmaLayout = srcLayout.dyn_cast<MfmaEncodingAttr>();
-    auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-    auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
     for (unsigned repId = 0; repId < accumNumReplicates; ++repId) {
       auto multiDimRepId =
           getMultiDimIndex<unsigned>(repId, numReplicates, outOrd);

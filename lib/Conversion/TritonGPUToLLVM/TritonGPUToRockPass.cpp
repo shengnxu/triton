@@ -129,12 +129,17 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     // TODO: in rocMLIR, blockSize is derived from [m|n]PerBlock, [m|n]PerWave,
     // and waveSize. In triton, blockSize and [m|n]PerBlock are given.
     // Therefore, mPerWave and nPerWave need to be derived.
-    // TODO: this is a duplicate from BlockedToMFMA in the tritongpu-combineop
-    // pass. We should unify them in the future.
-    uint32_t mPerWave = std::min<uint32_t>(64, mPerBlock);
+    // TODO: this is a duplicate from BlockedToMFMA in the
+    // tritongpu-accelerate-matmul pass. We should unify them in the future.
+    uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (mPerBlock * nPerBlock / (mPerWave * nPerWave) != numWaves)
       return emitError(loc) << "Need to pick another [m|n]PerWave!\n";
+    // When numWarps are too small, we need larger mPerWave and nPerWave
+    if (nPerWave > nPerBlock) {
+      nPerWave = nPerBlock;
+      mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
+    }
     int64_t nWaves = nPerBlock / nPerWave;
 
     LLVM_DEBUG(llvm::dbgs() << "mPerBlock:      " << mPerBlock << "\n"

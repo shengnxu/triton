@@ -312,9 +312,23 @@ FailureOr<MfmaInsnGroup> MfmaInsnGroup::select(mlir::Type elementType,
                           << "mPerWave: " << mPerWave << "\n"
                           << "nPerWave: " << nPerWave << "\n");
 
-  // Use 64x64 as base unit in large waves
-  int64_t mPerMfmaGroup = getLenPerMfmaGroup(mPerWave);
-  int64_t nPerMfmaGroup = getLenPerMfmaGroup(nPerWave);
+  // Use 64x64 as base unit in large waves for float32 and float16
+  // Use 32x32 as base unit in large waves for int8
+  int64_t mPerMfmaGroup = getLenPerMfmaGroup(elementType, mPerWave);
+  int64_t nPerMfmaGroup = getLenPerMfmaGroup(elementType, nPerWave);
+  if (elementType.isInteger(8)) {
+    if (mPerMfmaGroup != nPerMfmaGroup) {
+      if (mPerMfmaGroup > nPerMfmaGroup)
+        mPerMfmaGroup = 16;
+      else
+        nPerMfmaGroup = 16;
+    }
+  } else {
+    if ((mPerMfmaGroup == 16) && (nPerMfmaGroup == 32))
+      nPerMfmaGroup = 16;
+    if ((mPerMfmaGroup == 32) && (nPerMfmaGroup == 16))
+      mPerMfmaGroup = 16;
+  }
 
   MfmaInsnGroupSelectKey key = {convertTypeToId(elementType), mPerMfmaGroup,
                                 nPerMfmaGroup};
@@ -353,8 +367,12 @@ int64_t MfmaInsnGroup::getNRepeats(int64_t nPerWave) {
   return std::max(int64_t(1), nPerWave / mnPerXdl);
 }
 
-int64_t MfmaInsnGroup::getLenPerMfmaGroup(int64_t lenPerWave) {
-  return (lenPerWave > 64) ? 64 : lenPerWave;
+int64_t MfmaInsnGroup::getLenPerMfmaGroup(mlir::Type elementType,
+                                          int64_t lenPerWave) {
+  if (elementType.isInteger(8))
+    return (lenPerWave > 32) ? 32 : lenPerWave;
+  else
+    return (lenPerWave > 64) ? 64 : lenPerWave;
 }
 
 MfmaInsnAttr MfmaInsnGroup::getInsnAttr() { return insn.getAttr(); }

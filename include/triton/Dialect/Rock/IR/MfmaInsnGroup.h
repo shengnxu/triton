@@ -130,7 +130,7 @@ public:
                 const MfmaInsnGroupAttr &groupAttr);
   int64_t getMRepeats(int64_t mPerWave);
   int64_t getNRepeats(int64_t nPerWave);
-  static int64_t getLenPerMfmaGroup(int64_t lenPerWave);
+  static int64_t getLenPerMfmaGroup(mlir::Type elementType, int64_t lenPerWave);
   SmallVector<mlir::rock::MFMAParams, 2> getImms();
 
   MfmaInsnAttr getInsnAttr();

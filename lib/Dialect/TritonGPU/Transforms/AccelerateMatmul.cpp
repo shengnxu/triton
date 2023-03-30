@@ -228,8 +228,15 @@ public:
     // TODO: Check the validity of these parameters
     uint32_t mPerBlock = retShape[0];
     uint32_t nPerBlock = retShape[1];
-    uint32_t mPerWave = std::min<uint32_t>(64, mPerBlock);
+    uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
+    if (nPerWave < 16)
+      return emitError(loc) << "numWarps too large.\n";
+    // When numWarps are too small, we need larger mPerWave and nPerWave
+    if (nPerWave > nPerBlock) {
+      nPerWave = nPerBlock;
+      mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
+    }
     SmallVector<unsigned> warpsPerCTA(2), xdlopsPerWarp(2);
     warpsPerCTA[0] = mPerBlock / mPerWave;
     warpsPerCTA[1] = nPerBlock / nPerWave;

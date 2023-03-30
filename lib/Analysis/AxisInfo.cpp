@@ -189,14 +189,16 @@ public:
     auto splatAttr = op.getValue().template dyn_cast<SplatElementsAttr>();
     if (splatAttr && splatAttr.getElementType().isIntOrIndex()) {
       int64_t value = splatAttr.template getSplatValue<APInt>().getZExtValue();
-      TensorType ty = splatAttr.getType().template cast<TensorType>();
-      return AxisInfo(
-          /*contiguity=*/AxisInfo::DimVectorT(ty.getRank(), 1),
-          /*divisibility=*/
-          AxisInfo::DimVectorT(ty.getRank(), highestPowOf2Divisor(value)),
-          /*constancy=*/
-          AxisInfo::DimVectorT(ty.getShape().begin(), ty.getShape().end()),
-          /*knownConstantValue=*/{value});
+      if (splatAttr.getType().template isa<TensorType>()) {
+        TensorType ty = splatAttr.getType().template cast<TensorType>();
+        return AxisInfo(
+            /*contiguity=*/AxisInfo::DimVectorT(ty.getRank(), 1),
+            /*divisibility=*/
+            AxisInfo::DimVectorT(ty.getRank(), highestPowOf2Divisor(value)),
+            /*constancy=*/
+            AxisInfo::DimVectorT(ty.getShape().begin(), ty.getShape().end()),
+            /*knownConstantValue=*/{value});
+      }
     }
     return AxisInfo();
   }

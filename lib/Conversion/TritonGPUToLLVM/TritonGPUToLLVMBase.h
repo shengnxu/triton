@@ -362,11 +362,9 @@ public:
     // the pointer: ptr[(row, col)] = base + offset
     // where :
     //   offset = superColId * kpack x nonKDim + rowInSuperCol * kpack + idInRow
-    //     superColId = newCol // kpack
-    //     rowInSuperCol = newRow
-    //     idInRow = newCol % kpack
-    //     When srcTy.order == resLDSLayout.order, [newRow, newCol] = [row, col]
-    //     Else, [newRow, newCol] = [col, row]
+    //     superColId = idxCol // kpack
+    //     rowInSuperCol = idxRow
+    //     idInRow = idxCol % kpack
     //
     // Note 1:
     // -------
@@ -374,11 +372,6 @@ public:
     // kpack, where kpacksPerBlock x kpack = k. The data layout is similar to a
     // column major layout, except each column is a super-column of [m|n] x
     // kpack. For each super-column, the data layout is row major.
-    //
-    // Note 2:
-    // -------
-    // When the order of src and dst do not match, we need to "transpose"
-    // the tile before storing it into the LDS.
     auto dstPtrTy = ptr_ty(resElemTy, 3);
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
     Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);
@@ -400,13 +393,8 @@ public:
     for (unsigned elemIdx = 0; elemIdx < numElems; elemIdx += minVec) {
       // extract multi dimensional index for current element
       auto idx = srcIndices[elemIdx];
-      Value idxCol = idx[outOrder[0]]; // contiguous dimension
-      Value idxRow = idx[outOrder[1]]; // discontiguous dimension
-      // "transpose" if orders do not match
-      if (inOrder != outOrder) {
-        idxCol = idx[outOrder[1]];
-        idxRow = idx[outOrder[0]];
-      }
+      Value idxCol = idx[outOrder[0]]; // k dimension
+      Value idxRow = idx[outOrder[1]]; // non-k dimension
       Value superColId = udiv(idxCol, i32_val(kpack));
       Value rowInSuperCol = idxRow;
       Value idInRow = urem(idxCol, i32_val(kpack));
@@ -739,7 +727,6 @@ private:
     unsigned nPerWave = n / warpsPerCTA[order[0]];
     SmallVector<unsigned, 2> sizePerWarp{mPerWave, nPerWave};
 
-    // delinearize threadId to get the base index
     SmallVector<Value> multiDimWarpId =
         delinearize(rewriter, loc, warpId, warpsPerCTA, order);
 

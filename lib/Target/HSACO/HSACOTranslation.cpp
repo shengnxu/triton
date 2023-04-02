@@ -33,6 +33,7 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <filesystem>
 
 namespace {
 
@@ -133,7 +134,14 @@ std::string generate_hsaco(llvm::Module *module, const std::string &triple,
   std::string hsaco_path = kernel_name + std::string(".hsaco");
 
   std::string error_message;
-  std::string lld_path = ::triton::tools::getenv("ROCM_PATH") + "/llvm/bin/ld.lld";
+  static const auto this_file_path = std::filesystem::path(__FILE__);
+  static const auto compiletime_path = this_file_path.parent_path()
+                                               .parent_path()
+                                               .parent_path()
+                                               .parent_path() /
+                                              "python" / "triton" / "third_party" /
+                                              "rocm" / "bin" / "ld.lld";
+  std::string lld_path = compiletime_path.string();
   int lld_result =
       llvm::sys::ExecuteAndWait(lld_path,
                                 {lld_path, "-flavor", "gnu",

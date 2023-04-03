@@ -8,6 +8,7 @@ using namespace mlir;
 using namespace mlir::triton;
 
 using ::mlir::LLVM::DotOpFMAConversionHelper;
+using ::mlir::LLVM::DotOpMFMAConversionHelper;
 using ::mlir::LLVM::DotOpMmaV1ConversionHelper;
 using ::mlir::LLVM::MMA16816ConversionHelper;
 using ::mlir::triton::gpu::BlockedEncodingAttr;
@@ -152,6 +153,28 @@ TritonGPUToLLVMTypeConverter::convertTritonTensorType(RankedTensorType type) {
         Type x2Ty = vec_ty(elemTy, 2);
         return struct_ty(SmallVector<Type>(elems, x2Ty));
       }
+
+#ifdef USE_ROCM
+      if (mmaLayout.isMI200()) {
+        const llvm::DenseMap<int, Type> targetTyMap = {
+            {32, elemTy},
+            {16, vec_ty(elemTy, 4)},
+            {8, IntegerType::get(ctx, 32)},
+        };
+        Type targetTy = targetTyMap.lookup(elemTy.getIntOrFloatBitWidth());
+        if (dotOpLayout.getOpIdx() == 0) { // $a
+          auto elems =
+              DotOpMFMAConversionHelper::getANumElemsPerThread(type, wpt[0]);
+          return struct_ty(SmallVector<Type>(elems, targetTy));
+        }
+        if (dotOpLayout.getOpIdx() == 1) { // $b
+          auto elems =
+              DotOpMFMAConversionHelper::getBNumElemsPerThread(type, wpt[1]);
+          return struct_ty(SmallVector<Type>(elems, targetTy));
+        }
+      }
+      // llvm_unreachable("if (mmaLayout.isMI200()) not implemented");
+#endif
     }
 
     llvm::errs() << "Unexpected dot operand layout detected in "

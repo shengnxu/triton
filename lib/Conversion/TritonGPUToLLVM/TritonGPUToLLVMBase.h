@@ -523,6 +523,10 @@ public:
           result = emitBaseIndexForMmaLayoutV1(loc, rewriter, mmaLayout, type);
         if (mmaLayout.isAmpere())
           result = emitBaseIndexForMmaLayoutV2(loc, rewriter, mmaLayout, type);
+#ifdef USE_ROCM
+        if (mmaLayout.isMI200())
+          llvm_unreachable("if (mmaLayout.isMI200()) not implemented");
+#endif
       } else {
         llvm_unreachable("unsupported emitBaseIndexForLayout");
       }
@@ -541,6 +545,10 @@ public:
         return emitOffsetForMmaLayoutV1(mmaLayout, type);
       if (mmaLayout.isAmpere())
         return emitOffsetForMmaLayoutV2(mmaLayout, type);
+#ifdef USE_ROCM
+      if (mmaLayout.isMI200())
+        llvm_unreachable("if (mmaLayout.isMI200()) not implemented");
+#endif
     }
     llvm_unreachable("unsupported emitOffsetForLayout");
   }

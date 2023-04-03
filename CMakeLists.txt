@@ -22,6 +22,8 @@ option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
 
 # Force TRITON_USE_ROCM for ROCm support
 set(TRITON_USE_ROCM ON)
+set(ROCM_DEFAULT_DIR "/opt/rocm")
+add_definitions( -DROCM_DEFAULT_DIR="${ROCM_DEFAULT_DIR}")
 
 # Ensure Python3 vars are set correctly
 #  used conditionally in this file and by lit tests
@@ -234,9 +236,19 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIRIR
   )
 
-  set(ROCM_LIBRARIES
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/rocm/libhsa-runtime64.so
+  if(EXISTS "$ENV{ROCM_PATH}/lib/libhsa-runtime64.so" )
+  set(ROCM_LIBRARIES 
+    "$ENV{ROCM_PATH}/lib/libhsa-runtime64.so"
   )
+  elseif(EXISTS "${ROCM_DEFAULT_DIR}/lib/libhsa-runtime64.so" )
+  set(ROCM_LIBRARIES 
+    "${ROCM_DEFAULT_DIR}/lib/libhsa-runtime64.so"
+  )
+  else()
+  set(ROCM_LIBRARIES 
+    ${CMAKE_CURRENT_SOURCE_DIR}/python/triton/third_party/rocm/lib/libhsa-runtime64.so
+  )
+  endif()
 
   if(WIN32)
     target_link_libraries(triton PRIVATE ${ROCM_LIBRARIES} ${LLVM_LIBRARIES} ${CMAKE_DL_LIBS}

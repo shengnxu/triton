@@ -1487,7 +1487,12 @@ def quiet():
 
 @functools.lru_cache()
 def rocm_path_dir():
-    return os.getenv("ROCM_PATH", default="/opt/rocm")
+    rocm_path = os.getenv("ROCM_PATH", default="/opt/rocm")
+    if ( os.path.exists(rocm_path)):
+        return rocm_path
+    else: 
+        base_dir = os.path.dirname(__file__)
+        return os.path.join(base_dir, "third_party", "rocm")
 
 def _build(name, src, srcdir):
     if torch.version.hip is not None:
@@ -1603,7 +1608,7 @@ def read_or_execute(cache_manager, force_compile, file_name, metadata,
 
 def get_amdgpu_arch_fulldetails():
     """
-    get the amdgpu fulll ISA details for compiling:
+    get the amdgpu full ISA details for compiling:
     i.e., arch_triple: amdgcn-amd-amdhsa; arch_name: gfx906; arch_features: sramecc+:xnack-
     """
     try:
@@ -1614,12 +1619,12 @@ def get_amdgpu_arch_fulldetails():
         arch_name_features = gfx_arch_details[1].split(':')
         arch_name = arch_name_features[0]
         arch_features = ""
-
         if (len(arch_name_features) == 3):
             arch_features = "+" + re.search('\\w+', arch_name_features[1]).group(0) + ","\
                             "-" + re.search('\\w+', arch_name_features[2]).group(0)
         return [arch_triple, arch_name, arch_features]
-    except:
+    except Exception as e:
+        print("Error: Attempting to get amgpu ISA Details {}".format(e))
         return None
 
 def make_stub(name, signature, constants):
@@ -1869,7 +1874,7 @@ def _get_amdgcn_bitcode_paths():
       gfx_arch_id = re.search('gfx(\\w+)', gfx_arch).group(1).strip()
 
       gpu_arch_specific_bitcode_library = 'oclc_isa_version_' + gfx_arch_id + ".bc"
-      bitcode_path_dir = os.path.join(Path(__file__).parent.resolve(), "third_party/rocm/lib/bitcode/")
+      bitcode_path_dir = os.path.join(Path(__file__).resolve(), "third_party/rocm/lib/bitcode/")
 
       amdgcn_bitcode_paths = {}
       i = 1

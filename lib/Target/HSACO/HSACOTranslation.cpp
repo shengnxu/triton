@@ -31,8 +31,10 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <iostream>
+#include <dlfcn.h>
 #include <memory>
 #include <random>
+#include <filesystem>
 
 namespace {
 
@@ -133,7 +135,31 @@ std::string generate_hsaco(llvm::Module *module, const std::string &triple,
   std::string hsaco_path = kernel_name + std::string(".hsaco");
 
   std::string error_message;
-  std::string lld_path = ::triton::tools::getenv("ROCM_PATH") + "/llvm/bin/ld.lld";
+
+  // Check in triton/third_party/rocm/llvm/bin first.  For whls this will be the 
+  // correct location. If not found, go back to using ROCM_PATH or /opt/rocm
+  static const auto this_library_path = [] {
+  Dl_info fileinfo;
+  if (dladdr(reinterpret_cast<void *>(generate_hsaco), &fileinfo) == 0) {
+    return std::filesystem::path();
+  }
+  return std::filesystem::path(fileinfo.dli_fname);
+  }();
+
+  static const auto compiletime_path = this_library_path.parent_path()
+                                              .parent_path()
+                                              .parent_path() /
+                                              "triton" / "third_party" /
+                                              "rocm" / "llvm" / "bin" / "ld.lld"; 
+  std::string lld_path = compiletime_path.string();
+  
+  if (!std::filesystem::exists(lld_path)) {
+    std::string rocm_path = ::triton::tools::getenv("ROCM_PATH");
+    lld_path = (rocm_path.empty()) ? ROCM_DEFAULT_DIR : rocm_path;
+    lld_path += "/llvm/bin/ld.lld";
+  }
+ 
+
   int lld_result =
       llvm::sys::ExecuteAndWait(lld_path,
                                 {lld_path, "-flavor", "gnu",

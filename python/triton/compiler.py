@@ -1613,7 +1613,13 @@ def quiet():
 
 @functools.lru_cache()
 def rocm_path_dir():
-    return os.getenv("ROCM_PATH", default="/opt/rocm")
+    default_path = os.path.join(os.path.dirname(__file__), "third_party", "rocm")
+    # Check if include files have been populated locally.  If so, then we are 
+    # most likely in a whl installation and he rest of our libraries should be here
+    if (os.path.exists(default_path+"/include/hip/hip_runtime.h")):
+        return default_path
+    else:
+        return os.getenv("ROCM_PATH", default="/opt/rocm")
 
 def _build(name, src, srcdir):
     if torch.version.hip is not None:
@@ -1729,7 +1735,7 @@ def read_or_execute(cache_manager, force_compile, file_name, metadata,
 
 def get_amdgpu_arch_fulldetails():
     """
-    get the amdgpu fulll ISA details for compiling:
+    get the amdgpu full ISA details for compiling:
     i.e., arch_triple: amdgcn-amd-amdhsa; arch_name: gfx906; arch_features: sramecc+:xnack-
     """
     try:
@@ -1740,12 +1746,12 @@ def get_amdgpu_arch_fulldetails():
         arch_name_features = gfx_arch_details[1].split(':')
         arch_name = arch_name_features[0]
         arch_features = ""
-
         if (len(arch_name_features) == 3):
             arch_features = "+" + re.search('\\w+', arch_name_features[1]).group(0) + ","\
                             "-" + re.search('\\w+', arch_name_features[2]).group(0)
         return [arch_triple, arch_name, arch_features]
-    except:
+    except Exception as e:
+        print("Error: Attempting to get amgpu ISA Details {}".format(e))
         return None
 
 def make_stub(name, signature, constants):

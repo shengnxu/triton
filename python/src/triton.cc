@@ -1566,7 +1566,6 @@ void init_triton_translation(py::module &m) {
       "get_arch_info",
       []() {
         return std::get<0>(getArchInfo());
-        // return getName();
       },
       ret::take_ownership);
 
@@ -1574,7 +1573,6 @@ void init_triton_translation(py::module &m) {
       "get_warp_size",
       []() {
         return std::get<1>(getArchInfo());
-        // return getWarpSize();
       },
       ret::take_ownership);
 

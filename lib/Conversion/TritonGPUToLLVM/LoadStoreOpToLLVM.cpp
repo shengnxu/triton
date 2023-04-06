@@ -10,6 +10,7 @@ using namespace mlir::triton;
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 
 // Contains some helper functions for both Load and Store conversions.
 struct LoadStoreConversionBase {
@@ -879,7 +880,7 @@ struct InsertSliceOpConversion
   LogicalResult
   matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // %dst = insert_slice %src into %dst[%offsets]
+    // %res = insert_slice %src into %dst[%offsets]
     Location loc = op->getLoc();
     Value dst = op.getDest();
     Value src = op.getSource();
@@ -893,7 +894,7 @@ struct InsertSliceOpConversion
     assert(srcLayout && "Unexpected srcLayout in InsertSliceOpConversion");
 
     auto dstTy = dst.getType().dyn_cast<RankedTensorType>();
-    auto dstLayout = dstTy.getEncoding().dyn_cast<SharedEncodingAttr>();
+    auto dstLayout = dstTy.getEncoding().dyn_cast<LDSEncodingAttr>();
     auto llDst = adaptor.getDest();
     assert(dstLayout && "Unexpected dstLayout in InsertSliceOpConversion");
     assert(op.hasUnitStride() &&
@@ -927,8 +928,8 @@ struct InsertSliceOpConversion
 
     auto llSrc = adaptor.getSource();
     auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTy);
-    storeDistributedToShared(src, llSrc, srcStrides, srcIndices, dst, smemBase,
-                             elemTy, loc, rewriter);
+    storeDistributedToLds(src, llSrc, srcStrides, srcIndices, dst, smemBase,
+                          elemTy, loc, rewriter);
     // Barrier is not necessary.
     // The membar pass knows that it writes to shared memory and will handle it
     // properly.

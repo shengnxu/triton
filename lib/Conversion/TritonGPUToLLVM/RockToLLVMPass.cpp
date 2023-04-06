@@ -183,6 +183,23 @@ public:
       funcPatterns.add<FuncOpConversion>(typeConverter, numWarps,
                                          /*benefit=*/1);
       funcPatterns.add<ReturnOpConversion>(typeConverter);
+      // Copied from LowerGpuOpsToROCDLOps.cpp
+      // We need this function to teach the typeConverter how to lower the
+      // enum-style gpu memory space into integers. Otherwise, fromStaticShape
+      // will complain.
+      populateGpuMemorySpaceAttributeConversions(
+          typeConverter, [](mlir::gpu::AddressSpace space) {
+              switch (space) {
+              case mlir::gpu::AddressSpace::Global:
+                  return 1;
+              case mlir::gpu::AddressSpace::Workgroup:
+                  return 3;
+              case mlir::gpu::AddressSpace::Private:
+                  return 5;
+              }
+              llvm_unreachable("unknown address space enum value");
+              return 0;
+          });
       mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                             funcPatterns);
       if (failed(

@@ -7,7 +7,7 @@ mlir::OpTrait::impl::verifyResultsAreSharedEncoding(Operation *op) {
     return failure();
 
   for (auto result : op->getResults())
-    if (!isSharedEncoding(result))
+    if (!(isSharedEncoding(result) || isLDSEncoding(result)))
       return op->emitOpError() << "requires all results to be shared encoding";
 
   return success();

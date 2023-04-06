@@ -36,6 +36,8 @@ public:
       auto srcEncoding = srcType.getEncoding();
       if (srcEncoding.isa<triton::gpu::SharedEncodingAttr>())
         return;
+      if (srcEncoding.isa<triton::gpu::LDSEncodingAttr>())
+        return;
       auto dstDotOp =
           dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
       if (!dstDotOp)

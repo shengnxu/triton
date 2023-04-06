@@ -47,7 +47,7 @@ class LoopPipeliner {
   DenseMap<Value, Value> loadsMapping;
   /// load => buffer
   DenseMap<Value, Value> loadsBuffer;
-  /// load => buffer type (with shared layout after swizzling)
+  /// load => buffer type (with lds layout)
   DenseMap<Value, RankedTensorType> loadsBufferType;
   /// load => buffer at stage N
   DenseMap<Value, SmallVector<Value>> loadStageBuffer;
@@ -228,7 +228,8 @@ LogicalResult LoopPipeliner::initialize() {
           break;
         auto tensorType =
             use->getResult(0).getType().dyn_cast<RankedTensorType>();
-        if (!tensorType.getEncoding().isa<ttg::SharedEncodingAttr>())
+        if (!(tensorType.getEncoding().isa<ttg::SharedEncodingAttr>() ||
+              tensorType.getEncoding().isa<ttg::LDSEncodingAttr>()))
           break;
         use = *use->getResult(0).getUsers().begin();
       }
@@ -245,11 +246,13 @@ LogicalResult LoopPipeliner::initialize() {
             SmallVector<int64_t> bufferShape(ty.getShape().begin(),
                                              ty.getShape().end());
             bufferShape.insert(bufferShape.begin(), numStages);
-            auto sharedEnc = ttg::SharedEncodingAttr::get(
-                ty.getContext(), dotOpEnc, ty.getShape(),
-                triton::gpu::getOrder(ty.getEncoding()), ty.getElementType());
-            loadsBufferType[loadOp] = RankedTensorType::get(
-                bufferShape, ty.getElementType(), sharedEnc);
+            // TODO: Make kpack one of the tuning parameters and pass it from
+            // kernel launch
+            uint32_t kpack = 4;
+            auto ldsEnc =
+                ttg::LDSEncodingAttr::get(ty.getContext(), dotOpEnc, kpack);
+            loadsBufferType[loadOp] =
+                RankedTensorType::get(bufferShape, ty.getElementType(), ldsEnc);
           }
         }
       }

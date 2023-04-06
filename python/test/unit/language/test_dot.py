@@ -80,27 +80,46 @@ def to_numpy(x):
     else:
         raise ValueError(f"Not a triton-compatible tensor: {x}")
 
-
+# Restrictions of supported dim:
+# 1. M and N must be a power of 2, which is a restriction from triton
+#    https://github.com/openai/triton/blob/7f3f58f3322d537125c6f6a18d50f070d643994b/include/triton/Dialect/Triton/IR/TritonOps.td#L19
+# 2. num_warps must be a power of 2, which is a restriction from triton
+#    https://github.com/openai/triton/blob/7f3f58f3322d537125c6f6a18d50f070d643994b/python/triton/runtime/jit.py#L291
+# 3. The largest MxN is 128x64 or 64x128 due to limitation of LDS size
+# 4. When M and N is fixed, the largest K can be found in the following list.
+#    For example, when M=128, N=64, the largest supported K is 64.
+#    This is also due to limited LDS size
+# 5. The smallest M or N dim is 16. This is due to the mfma instruction
+#    selection logic in rocMLIR. Now we only select 32x32 or 16x16 mfma
+#    output matrix as the building block for larger matrices.
+# 6. The smallest K dim is 16, which is a restriction from triton
+#    https://github.com/openai/triton/blob/7f3f58f3322d537125c6f6a18d50f070d643994b/python/triton/language/semantic.py#L1182
 @pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype",
                          [(*shape_nw, col_a, col_b, epilogue, allow_tf32, dtype)
-                          for shape_nw in [[128, 64, 16, 8], [64, 128, 16, 8],
+                          for shape_nw in [[128, 64, 16, 16], [64, 128, 16, 16],
+                                           [128, 64, 16, 8], [64, 128, 16, 8],
                                            [128, 64, 16, 4], [64, 128, 16, 4],
                                            [128, 64, 16, 2], [64, 128, 16, 2],
                                            [128, 64, 16, 1], [64, 128, 16, 1],
+                                           [128, 64, 32, 16], [64, 128, 32, 16],
                                            [128, 64, 32, 8], [64, 128, 32, 8],
                                            [128, 64, 32, 4], [64, 128, 32, 4],
                                            [128, 64, 32, 2], [64, 128, 32, 2],
                                            [128, 64, 32, 1], [64, 128, 32, 1],
+                                           [128, 64, 64, 16], [64, 128, 64, 16],
                                            [128, 64, 64, 8], [64, 128, 64, 8],
                                            [128, 64, 64, 4], [64, 128, 64, 4],
                                            [128, 64, 64, 2], [64, 128, 64, 2],
                                            [128, 64, 64, 1], [64, 128, 64, 1],
+                                           [128, 32, 16, 8], [32, 128, 16, 8],
                                            [128, 32, 16, 4], [32, 128, 16, 4],
                                            [128, 32, 16, 2], [32, 128, 16, 2],
                                            [128, 32, 16, 1], [32, 128, 16, 1],
+                                           [128, 32, 32, 8], [32, 128, 32, 8],
                                            [128, 32, 32, 4], [32, 128, 32, 4],
                                            [128, 32, 32, 2], [32, 128, 32, 2],
                                            [128, 32, 32, 1], [32, 128, 32, 1],
+                                           [128, 32, 64, 8], [32, 128, 64, 8],
                                            [128, 32, 64, 4], [32, 128, 64, 4],
                                            [128, 32, 64, 2], [32, 128, 64, 2],
                                            [128, 32, 64, 1], [32, 128, 64, 1],
@@ -113,22 +132,32 @@ def to_numpy(x):
                                            [128, 16, 64, 4], [16, 128, 64, 4],
                                            [128, 16, 64, 2], [16, 128, 64, 2],
                                            [128, 16, 64, 1], [16, 128, 64, 1],
+                                           [64, 64, 16, 8],
                                            [64, 64, 16, 4],
                                            [64, 64, 16, 2],
                                            [64, 64, 16, 1],
+                                           [64, 64, 32, 8],
                                            [64, 64, 32, 4],
                                            [64, 64, 32, 2],
                                            [64, 64, 32, 1],
+                                           [64, 64, 64, 8],
                                            [64, 64, 64, 4],
                                            [64, 64, 64, 2],
                                            [64, 64, 64, 1],
+                                           [64, 64, 128, 8],
                                            [64, 64, 128, 4],
                                            [64, 64, 128, 2],
                                            [64, 64, 128, 1],
+                                           [64, 32, 16, 4], [32, 64, 16, 4],
+                                           [64, 32, 16, 2], [32, 64, 16, 2],
+                                           [64, 32, 16, 1], [32, 64, 16, 1],
+                                           [64, 32, 32, 4], [32, 64, 32, 4],
                                            [64, 32, 32, 2], [32, 64, 32, 2],
                                            [64, 32, 32, 1], [32, 64, 32, 1],
+                                           [64, 32, 64, 4], [32, 64, 64, 4],
                                            [64, 32, 64, 2], [32, 64, 64, 2],
                                            [64, 32, 64, 1], [32, 64, 64, 1],
+                                           [64, 32, 128, 4], [32, 64, 128, 4],
                                            [64, 32, 128, 2], [32, 64, 128, 2],
                                            [64, 32, 128, 1], [32, 64, 128, 1],
                                            [64, 16, 16, 2], [16, 64, 16, 2],

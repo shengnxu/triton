@@ -9,8 +9,8 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getElemsPerThread;
-using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::LDSEncodingAttr;
+using ::mlir::triton::gpu::SharedEncodingAttr;
 
 // Contains some helper functions for both Load and Store conversions.
 struct LoadStoreConversionBase {

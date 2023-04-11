@@ -189,16 +189,16 @@ public:
       // will complain.
       populateGpuMemorySpaceAttributeConversions(
           typeConverter, [](mlir::gpu::AddressSpace space) {
-              switch (space) {
-              case mlir::gpu::AddressSpace::Global:
-                  return 1;
-              case mlir::gpu::AddressSpace::Workgroup:
-                  return 3;
-              case mlir::gpu::AddressSpace::Private:
-                  return 5;
-              }
-              llvm_unreachable("unknown address space enum value");
-              return 0;
+            switch (space) {
+            case mlir::gpu::AddressSpace::Global:
+              return 1;
+            case mlir::gpu::AddressSpace::Workgroup:
+              return 3;
+            case mlir::gpu::AddressSpace::Private:
+              return 5;
+            }
+            llvm_unreachable("unknown address space enum value");
+            return 0;
           });
       mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                             funcPatterns);

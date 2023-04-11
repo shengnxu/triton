@@ -8,8 +8,8 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getElemsPerThread;
-using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::LDSEncodingAttr;
+using ::mlir::triton::gpu::SharedEncodingAttr;
 
 struct ReturnOpConversion : public ConvertOpToLLVMPattern<func::ReturnOp> {
   using ConvertOpToLLVMPattern<func::ReturnOp>::ConvertOpToLLVMPattern;

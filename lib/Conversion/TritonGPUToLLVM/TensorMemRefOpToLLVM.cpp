@@ -27,7 +27,14 @@ public:
     if (!(srcEncoding && srcEncoding.isa<LDSEncodingAttr>()))
       return failure();
 
-    Value smemBase = getSharedMemoryBase(loc, rewriter, src);
+    Value smemBase;
+    if (allocation->getBufferId(src) == Allocation::InvalidBufferId) {
+      auto smemObj =
+          getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(), rewriter);
+      smemBase = smemObj.base;
+    } else {
+      smemBase = getSharedMemoryBase(loc, rewriter, src);
+    }
     Value res = op.getResult();
     auto resTy = res.getType().dyn_cast<MemRefType>();
 

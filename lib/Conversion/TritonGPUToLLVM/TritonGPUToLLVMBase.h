@@ -372,9 +372,9 @@ public:
     // kpack, where kpacksPerBlock x kpack = k. The data layout is similar to a
     // column major layout, except each column is a super-column of [m|n] x
     // kpack. For each super-column, the data layout is row major.
-    auto dstPtrTy = ptr_ty(resElemTy, 3);
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
-    Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);
+    Value dstPtrBase = gep(ptrTy, resElemTy, smemObj.base, dstOffset);
 
     auto srcEncoding = srcTy.getEncoding();
     auto srcShape = srcTy.getShape();
@@ -402,7 +402,7 @@ public:
           mul(superColId, mul(i32_val(kpack), i32_val(nonKDim)));
       Value offInSuperCol = add(mul(rowInSuperCol, i32_val(kpack)), idInRow);
       Value offset = add(superColOff, offInSuperCol);
-      ret[elemIdx] = gep(dstPtrTy, dstPtrBase, offset);
+      ret[elemIdx] = gep(ptrTy, resElemTy, dstPtrBase, offset);
     }
     return ret;
   }

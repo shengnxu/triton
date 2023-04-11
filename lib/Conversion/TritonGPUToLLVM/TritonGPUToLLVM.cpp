@@ -474,8 +474,6 @@ struct AllocTensorOpConversion
     auto resultTy = op.getType().dyn_cast<RankedTensorType>();
     auto llvmElemTy =
         getTypeConverter()->convertType(resultTy.getElementType());
-    auto elemPtrTy = ptr_ty(llvmElemTy, 3);
-    smemBase = bitcast(smemBase, elemPtrTy);
     auto order = resultTy.getEncoding().cast<LDSEncodingAttr>().getOrder();
     // Workaround for 3D tensors
     // TODO: we need to modify the pipeline pass to give a proper shared
@@ -539,8 +537,8 @@ struct ExtractSliceOpConversion
     }
 
     auto llvmElemTy = getTypeConverter()->convertType(srcTy.getElementType());
-    auto elemPtrTy = ptr_ty(llvmElemTy, 3);
-    smemObj = SharedMemoryObject(gep(elemPtrTy, smemObj.base, offset),
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
+    smemObj = SharedMemoryObject(gep(ptrTy, llvmElemTy, smemObj.base, offset),
                                  strideVals, offsetVals);
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
     rewriter.replaceOp(op, retVal);

@@ -103,6 +103,8 @@ TritonGPUToLLVMTypeConverter::convertTritonTensorType(RankedTensorType type) {
     // base ptr
     auto ptrType =
         LLVM::LLVMPointerType::get(convertType(type.getElementType()), 3);
+    if (layout.isa<LDSEncodingAttr>())
+        ptrType = LLVM::LLVMPointerType::get(ctx, 3);
     types.push_back(ptrType);
     // shape dims
     auto rank = type.getRank();

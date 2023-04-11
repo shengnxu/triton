@@ -923,8 +923,8 @@ struct InsertSliceOpConversion
     // object
     auto offset = dot(rewriter, loc, offsets, smemObj.strides);
     auto elemTy = getTypeConverter()->convertType(dstTy.getElementType());
-    auto elemPtrTy = ptr_ty(elemTy, 3);
-    auto smemBase = gep(elemPtrTy, smemObj.base, offset);
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
+    auto smemBase = gep(ptrTy, elemTy, smemObj.base, offset);
 
     auto llSrc = adaptor.getSource();
     auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTy);

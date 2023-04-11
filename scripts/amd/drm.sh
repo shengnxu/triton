@@ -1,10 +1,9 @@
 #!/bin/bash
 
 
-if [[ -z "${TRITON_ROCM_DIR}" ]]; then
-  TRITON_ROCM_DIR=python/triton/third_party/rocm
+if [[ -z "${PREFIX}" ]]; then
+  PREFIX=/opt/rocm
 fi
-
 ###########################
 ### prereqs
 ###########################
@@ -127,27 +126,52 @@ index a5007ffc..8ae66f28 100644
  	/* 1st valid line is file version */
  	while ((n = getline(&line, &len, fp)) != -1) {
  		/* trim trailing newline */
--- 
+diff --git a/amdgpu/meson.build b/amdgpu/meson.build
+index 20bf6244..700ab38a 100644
+--- a/amdgpu/meson.build
++++ b/amdgpu/meson.build
+@@ -36,7 +36,7 @@ libdrm_amdgpu = library(
+   ],
+   include_directories : [inc_root, inc_drm],
+   link_with : libdrm,
+-  dependencies : [dep_threads, dep_atomic_ops, dep_rt],
++  dependencies : [dep_threads, dep_atomic_ops, dep_rt, dep_dl],
+   version : '1.0.0',
+   install : true,
+ )
+diff --git a/meson.build b/meson.build
+index 3c2e171d..7929dd12 100644
+--- a/meson.build
++++ b/meson.build
+@@ -190,11 +190,8 @@ endif
+ summary('VC4', with_vc4)
+ 
+ # Among others FreeBSD does not have a separate dl library.
+-if not cc.has_function('dlsym')
+-  dep_dl = cc.find_library('dl', required : with_nouveau)
+-else
+-  dep_dl = []
+-endif
++dep_dl = cc.find_library('dl', required : with_amdgpu)
++
+ # clock_gettime might require -rt, or it might not. find out
+ if not cc.has_function('clock_gettime', prefix : '#define _GNU_SOURCE\n#include <time.h>')
+   # XXX: untested
+--
 EOF
 
 ###########################
 ### build
 ###########################
-meson builddir --prefix=${PWD}/
 meson builddir --prefix=$PREFIX
 pushd builddir
 ninja install
-
 popd
 popd
 
 mkdir -p $TRITON_ROCM_DIR/lib/data
-find . | grep libdrm
-find . | grep ids
-ls -l ./drm/builddir/amdgpu/
-ls -l ./drm/builddir/
-cp drm/builddir/amdgpu/libdrm_amdgpu.so* $TRITON_ROCM_DIR/lib/
-cp drm/builddir/libdrm.so* $TRITON_ROCM_DIR/lib/
-cp drm/data/amdgpu.ids $TRITON_ROCM_DIR/data/
+cp drm/builddir/amdgpu/libdrm_amdgpu.so.1 $TRITON_ROCM_DIR/lib/
+cp drm/builddir/libdrm.so2 $TRITON_ROCM_DIR/lib/
+cp drm/data/amdgpu.ids $TRITON_ROCM_DIR/lib/data
 rm -rf drm
-
+#

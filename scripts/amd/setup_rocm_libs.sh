@@ -4,17 +4,18 @@ set -ex
 
 CWD=$(dirname "$0")
 
-echo "Building libdrm"
-$CWD/drm.sh
-
 echo "Collecting Necessary ROCM libraries"
 if [[ -z "${ROCM_VERSION}" ]]; then
   ROCM_VERSION=5.4.2
 fi
+
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
   TRITON_ROCM_DIR=python/triton/third_party/rocm
 fi
   
+EXTRACT_DIR=/tmp/vanilla_extract
+mkdir -p $EXTRACT_DIR
+
 save_IFS="$IFS"
 IFS=. ROCM_VERSION_ARRAY=(${ROCM_VERSION})
 IFS="$save_IFS"
@@ -37,11 +38,11 @@ OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
 if [[ $ROCM_INT -eq 50402 ]]; then
     if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
         ROCM_PKGS=(
-            "https://repo.radeon.com/rocm/rhel8/5.4.2/main/hsa-rocr5.4.2-1.7.0.50402-104.el8.x86_64.rpm"
-            "https://repo.radeon.com/rocm/rhel8/5.4.2/main/hip-runtime-amd-5.4.22803.50402-104.el8.x86_64.rpm"
-            "https://repo.radeon.com/rocm/rhel8/5.4.2/main/hip-devel-5.4.22803.50402-104.el8.x86_64.rpm"
-            "https://repo.radeon.com/rocm/rhel8/5.4.2/main/rocm-llvm5.4.2-15.0.0.22506.50402-104.el8.x86_64.rpm"
-            "https://repo.radeon.com/rocm/rhel8/5.4.2/main/rocminfo5.4.2-1.0.0.50402-104.el8.x86_64.rpm"
+            "https://repo.radeon.com/rocm/yum/5.4.2/main/hsa-rocr-1.7.0.50402-104.el7.x86_64.rpm"
+            "https://repo.radeon.com/rocm/yum/5.4.2/main/hip-runtime-amd-5.4.22803.50402-104.el7.x86_64.rpm"
+            "https://repo.radeon.com/rocm/yum/5.4.2/main/hip-devel-5.4.22803.50402-104.el7.x86_64.rpm"
+            "https://repo.radeon.com/rocm/yum/5.4.2/main/rocm-llvm-15.0.0.22506.50402-104.el7.x86_64.rpm"
+            "https://repo.radeon.com/rocm/yum/5.4.2/main/comgr-2.4.0.50402-104.el7.x86_64.rpm"
         )
 
     elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -50,20 +51,19 @@ if [[ $ROCM_INT -eq 50402 ]]; then
             "https://repo.radeon.com/rocm/apt/5.4.2/pool/main/h/hip-runtime-amd5.4.2/hip-runtime-amd5.4.2_5.4.22803.50402-104~22.04_amd64.deb"
             "https://repo.radeon.com/rocm/apt/5.4.2/pool/main/h/hip-dev5.4.2/hip-dev5.4.2_5.4.22803.50402-104~22.04_amd64.deb"
             "https://repo.radeon.com/rocm/apt/5.4.2/pool/main/r/rocm-llvm5.4.2/rocm-llvm5.4.2_15.0.0.22506.50402-104~22.04_amd64.deb"
-            "https://repo.radeon.com/rocm/apt/5.4.2/pool/main/r/rocminfo5.4.2/rocminfo5.4.2_1.0.0.50402-104~22.04_amd64.deb"
+            "https://repo.radeon.com/rocm/apt/5.4.2/pool/main/c/comgr5.4.2/comgr5.4.2_2.4.0.50402-104~20.04_amd64.deb"
         )
     fi
 fi
 
-EXTRACT_DIR=vanilla_extract
-mkdir -p $EXTRACT_DIR
 if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    OS_SO=(
-        "/usr/lib64/libnuma.so.1"
-        "/usr/lib64/libelf.so.1"
-    )
+
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+    LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
+    LIBELF_PATH="/usr/lib64/libelf.so.1"
+
     #install elf and numa packages if not already done
-    yum install -y elfutils-libelf numactl-libs
+    yum install -y elfutils-libelf numactl-libs ncurses-libs
     
     #download and extract ROCM packages
     pushd $EXTRACT_DIR
@@ -81,8 +81,17 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     )
     #install elf and numa packages if not already done
     apt-get update -y
-    apt-get install -y libelf1 libnuma1 curl
+    apt-get install -y libelf1 libnuma1 curl libncurses6
     apt-get clean
+
+    LIBNUMA_PATH="/usr/lib/x86_64-linux-gnu/libnuma.so.1"
+    LIBELF_PATH="/usr/lib/x86_64-linux-gnu/libelf.so.1"
+
+    if [[ $ROCM_INT -ge 50300 ]]; then
+        LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.6"
+    else
+        LIBTINFO_PATH="/lib/x86_64-linux-gnu/libtinfo.so.5"
+    fi	
 
     #download and extract ROCM packages
     for pkg  in "${ROCM_PKGS[@]}"
@@ -95,25 +104,45 @@ else
     echo "ERROR: $OS_NAME is not a supported Operating System"
 fi
 
+OS_SO=($LIBELF_PATH $LIBNUMA_PATH\
+       $LIBTINFO_PATH)
+
+echo "Building libdrm"
+PREFIX=$EXTRACT_DIR/opt/rocm-$ROCM_VERSION $CWD/drm.sh
+
 # Required ROCm libraries from extracted packages
-ROCM_FILES=(
-    "lib/libhsa-runtime64.so"
-    "lib/libamdhip64.so"
-    "bin/rocminfo"
-    "llvm/bin/ld.lld"
-    "llvm/bin/lld"
-    "include/hip"
+ROCM_SO=(
+    "libhsa-runtime64.so.1"
+    "libamdhip64.so.5"
+    "libamd_comgr.so.2"
+    "libdrm.so.2"
+    "libdrm_amdgpu.so.1"
 )
-for lib in "${ROCM_FILES[@]}"
+
+mkdir -p $TRITON_ROCM_DIR/lib
+
+for lib in "${ROCM_SO[@]}"
 do
-    mkdir -p `dirname $TRITON_ROCM_DIR/$lib`
-    cp -r $EXTRACT_DIR/opt/rocm-$ROCM_VERSION/$lib* `dirname $TRITON_ROCM_DIR/$lib`
+    if [[ -f $EXTRACT_DIR/opt/rocm-$ROCM_VERSION/lib/$lib ]]; then 
+        filepath=$EXTRACT_DIR/opt/rocm-$ROCM_VERSION/lib/$lib
+    else
+        filepath=$EXTRACT_DIR/opt/rocm-$ROCM_VERSION/lib64/$lib
+    fi
+    cp $filepath $TRITON_ROCM_DIR/lib/
 done
 
+echo "Extracting OS_SO files"
 for lib in "${OS_SO[@]}"
 do
-    cp $lib $TRITON_ROCM_DIR/lib/
+  cp $lib $TRITON_ROCM_DIR/lib/
 done
+
+# Copy Include Files
+cp -r $EXTRACT_DIR/opt/rocm-$ROCM_VERSION/include $TRITON_ROCM_DIR/
+
+#copy linker
+mkdir -p $TRITON_ROCM_DIR/llvm/bin
+cp  $EXTRACT_DIR/opt/rocm-$ROCM_VERSION/llvm/bin/ld.lld $TRITON_ROCM_DIR/llvm/bin/
 
 rm -rf $EXTRACT_DIR
 

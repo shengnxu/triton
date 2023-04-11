@@ -1874,7 +1874,7 @@ def _get_amdgcn_bitcode_paths():
       gfx_arch_id = re.search('gfx(\\w+)', gfx_arch).group(1).strip()
 
       gpu_arch_specific_bitcode_library = 'oclc_isa_version_' + gfx_arch_id + ".bc"
-      bitcode_path_dir = os.path.join(Path(__file__).resolve(), "third_party/rocm/lib/bitcode/")
+      bitcode_path_dir = os.path.join(Path(__file__).parent.resolve(), "third_party/rocm/lib/bitcode/")
 
       amdgcn_bitcode_paths = {}
       i = 1

@@ -246,7 +246,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   )
   else()
   set(ROCM_LIBRARIES 
-    ${CMAKE_CURRENT_SOURCE_DIR}/python/triton/third_party/rocm/lib/libhsa-runtime64.so
+    ${CMAKE_CURRENT_SOURCE_DIR}/python/triton/third_party/rocm/lib/libhsa-runtime64.so.1
   )
   endif()
 

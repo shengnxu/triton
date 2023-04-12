@@ -571,9 +571,9 @@ private:
         // Obtain the insert_slice op
         // Note that insert_slice_async should be decomposed to
         // load and insert_slice already
-        auto insertSliceOpA = dyn_cast<tensor::InsertSliceOp>(
+        auto insertSliceOpA = dyn_cast<triton::gpu::InsertSliceOp>(
             extractSliceOpA.getSource().getDefiningOp());
-        auto insertSliceOpB = dyn_cast<tensor::InsertSliceOp>(
+        auto insertSliceOpB = dyn_cast<triton::gpu::InsertSliceOp>(
             extractSliceOpB.getSource().getDefiningOp());
         if (!insertSliceOpA || !insertSliceOpB) {
           emitError(loc) << "Failed to find insert_slice op.\n";
@@ -834,21 +834,12 @@ private:
       auto offsets = SmallVector<OpFoldResult>(dstTy.getRank(), intAttr(0));
       auto sizes = SmallVector<OpFoldResult>(dstTy.getRank(), intAttr(1));
       auto strides = SmallVector<OpFoldResult>(dstTy.getRank(), intAttr(1));
-      auto index = insertSliceAsyncOp.getIndex();
-      if (auto constantOp = llvm::dyn_cast_or_null<mlir::arith::ConstantOp>(
-              index.getDefiningOp())) {
-        auto integerAttr =
-            constantOp.getValue().dyn_cast_or_null<mlir::IntegerAttr>();
-        int64_t intVal = integerAttr.getValue().getSExtValue();
-        offsets[axis] = intAttr(intVal);
-      } // else
-        // llvm::outs() << "The index does not come from a constant op\n";
-      // offsets[axis] = insertSliceAsyncOp.getIndex();
+      offsets[axis] = insertSliceAsyncOp.getIndex();
       for (size_t i = 0; i < dstTy.getRank(); i++) {
         if (i != axis)
           sizes[i] = intAttr(dstTy.getShape()[i]);
       }
-      auto insertSliceOp = builder.create<tensor::InsertSliceOp>(
+      auto insertSliceOp = builder.create<triton::gpu::InsertSliceOp>(
           insertSliceAsyncOp.getLoc(), loadOp, insertSliceAsyncOp.getDst(),
           offsets, sizes, strides);
 
@@ -861,6 +852,9 @@ private:
     mod.walk([&](triton::gpu::AsyncCommitGroupOp asyncCommitGroupOp) -> void {
       if (!triton::gpu::AsyncCommitGroupOp::isSupported(computeCapability))
         asyncCommitGroupOp.erase();
+      OpBuilder builder(asyncCommitGroupOp);
+      builder.create<mlir::amdgpu::LDSBarrierOp>(asyncCommitGroupOp.getLoc());
+      asyncCommitGroupOp.erase();
     });
 
     mod.walk([&](triton::gpu::AsyncWaitOp asyncWaitOp) -> void {

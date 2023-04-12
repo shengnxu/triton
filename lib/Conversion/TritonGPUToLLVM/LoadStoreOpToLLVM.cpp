@@ -873,12 +873,12 @@ struct AtomicRMWOpConversion
 };
 
 struct InsertSliceOpConversion
-    : public ConvertTritonGPUOpToLLVMPattern<tensor::InsertSliceOp> {
+    : public ConvertTritonGPUOpToLLVMPattern<triton::gpu::InsertSliceOp> {
   using ConvertTritonGPUOpToLLVMPattern<
-      tensor::InsertSliceOp>::ConvertTritonGPUOpToLLVMPattern;
+      triton::gpu::InsertSliceOp>::ConvertTritonGPUOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::gpu::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     // %res = insert_slice %src into %dst[%offsets]
     Location loc = op->getLoc();

@@ -853,7 +853,7 @@ private:
       if (!triton::gpu::AsyncCommitGroupOp::isSupported(computeCapability))
         asyncCommitGroupOp.erase();
       OpBuilder builder(asyncCommitGroupOp);
-      builder.create<mlir::amdgpu::LDSBarrierOp>(asyncCommitGroupOp.getLoc());
+      builder.create<mlir::rock::LDSBarrierOp>(asyncCommitGroupOp.getLoc());
       asyncCommitGroupOp.erase();
     });
 

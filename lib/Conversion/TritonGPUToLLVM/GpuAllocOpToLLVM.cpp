@@ -57,14 +57,25 @@ struct MIIdRewritePattern : public OpRewritePattern<Tmi> {
   }
 };
 
+template <typename Tmi, typename Tgpu>
+struct MIOpRewritePattern : public OpRewritePattern<Tmi> {
+  using OpRewritePattern<Tmi>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(Tmi op, PatternRewriter &b) const override {
+    b.create<Tgpu>(op.getLoc());
+    b.eraseOp(op);
+    return success();
+  }
+};
+
 void populateGpuAllocOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, AxisInfoAnalysis &axisInfoAnalysis,
     const Allocation *allocation, Value smem, PatternBenefit benefit,
     MLIRContext *ctx) {
   patterns.add<MIGPUAllocRewritePattern>(typeConverter, benefit);
-  // patterns.add<WorkitemIdRewritePattern>(typeConverter, benefit);
-  patterns
-      .add<MIIdRewritePattern<mlir::rock::WorkitemIdOp, mlir::gpu::ThreadIdOp>>(
-          ctx);
+  patterns.add<
+      MIIdRewritePattern<mlir::rock::WorkitemIdOp, mlir::gpu::ThreadIdOp>,
+      MIOpRewritePattern<mlir::rock::LDSBarrierOp, mlir::amdgpu::LDSBarrierOp>>(
+      ctx);
 }

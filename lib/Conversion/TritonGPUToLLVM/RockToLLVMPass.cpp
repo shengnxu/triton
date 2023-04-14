@@ -266,9 +266,10 @@ public:
     populateAMDGPUToROCDLConversionPatterns(typeConverter, patterns,
                                             *maybeChipset);
     populateVectorToLLVMConversionPatterns(typeConverter, patterns);
+    cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns);
     populateFinalizeMemRefToLLVMConversionPatterns(typeConverter, patterns);
-    mlir::populateGpuToROCDLConversionPatterns(typeConverter, patterns,
-                                               mlir::gpu::amd::HIP);
+    populateGpuToROCDLConversionPatterns(typeConverter, patterns,
+                                         mlir::gpu::amd::HIP);
 #else
     mlir::populateGpuToNVVMConversionPatterns(typeConverter, patterns);
 #endif

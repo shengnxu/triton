@@ -8,6 +8,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/ROCDL/ROCDLToLLVMIRTranslation.h"
@@ -248,6 +249,7 @@ static bool linkExternLib(llvm::Module &module, llvm::StringRef name,
 std::unique_ptr<llvm::Module>
 translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module) {
   DialectRegistry registry;
+  mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
   mlir::registerROCDLDialectTranslation(registry);
   mlir::registerNVVMDialectTranslation(registry);
@@ -298,7 +300,11 @@ std::unique_ptr<llvm::Module>
 translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
                            mlir::ModuleOp module, int computeCapability) {
   mlir::PassManager pm(module->getContext());
-  applyPassManagerCLOptions(pm);
+  mlir::registerPassManagerCLOptions();
+  if (failed(applyPassManagerCLOptions(pm))) {
+    llvm::errs() << "failed to apply pass manager CL options\n";
+    return nullptr;
+  }
   auto printingFlags = mlir::OpPrintingFlags();
   printingFlags.elideLargeElementsAttrs(16);
   pm.enableIRPrinting(
@@ -311,6 +317,10 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
       /*printAfterOnlyOnChange=*/true,
       /*printAfterOnlyOnFailure*/ false, llvm::dbgs(), printingFlags);
 
+  auto setIndexBitWidth = [](auto options, unsigned bitWidth) {
+    options.indexBitwidth = bitWidth;
+    return options;
+  };
   pm.addPass(mlir::createConvertSCFToCFPass());
   pm.addPass(mlir::createConvertIndexToLLVMPass());
   pm.addPass(createConvertTritonGPUToRockPass(computeCapability));
@@ -326,18 +336,16 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
       mlir::rock::createRockBufferLoadMergePass());
   pm.addPass(mlir::rock::createRockLoopsToCfPass());
   pm.addPass(createConvertRockToLLVMPass(computeCapability));
-  ArithToLLVMConversionPassOptions arithToLLVMOption;
-  arithToLLVMOption.indexBitwidth = 32;
-  pm.addPass(mlir::createArithToLLVMConversionPass(arithToLLVMOption));
-  ConvertControlFlowToLLVMPassOptions cfToLLVMOption;
-  cfToLLVMOption.indexBitwidth = 32;
+  pm.addPass(mlir::createArithToLLVMConversionPass(
+      setIndexBitWidth(ArithToLLVMConversionPassOptions{}, 32)));
   pm.addPass(mlir::createCanonicalizerPass());
   // Simplify the IR
   pm.addPass(mlir::createCSEPass());
   pm.addPass(mlir::createSymbolDCEPass());
 #ifdef USE_ROCM
   pm.addPass(mlir::createConvertSCFToCFPass());
-  pm.addPass(createConvertControlFlowToLLVMPass(cfToLLVMOption));
+  pm.addPass(createConvertControlFlowToLLVMPass(
+      setIndexBitWidth(ConvertControlFlowToLLVMPassOptions{}, 32)));
 #endif
 
   if (failed(pm.run(module))) {

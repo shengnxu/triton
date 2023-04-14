@@ -1,6 +1,5 @@
 add_mlir_dialect_library(MLIRRockTransforms
   AffixTuningParameters.cpp
-  AlignTiling.cpp
   BlockwiseGemmToThreadwise.cpp
   BufferLoadMerge.cpp
   BufferizableOpInterfaceImpl.cpp

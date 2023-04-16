@@ -33,6 +33,7 @@ jobs:
           # strip off initial 'pytorch-triton-rocm-v'
           VERSION=${GITHUB_REF_NAME#pytorch-triton-rocm-v}
           echo Version: $VERSION
+          sed -i -r "s/version\=\"(.*)\"/version=\"$VERSION\"/g" python/setup.py
 
       - name: Build Triton wheel
         run: |

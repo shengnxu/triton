@@ -10,6 +10,9 @@ jobs:
     strategy:
       matrix:
         python: ["cp37", "cp38", "cp39", "cp310", "cp311"]
+    env:
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_x86_64:latest
+      PY_VERS: ${{ matrix.python }}
 
     steps:
       - uses: actions/checkout@v3
@@ -21,7 +24,7 @@ jobs:
           sed -i -r "s/version\=\"(.*)\"/version=\"\1+"$HASH"\"/g" python/setup.py
           echo "" >> python/setup.cfg
           echo "[build_ext]" >> python/setup.cfg
-          echo "base-dir=/project" >> python/setup.cfg
+          echo "base-dir=/triton" >> python/setup.cfg
 
       - name: Patch setup.py version if tagged
         # patch setup.py version for any tag starting with 'v'
@@ -32,18 +35,53 @@ jobs:
           echo Version: $VERSION
           sed -i -r "s/version\=\"(.*)\"/version=\"$VERSION\"/g" python/setup.py
 
-      - name: Build wheels
-        uses: pypa/cibuildwheel@v2.12.0
-        with:
-          package-dir: python
-        env:
-          CIBW_BUILD: ${{ matrix.python }}-manylinux_x86_64
-          CIBW_BUILD_VERBOSITY: 3
-          CIBW_MANYLINUX_X86_64_IMAGE: rocm/dev-manylinux2014_x86_64:5.4.2
+      - name: Build Triton wheel
+        run: |
+          set -x
+          mkdir -p "artifacts/"
+          TRITON_ROCM_DIR=/triton/python/triton/third_party/rocm
+
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/triton" \
+            -v "${GITHUB_WORKSPACE}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}"      \
+          )
+
+          # Determine python executable for given version
+          case $PY_VERS in
+          cp37)
+            PYTHON_EXECUTABLE=/opt/python/cp37-cp37m/bin/python
+            ;;
+          cp38)
+            PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
+            ;;
+          cp39)
+            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
+            ;;
+          cp310)
+            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            ;;
+          cp311)
+            PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            ;;
+          *)
+            echo "Unsupported python version ${PY_VERS}"
+            exit 1
+            ;;
+          esac
+
+          docker exec -t "${container_name}" yum install -y zlib-devel python3 zip unzip
+          docker exec -t "${container_name}" /bin/bash -c "TRITON_ROCM_DIR=${TRITON_ROCM_DIR} /triton/scripts/amd/setup_rocm_libs.sh"
+          docker exec -t "${container_name}" $PYTHON_EXECUTABLE -m pip install -U setuptools==67.4.0
+          docker exec -t "${container_name}" $PYTHON_EXECUTABLE /triton/.github/scripts/build_triton_wheel.py
+          docker exec -t "${container_name}" /triton/.github/scripts/fix_so.sh
 
       - uses: actions/upload-artifact@v3
         with:
-          path: ./wheelhouse/*.whl
+          path: ./artifacts/*.whl
 
   upload_pypi:
     needs: build_wheels

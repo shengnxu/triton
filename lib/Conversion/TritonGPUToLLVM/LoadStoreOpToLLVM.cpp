@@ -138,8 +138,7 @@ struct LoadOpConversion
               builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
             },
             [&](OpBuilder &builder, Location loc) {
-              Value zeroVal = bitcast(int_val(valueElemNbits, 0),
-                                      IntegerType::get(getContext(), width));
+              Value zeroVal = int_val(width, 0);
               Value otherVal;
               if (other) {
                 auto vecTy = LLVM::getFixedVectorType(valueElemTy, wordNElems);

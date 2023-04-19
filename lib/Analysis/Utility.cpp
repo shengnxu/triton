@@ -137,7 +137,7 @@ bool maybeSharedAllocationOp(Operation *op) {
 bool maybeAliasOp(Operation *op) {
   return isa<triton::gpu::ExtractSliceOp>(op) || isa<triton::TransOp>(op) ||
          isa<triton::gpu::InsertSliceAsyncOp>(op) ||
-         isa<tensor::InsertSliceOp>(op);
+         isa<triton::gpu::InsertSliceOp>(op);
 }
 
 bool supportMMA(triton::DotOp op, int version) {

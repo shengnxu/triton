@@ -9,6 +9,7 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getElemsPerThread;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 // Contains some helper functions for both Load and Store conversions.
@@ -137,8 +138,7 @@ struct LoadOpConversion
               builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
             },
             [&](OpBuilder &builder, Location loc) {
-              Value zeroVal = bitcast(int_val(valueElemNbits, 0),
-                                      IntegerType::get(getContext(), width));
+              Value zeroVal = int_val(width, 0);
               Value otherVal;
               if (other) {
                 auto vecTy = LLVM::getFixedVectorType(valueElemTy, wordNElems);
@@ -872,14 +872,14 @@ struct AtomicRMWOpConversion
 };
 
 struct InsertSliceOpConversion
-    : public ConvertTritonGPUOpToLLVMPattern<tensor::InsertSliceOp> {
+    : public ConvertTritonGPUOpToLLVMPattern<triton::gpu::InsertSliceOp> {
   using ConvertTritonGPUOpToLLVMPattern<
-      tensor::InsertSliceOp>::ConvertTritonGPUOpToLLVMPattern;
+      triton::gpu::InsertSliceOp>::ConvertTritonGPUOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(tensor::InsertSliceOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::gpu::InsertSliceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    // %dst = insert_slice %src into %dst[%offsets]
+    // %res = insert_slice %src into %dst[%offsets]
     Location loc = op->getLoc();
     Value dst = op.getDest();
     Value src = op.getSource();
@@ -893,7 +893,7 @@ struct InsertSliceOpConversion
     assert(srcLayout && "Unexpected srcLayout in InsertSliceOpConversion");
 
     auto dstTy = dst.getType().dyn_cast<RankedTensorType>();
-    auto dstLayout = dstTy.getEncoding().dyn_cast<SharedEncodingAttr>();
+    auto dstLayout = dstTy.getEncoding().dyn_cast<LDSEncodingAttr>();
     auto llDst = adaptor.getDest();
     assert(dstLayout && "Unexpected dstLayout in InsertSliceOpConversion");
     assert(op.hasUnitStride() &&
@@ -922,13 +922,13 @@ struct InsertSliceOpConversion
     // object
     auto offset = dot(rewriter, loc, offsets, smemObj.strides);
     auto elemTy = getTypeConverter()->convertType(dstTy.getElementType());
-    auto elemPtrTy = ptr_ty(elemTy, 3);
-    auto smemBase = gep(elemPtrTy, smemObj.base, offset);
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
+    auto smemBase = gep(ptrTy, elemTy, smemObj.base, offset);
 
     auto llSrc = adaptor.getSource();
     auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTy);
-    storeDistributedToShared(src, llSrc, srcStrides, srcIndices, dst, smemBase,
-                             elemTy, loc, rewriter);
+    storeDistributedToLds(src, llSrc, srcStrides, srcIndices, dst, smemBase,
+                          elemTy, loc, rewriter);
     // Barrier is not necessary.
     // The membar pass knows that it writes to shared memory and will handle it
     // properly.

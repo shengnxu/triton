@@ -73,30 +73,4 @@ def ConvertRockToLLVM : Pass<"convert-rock-to-llvm", "mlir::ModuleOp"> {
     ];
 }
 
-//===----------------------------------------------------------------------===//
-// RockToGPU
-//===----------------------------------------------------------------------===//
-
-def ConvertRockToGPUPass : Pass<"convert-rock-to-gpu", "mlir::ModuleOp"> {
-  let summary = "Lower the operations from the Rock dialect into the GPU "
-                "dialect";
-
-  let options = [
-      Option<"kernelName", "kernel-name", "std::string",
-             "\"rock_conv2d_kcyx_nchw_nkhw\"",
-             "kernel name to be lowered">,
-      Option<"gpuModuleName", "gpu-module-name", "std::string",
-             "\"rock_kernel_module\"",
-             "GPU kernel module name to be lowered">,
-  ];
-
-  let dependentDialects = ["mlir::rock::RockDialect",
-                           "mlir::amdgpu::AMDGPUDialect",
-                           "mlir::cf::ControlFlowDialect",
-                           "mlir::func::FuncDialect",
-                           "mlir::gpu::GPUDialect",
-                           "mlir::memref::MemRefDialect"];
-}
-
-
 #endif

@@ -34,7 +34,6 @@ int main(int argc, char **argv) {
   mlir::triton::registerConvertTritonToTritonGPUPass();
   mlir::triton::registerConvertTritonGPUToRockPass();
   mlir::triton::registerConvertRockToLLVMPass();
-  mlir::triton::registerConvertRockToGPUPass();
   mlir::rock::registerPasses();
 
   // TODO: register Triton & TritonGPU passes

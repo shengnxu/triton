@@ -32,7 +32,7 @@ void SharedMemoryAliasAnalysis::visitOperation(
       // trans %src
       aliasInfo = AliasInfo(operands[0]->getValue());
       pessimistic = false;
-    } else if (isa<tensor::InsertSliceOp, triton::gpu::InsertSliceAsyncOp>(
+    } else if (isa<triton::gpu::InsertSliceOp, triton::gpu::InsertSliceAsyncOp>(
                    op)) {
       // insert_slice_async %src, %dst, %index
       // insert_slice %src into %dst[%offsets]

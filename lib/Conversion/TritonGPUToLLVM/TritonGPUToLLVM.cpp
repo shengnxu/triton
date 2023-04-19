@@ -8,6 +8,7 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getElemsPerThread;
+using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 struct ReturnOpConversion : public ConvertOpToLLVMPattern<func::ReturnOp> {
@@ -473,9 +474,7 @@ struct AllocTensorOpConversion
     auto resultTy = op.getType().dyn_cast<RankedTensorType>();
     auto llvmElemTy =
         getTypeConverter()->convertType(resultTy.getElementType());
-    auto elemPtrTy = ptr_ty(llvmElemTy, 3);
-    smemBase = bitcast(smemBase, elemPtrTy);
-    auto order = resultTy.getEncoding().cast<SharedEncodingAttr>().getOrder();
+    auto order = resultTy.getEncoding().cast<LDSEncodingAttr>().getOrder();
     // Workaround for 3D tensors
     // TODO: we need to modify the pipeline pass to give a proper shared
     // encoding to 3D tensors
@@ -504,7 +503,7 @@ struct ExtractSliceOpConversion
     // %dst = extract_slice %src[%offsets]
     Location loc = op->getLoc();
     auto srcTy = op.getSource().getType().dyn_cast<RankedTensorType>();
-    auto srcLayout = srcTy.getEncoding().dyn_cast<SharedEncodingAttr>();
+    auto srcLayout = srcTy.getEncoding().dyn_cast<LDSEncodingAttr>();
     assert(srcLayout && "Unexpected resultLayout in ExtractSliceOpConversion");
     assert(op.hasUnitStride() &&
            "Only unit stride supported by ExtractSliceOpConversion");
@@ -538,8 +537,8 @@ struct ExtractSliceOpConversion
     }
 
     auto llvmElemTy = getTypeConverter()->convertType(srcTy.getElementType());
-    auto elemPtrTy = ptr_ty(llvmElemTy, 3);
-    smemObj = SharedMemoryObject(gep(elemPtrTy, smemObj.base, offset),
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
+    smemObj = SharedMemoryObject(gep(ptrTy, llvmElemTy, smemObj.base, offset),
                                  strideVals, offsetVals);
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
     rewriter.replaceOp(op, retVal);

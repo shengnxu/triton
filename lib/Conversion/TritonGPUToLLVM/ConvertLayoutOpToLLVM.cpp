@@ -566,8 +566,6 @@ private:
     auto outOrd = dstLDSLayout.getOrder();
     Value smemBase = getSharedMemoryBase(loc, rewriter, dst);
     auto elemTy = getTypeConverter()->convertType(srcTy.getElementType());
-    auto elemPtrTy = ptr_ty(getTypeConverter()->convertType(elemTy), 3);
-    smemBase = bitcast(smemBase, elemPtrTy);
 
     auto dstStrides =
         getStridesFromShapeAndOrder(dstShape, outOrd, loc, rewriter);

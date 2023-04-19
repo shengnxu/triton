@@ -172,6 +172,80 @@ def TTG_ExtractSliceOp : TTG_Op<"extract_slice",
   }];
 }
 
+
+def TTG_InsertSliceOp : TTG_Op<"insert_slice",
+                               [AttrSizedOperandSegments,
+                                Pure,
+                                OffsetSizeAndStrideOpInterface,
+                                TypesMatchWith<"expected result type to match dest type",
+                                "dest", "result", "$_self">
+                                ]> {
+  let summary = "insert_slice operation";
+  let description = [{
+    same as tensor.insert_slice, but with I32 index.
+  }];
+
+  let arguments = (ins
+    AnyRankedTensor:$source,
+    AnyRankedTensor:$dest,
+    Variadic<I32>:$offsets,
+    Variadic<I32>:$sizes,
+    Variadic<I32>:$strides,
+    DenseI64ArrayAttr:$static_offsets,
+    DenseI64ArrayAttr:$static_sizes,
+    DenseI64ArrayAttr:$static_strides
+  );
+  let results = (outs AnyRankedTensor:$result);
+
+  let assemblyFormat = [{
+    $source `into` $dest ``
+    custom<DynamicIndexList>($offsets, $static_offsets)
+    custom<DynamicIndexList>($sizes, $static_sizes)
+    custom<DynamicIndexList>($strides, $static_strides)
+    attr-dict `:` type($source) `into` type($dest)
+  }];
+
+  let builders = [
+    // Build a InsertSliceOp with mixed static and dynamic entries.
+    OpBuilder<(ins "Value":$source, "Value":$dest,
+      "ArrayRef<OpFoldResult>":$offsets, "ArrayRef<OpFoldResult>":$sizes,
+      "ArrayRef<OpFoldResult>":$strides,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>
+  ];
+
+  let extraClassDeclaration = [{
+    /// The result of a insert_slice is always a tensor.
+    // TODO: Deprecate this method.
+    RankedTensorType getType() {
+      return getResult().getType().cast<RankedTensorType>();
+    }
+
+    /// The `dest` type is the same as the result type.
+    RankedTensorType getDestType() {
+      return getType();
+    }
+
+    /// Return the expected rank of each of the`static_offsets`, `static_sizes`
+    /// and `static_strides` attributes.
+    std::array<unsigned, 3> getArrayAttrMaxRanks() {
+      unsigned rank = getType().getRank();
+      return {rank, rank, rank};
+    }
+
+    /// Return the dimensions of the dest that are omitted to insert a source
+    /// when the result is rank-extended.
+    llvm::SmallBitVector getDroppedDims();
+
+    /// Return the number of leading operands before the `offsets`, `sizes` and
+    /// and `strides` operands.
+    static unsigned getOffsetSizeAndStrideStartOperandIndex() { return 2; }
+
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      return {1, 2};  // `dest` operand
+    }
+  }];
+}
+
 //
 
 def TTG_InsertSliceAsyncOp : TTG_Op<"insert_slice_async",

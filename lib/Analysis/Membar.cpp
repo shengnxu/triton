@@ -108,7 +108,7 @@ void MembarAnalysis::update(Operation *op, BlockInfo *blockInfo,
     for (auto bufferId : allocation->getBufferIds(value)) {
       if (bufferId != Allocation::InvalidBufferId) {
         if (isa<triton::gpu::InsertSliceAsyncOp>(op) ||
-            isa<tensor::InsertSliceOp>(op)) {
+            isa<triton::gpu::InsertSliceOp>(op)) {
           // FIXME(Keren): insert_slice and insert_slice_async are always
           // alias for now
           curBlockInfo.syncWriteBuffers.insert(bufferId);

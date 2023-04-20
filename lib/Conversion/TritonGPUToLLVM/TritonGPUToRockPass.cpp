@@ -44,13 +44,6 @@ using namespace mlir::triton::gpu;
 using namespace mlir::arith;
 using namespace mlir::rock;
 
-#define printVec(vec)                                                          \
-  llvm::outs() << #vec ": ";                                                   \
-  for (int i = 0; i < vec.size() - 1; i++) {                                   \
-    llvm::outs() << vec[i] << " ";                                             \
-  }                                                                            \
-  llvm::outs() << vec[vec.size() - 1] << "\n";
-
 namespace mlir {
 #define GEN_PASS_DEF_CONVERTTRITONGPUTOROCK
 #include "triton/Conversion/Passes.h.inc"
@@ -373,10 +366,6 @@ public:
 private:
   int computeCapability{};
 
-  // LogicalResult
-  // matchAndRewriteDotInLoop(triton::DotOp op,
-  //                        mlir::PatternRewriter &rewriter) const {
-
   LogicalResult processDotInLoop(ModuleOp mod) const {
 
     mod.walk([&](triton::DotOp op) -> void {
@@ -384,9 +373,9 @@ private:
 
       auto loc = op.getLoc();
       Value matA = op.getA(), matB = op.getB(), matC = op.getC();
-      // If matA has a defining op, then tt.dot is not in a loop.
+      // If both matA and matB have defining ops, then tt.dot is not in a loop.
       // Let the pattern rewriter handle this case.
-      if (matA.getDefiningOp())
+      if (matA.getDefiningOp() && matB.getDefiningOp())
         return;
       Attribute dEnc =
           op.getD().getType().cast<RankedTensorType>().getEncoding();
@@ -506,25 +495,29 @@ private:
           MemRefType::get(nResultVectors, accumulatorVectorType, AffineMap{},
                           /*memorySpace=*/privateMemoryAddressSpace);
 
-      // In this case, tt.dot's operands all come from block arguments
+      // In this case, at least one of dot's operands comes from block argument
       auto dotOpA = matA.dyn_cast<BlockArgument>();
       auto dotOpB = matB.dyn_cast<BlockArgument>();
       auto dotOpC = matC.dyn_cast<BlockArgument>();
+      // Index in the block argument list
+      // We use -1 to indicate the operand does have a definingOp
       uint dotOpAIdx = 0;
       uint dotOpBIdx = 0;
       uint accIdx = 0;
-      if (dotOpA && dotOpB) {
+      if (dotOpA)
         dotOpAIdx = dotOpA.getArgNumber();
+      else
+        dotOpAIdx = -1;
+
+      if (dotOpB)
         dotOpBIdx = dotOpB.getArgNumber();
-        accIdx = dotOpC.getArgNumber();
-      } else {
-        emitError(loc) << "Invalid block arguments!\n";
-        return;
-      }
+      else
+        dotOpBIdx = -1;
+
+      accIdx = dotOpC.getArgNumber();
 
       // Obtain the head of the for loop
-      auto loopBB = dotOpA.getOwner();
-      int cnt = 0;
+      auto loopBB = dotOpA ? dotOpA.getOwner() : dotOpB.getOwner();
       // Before processing tt.dot, we first process the two predeccors of the
       // loop head block:
       // 1. The entry block
@@ -535,6 +528,7 @@ private:
       Type extractTensorATy, extractTensorBTy;
       Value mMyWaveOffsetA, mMyWaveOffsetB;
       Value arrayA, arrayB;
+      triton::gpu::ConvertLayoutOp cvtOpA, cvtOpB;
       for (auto it = loopBB->pred_begin(), e = loopBB->pred_end(); it != e;
            ++it) {
         auto predBB = *it;
@@ -544,8 +538,12 @@ private:
         auto brOp = predBB->getTerminator();
 
         // Now obtain the defining op of dotOpA and dotOpB
-        auto matADefiningOp = brOp->getOperand(dotOpAIdx).getDefiningOp();
-        auto matBDefiningOp = brOp->getOperand(dotOpBIdx).getDefiningOp();
+        auto matADefiningOp = dotOpAIdx != -1
+                                  ? brOp->getOperand(dotOpAIdx).getDefiningOp()
+                                  : matA.getDefiningOp();
+        auto matBDefiningOp = dotOpBIdx != -1
+                                  ? brOp->getOperand(dotOpBIdx).getDefiningOp()
+                                  : matB.getDefiningOp();
         if (!(isConvertLDSToDotOp(matADefiningOp) &&
               isConvertLDSToDotOp(matBDefiningOp))) {
           LLVM_DEBUG(llvm::dbgs() << "operand a or b does not come from LDS\n");
@@ -553,31 +551,52 @@ private:
           return;
         }
         // Obtain the convert_layout #lds -> #dot_op
-        auto cvtOpA = dyn_cast<triton::gpu::ConvertLayoutOp>(matADefiningOp);
-        auto cvtOpB = dyn_cast<triton::gpu::ConvertLayoutOp>(matBDefiningOp);
-        // Obtain the extract_slice op
-        auto extractSliceOpA = dyn_cast<triton::gpu::ExtractSliceOp>(
-            cvtOpA.getSrc().getDefiningOp());
-        auto extractSliceOpB = dyn_cast<triton::gpu::ExtractSliceOp>(
-            cvtOpB.getSrc().getDefiningOp());
-        if (!extractSliceOpA || !extractSliceOpB) {
-          emitError(loc) << "Failed to find the extract_slice op.\n";
-          return;
+        cvtOpA = dyn_cast<triton::gpu::ConvertLayoutOp>(matADefiningOp);
+        cvtOpB = dyn_cast<triton::gpu::ConvertLayoutOp>(matBDefiningOp);
+
+        triton::gpu::ExtractSliceOp extractSliceOpA, extractSliceOpB;
+        if (dotOpAIdx != -1) {
+          // Obtain the extract_slice op
+          extractSliceOpA = dyn_cast<triton::gpu::ExtractSliceOp>(
+              cvtOpA.getSrc().getDefiningOp());
+          if (!extractSliceOpA) {
+            emitError(loc) << "Failed to find the extract_slice op for a.\n";
+            return;
+          }
+          // Save their type since we need to add them into the block argument
+          // list of loopBB
+          extractTensorATy = extractSliceOpA.getResult().getType();
+          // Obtain the insert_slice op
+          // Note that insert_slice_async should be decomposed to
+          // load and insert_slice already
+          auto insertSliceOpA = dyn_cast<triton::gpu::InsertSliceOp>(
+              extractSliceOpA.getSource().getDefiningOp());
+          if (!insertSliceOpA) {
+            emitError(loc) << "Failed to find insert_slice op for a.\n";
+            return;
+          }
         }
-        // Save their type since we need to add them into the block argument
-        // list of loopBB
-        extractTensorATy = extractSliceOpA.getResult().getType();
-        extractTensorBTy = extractSliceOpB.getResult().getType();
-        // Obtain the insert_slice op
-        // Note that insert_slice_async should be decomposed to
-        // load and insert_slice already
-        auto insertSliceOpA = dyn_cast<triton::gpu::InsertSliceOp>(
-            extractSliceOpA.getSource().getDefiningOp());
-        auto insertSliceOpB = dyn_cast<triton::gpu::InsertSliceOp>(
-            extractSliceOpB.getSource().getDefiningOp());
-        if (!insertSliceOpA || !insertSliceOpB) {
-          emitError(loc) << "Failed to find insert_slice op.\n";
-          return;
+
+        if (dotOpBIdx != -1) {
+          // Obtain the extract_slice op
+          extractSliceOpB = dyn_cast<triton::gpu::ExtractSliceOp>(
+              cvtOpB.getSrc().getDefiningOp());
+          if (!extractSliceOpB) {
+            emitError(loc) << "Failed to find the extract_slice op for b.\n";
+            return;
+          }
+          // Save their type since we need to add them into the block argument
+          // list of loopBB
+          extractTensorBTy = extractSliceOpB.getResult().getType();
+          // Obtain the insert_slice op
+          // Note that insert_slice_async should be decomposed to
+          // load and insert_slice already
+          auto insertSliceOpB = dyn_cast<triton::gpu::InsertSliceOp>(
+              extractSliceOpB.getSource().getDefiningOp());
+          if (!insertSliceOpB) {
+            emitError(loc) << "Failed to find insert_slice op for b.\n";
+            return;
+          }
         }
 
         // Changes only in the entry block:
@@ -589,7 +608,10 @@ private:
         uint brOperandInsertIdx = brOp->getNumOperands();
         if (isEntryBB) {
           OpBuilder::InsertionGuard guard(rewriter);
-          rewriter.setInsertionPointAfter(cvtOpB);
+          if (dotOpBIdx != -1)
+            rewriter.setInsertionPointAfter(cvtOpB);
+          else
+            rewriter.setInsertionPointAfter(cvtOpA);
           auto _waveSize = rewriter.create<ConstantIndexOp>(loc, waveSize);
           auto _mPerWave = rewriter.create<ConstantIndexOp>(loc, mPerWave);
           auto _nPerWave = rewriter.create<ConstantIndexOp>(loc, nPerWave);
@@ -621,17 +643,32 @@ private:
         //    - add %extractTensorA and %extractTensorB
         // Note that we can only add %bufferC in the cf.br operand list of
         // the current block later
-        brOp->eraseOperands(dotOpAIdx, 2);
+        if (dotOpBIdx != -1) {
+          brOp->eraseOperand(dotOpBIdx);
+          brOperandInsertIdx--;
+        }
+        if (dotOpAIdx != -1) {
+          brOp->eraseOperand(dotOpAIdx);
+          brOperandInsertIdx--;
+        }
         brOp->eraseOperand(accIdx);
-        cvtOpA.erase();
-        cvtOpB.erase();
+        brOperandInsertIdx--;
+        if (dotOpAIdx != -1)
+          cvtOpA.erase();
+        if (dotOpBIdx != -1)
+          cvtOpB.erase();
         // because we removed 3 operands from cf.br
-        extractTensorAIdx = brOperandInsertIdx - 3;
+        extractTensorAIdx = brOperandInsertIdx;
         extractTensorBIdx = extractTensorAIdx + 1;
         // In the case of entry block, %bufferC is already inserted.
         // brOperandInsertIdx - 3 is the position before %bufferC
-        brOp->insertOperands(brOperandInsertIdx - 3,
-                             {extractSliceOpA, extractSliceOpB});
+        if (dotOpAIdx != -1) {
+          brOp->insertOperands(brOperandInsertIdx, {extractSliceOpA});
+          brOperandInsertIdx++;
+        }
+        if (dotOpBIdx != -1) {
+          brOp->insertOperands(brOperandInsertIdx, {extractSliceOpB});
+        }
       }
 
       // Changes in the current block
@@ -641,19 +678,20 @@ private:
       // 4. erase tt.dot, and erase %dotOpA and %dotOpB in loopBB blockArg list
 
       // Step 1: insert tensor_to_memref
+
       auto LdsTensorA =
-          loopBB->addArgument(extractTensorATy, rewriter.getUnknownLoc());
+          dotOpAIdx != -1
+              ? loopBB->addArgument(extractTensorATy, rewriter.getUnknownLoc())
+              : cvtOpA.getSrc();
       auto LdsTensorB =
-          loopBB->addArgument(extractTensorBTy, rewriter.getUnknownLoc());
+          dotOpBIdx != -1
+              ? loopBB->addArgument(extractTensorBTy, rewriter.getUnknownLoc())
+              : cvtOpB.getSrc();
       auto workgroupMemoryAddressSpace =
           rewriter.getAttr<mlir::gpu::AddressSpaceAttr>(
               mlir::gpu::GPUDialect::getWorkgroupAddressSpace());
-      auto LDSTensorAShape =
-          LdsTensorA.getType().cast<RankedTensorType>().getShape();
-      auto LDSTensorBShape =
-          LdsTensorB.getType().cast<RankedTensorType>().getShape();
-      int64_t ldsBlockASize = product<long int>(LDSTensorAShape);
-      int64_t ldsBlockBSize = product<long int>(LDSTensorBShape);
+      int64_t ldsBlockASize = mPerBlock * kPerBlock;
+      int64_t ldsBlockBSize = nPerBlock * kPerBlock;
       auto ldsAMemRefType =
           MemRefType::get({ldsBlockASize}, elementType, AffineMap{},
                           workgroupMemoryAddressSpace);
@@ -685,9 +723,17 @@ private:
       brOp->insertOperands(brOp->getNumOperands(), {regCAllocOp});
 
       // Step 4: erase tt.dot
-      //         erase %dotOpA and %dotOpB fro the block argument list of loopBB
+      //         erase %dotOpA and %dotOpB for the block argument list of loopBB
       op.erase();
-      loopBB->eraseArguments(dotOpAIdx, 2);
+
+      if (dotOpBIdx != -1)
+        loopBB->eraseArgument(dotOpBIdx);
+      else
+        cvtOpB.erase();
+      if (dotOpAIdx != -1)
+        loopBB->eraseArgument(dotOpAIdx);
+      else
+        cvtOpA.erase();
 
       // In the block after the loop
       // Insert memref_to_tensor

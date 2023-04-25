@@ -21,6 +21,9 @@ unsigned ReduceOpHelper::getInterWarpSize() {
   auto axis = op.getAxis();
   auto srcReduceDimSize = static_cast<unsigned>(srcShape[axis]);
   unsigned sizeIntraWarps = getIntraWarpSize();
+  std::cout << "IntraWarps = " << sizeIntraWarps << std::endl;
+  std::cout << "Dim/Warps = " << srcReduceDimSize / sizeIntraWarps << std::endl;
+  std::cout << "WarpsPerCTA = " << triton::gpu::getWarpsPerCTA(srcLayout)[axis] << std::endl;
   return std::min(srcReduceDimSize / sizeIntraWarps,
                   triton::gpu::getWarpsPerCTA(srcLayout)[axis]);
 }

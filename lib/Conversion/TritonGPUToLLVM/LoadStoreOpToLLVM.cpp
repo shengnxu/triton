@@ -4,6 +4,8 @@
 #include "ConvertLayoutOpToLLVM.h"
 #include "LoadStoreOpToLLVM.h"
 
+#include <iostream>
+
 using namespace mlir;
 using namespace mlir::triton;
 
@@ -72,9 +74,12 @@ struct LoadOpConversion
     Type valueElemTy =
         typeConverter->convertType(getElementTypeOrSelf(valueTy));
     unsigned vec = getVectorSize(ptr);
+    std::cout << "vec = " << vec << std::endl;
     unsigned numElems = getElemsPerThread(ptr.getType());
     if (llMask)
       vec = std::min<size_t>(vec, getMaskAlignment(mask));
+
+    std::cout << "vec = " << vec << std::endl;
 
     // Get the LLVM values for pointers
     auto ptrElems = getTypeConverter()->unpackLLElements(loc, llPtr, rewriter,
@@ -110,19 +115,24 @@ struct LoadOpConversion
     // vectorized iteration through all the pointer/mask/other elements
     const int valueElemNBits =
         std::max(8u, valueElemTy.getIntOrFloatBitWidth());
+    std::cout << "valueElemNBits = " << valueElemNBits << std::endl;
+    
     const int numVecs = numElems / vec;
+    std::cout << "numElems = " << numElems << std::endl;
+    std::cout << "valueElemNBits = " << valueElemNBits << std::endl;
+
 
     SmallVector<Value> loadedVals;
     for (size_t vecStart = 0; vecStart < numElems; vecStart += vec) {
       // TODO: optimization when ptr is GEP with constant offset
       size_t in_off = 0;
 
-      const size_t maxWordWidth = std::max<size_t>(32, valueElemNBits);
-      const size_t totalWidth = valueElemNBits * vec;
-      const size_t width = std::min(totalWidth, maxWordWidth);
-      const size_t nWords = std::max<size_t>(1, totalWidth / width);
-      const size_t wordNElems = width / valueElemNBits;
-      const size_t movWidth = width < 16 ? 16 : width;
+      const size_t maxWordWidth = std::max<size_t>(32, valueElemNBits); // 32
+      const size_t totalWidth = valueElemNBits * vec; // 128
+      const size_t width = std::min(totalWidth, maxWordWidth); // 32
+      const size_t nWords = std::max<size_t>(1, totalWidth / width); // nwords = 4
+      const size_t wordNElems = width / valueElemNBits; // wordNElems = 2
+      const size_t movWidth = width < 16 ? 16 : width; // movWidth = 32
       assert(wordNElems * nWords * numVecs == numElems);
 
 #ifdef USE_ROCM

@@ -1110,9 +1110,9 @@ def ast_to_ttir(fn, signature, specialization, constants, debug=False):
     return optimize_triton_ir(mod)
 
 
-def ttir_to_ttgir(mod, num_warps):
+def ttir_to_ttgir(mod, num_warps, kpack, mPerWave):
     pm = _triton.ir.pass_manager(mod.context)
-    pm.add_convert_triton_to_tritongpu_pass(num_warps)
+    pm.add_convert_triton_to_tritongpu_pass(num_warps, kpack, mPerWave)
     pm.run(mod)
     return mod
 
@@ -1851,6 +1851,8 @@ def compile(fn, **kwargs):
     num_warps = kwargs.get("num_warps", 4)
     num_stages = kwargs.get("num_stages", 3 if capability >= 75 else 2)
     extern_libs = kwargs.get("extern_libs", dict())
+    kpack = kwargs.get("kpack", 4)
+    mPerWave = kwargs.get("mPerWave", 16)
     debug = kwargs.get("debug", False)
     # build compilation stages
     if torch.version.hip is not None:
@@ -1872,7 +1874,7 @@ def compile(fn, **kwargs):
             "ttir": (lambda path: parse_mlir_module(path, context),
                      lambda src: ast_to_ttir(src, signature, configs[0], constants, debug)),
             "ttgir": (lambda path: parse_mlir_module(path, context),
-                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps), num_stages, capability)),
+                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, kpack, mPerWave), num_stages, capability)),
             "llir": (lambda path: Path(path).read_text(),
                      lambda src: ttgir_to_llir(src, extern_libs, capability)),
             "amdgcn": (lambda path: Path(path).read_text(),
@@ -1886,7 +1888,7 @@ def compile(fn, **kwargs):
             "ttir": (lambda path: parse_mlir_module(path, context),
                      lambda src: ast_to_ttir(src, signature, configs[0], constants, debug)),
             "ttgir": (lambda path: parse_mlir_module(path, context),
-                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps), num_stages, capability)),
+                      lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, kpack, mPerWave), num_stages, capability)),
             "llir": (lambda path: Path(path).read_text(),
                      lambda src: ttgir_to_llir(src, extern_libs, capability)),
             "ptx": (lambda path: Path(path).read_text(),
@@ -1939,6 +1941,7 @@ def compile(fn, **kwargs):
             metadata = json.load(f)
     else:
         metadata = {"num_warps": num_warps, "num_stages": num_stages,
+                    "kpack": kpack, "mPerWave": mPerWave,
                     "constants": _get_jsonable_constants(constants), "ctime": dict(), "debug": debug}
         if ext == "ptx":
             assert "shared" in kwargs, "ptx compilation must provide shared memory size"

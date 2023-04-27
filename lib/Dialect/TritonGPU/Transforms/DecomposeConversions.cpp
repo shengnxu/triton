@@ -50,9 +50,7 @@ public:
              dstDotOp.getParent() == srcMmaEncoding))
           return;
       }
-      // TODO: Make kpack one of the tuning parameters and pass it from
-      // kernel launch
-      uint32_t kpack = 4;
+      uint32_t kpack = triton::gpu::TritonGPUDialect::getKPack(mod);
       auto tmpType = RankedTensorType::get(
           dstType.getShape(), dstType.getElementType(),
           triton::gpu::LDSEncodingAttr::get(mod.getContext(), dstDotOp, kpack));

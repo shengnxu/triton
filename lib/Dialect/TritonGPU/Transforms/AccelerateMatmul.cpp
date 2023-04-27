@@ -218,17 +218,11 @@ public:
     auto elementType = matA.getType().cast<RankedTensorType>().getElementType();
     auto aShape = matA.getType().cast<RankedTensorType>().getShape();
     uint32_t kPerBlock = aShape[1];
-    // TODO: kpack is needed to check the validity of the selected mfma
-    // instruction group.It is later used as one of the parameters of
-    // the LDSEncodingAttr. Make it a metadata that can be passed from
-    // kernel launch so that we have a single source of truth of its value.
-    uint32_t kpack = 4;
+    uint32_t kpack = triton::gpu::TritonGPUDialect::getKPack(mod);
     // Parameters for MfmaEncodingAttr
-    // TODO: Find a better way to derive [m|n]PerWave
-    // TODO: Check the validity of these parameters
     uint32_t mPerBlock = retShape[0];
     uint32_t nPerBlock = retShape[1];
-    uint32_t mPerWave = std::min<uint32_t>(32, mPerBlock);
+    uint32_t mPerWave = triton::gpu::TritonGPUDialect::getMPerWave(mod);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (nPerWave < 16)
       return emitError(loc) << "numWarps too large.\n";

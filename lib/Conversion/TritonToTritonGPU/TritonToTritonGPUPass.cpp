@@ -766,7 +766,11 @@ public:
       ConvertTritonToTritonGPU>::ConvertTritonToTritonGPUBase;
   ConvertTritonToTritonGPU() = default;
   // constructor with some parameters set explicitly.
-  ConvertTritonToTritonGPU(int numWarps) { this->numWarps = numWarps; }
+  ConvertTritonToTritonGPU(int numWarps, int kpack, int mPerWave) {
+    this->numWarps = numWarps;
+    this->kpack = kpack;
+    this->mPerWave = mPerWave;
+  }
 
   void runOnOperation() override {
     MLIRContext *context = &getContext();
@@ -796,6 +800,13 @@ public:
         AttrNumWarpsName,
         IntegerAttr::get(i32_ty, llvm::APInt(32, numWarps.getValue())));
 
+    mod->setAttr(AttrKPackName,
+                 IntegerAttr::get(i32_ty, llvm::APInt(32, kpack.getValue())));
+
+    mod->setAttr(
+        AttrMPerWaveName,
+        IntegerAttr::get(i32_ty, llvm::APInt(32, mPerWave.getValue())));
+
     // update layouts
     //  broadcast src => multicast, dst => broadcasted
     // if (failed(target.refineLayouts(mod, numWarps)))
@@ -806,8 +817,10 @@ public:
 } // namespace
 
 std::unique_ptr<OperationPass<ModuleOp>>
-mlir::triton::createConvertTritonToTritonGPUPass(int numWarps) {
-  return std::make_unique<::ConvertTritonToTritonGPU>(numWarps);
+mlir::triton::createConvertTritonToTritonGPUPass(int numWarps, int kpack,
+                                                 int mPerWave) {
+  return std::make_unique<::ConvertTritonToTritonGPU>(numWarps, kpack,
+                                                      mPerWave);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

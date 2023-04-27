@@ -118,26 +118,16 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
     uint32_t nPerBlock = bShape[1];
 
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
-    // The GPU kernel is launched with blockSize = 32*numWarps
-    // TODO: make it less confusing when working on AMDGPUs
-    // TODO: enable warpSize = 64
     uint32_t numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
     uint32_t blockSize = 64 * numWarps;
 
-    constexpr int64_t waveSize = 64;
+    constexpr uint32_t waveSize = 64;
     uint32_t numWaves = blockSize / waveSize;
 
     // Tuning parameters
-    // TODO: make kpack come from a single source of truth. E.g. tuning
-    // parameter when launching the kernel
-    int64_t kpack = 4;
-    int64_t kpacksPerBlock = kPerBlock / kpack;
-    // TODO: in rocMLIR, blockSize is derived from [m|n]PerBlock, [m|n]PerWave,
-    // and waveSize. In triton, blockSize and [m|n]PerBlock are given.
-    // Therefore, mPerWave and nPerWave need to be derived.
-    // TODO: this is a duplicate from BlockedToMFMA in the
-    // tritongpu-accelerate-matmul pass. We should unify them in the future.
-    uint32_t mPerWave = std::min<uint32_t>(16, mPerBlock);
+    uint32_t kpack = triton::gpu::TritonGPUDialect::getKPack(mod);
+    uint32_t kpacksPerBlock = kPerBlock / kpack;
+    uint32_t mPerWave = triton::gpu::TritonGPUDialect::getMPerWave(mod);
     uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
     if (mPerBlock * nPerBlock / (mPerWave * nPerWave) != numWaves)
       return emitError(loc) << "Need to pick another [m|n]PerWave!\n";
@@ -146,7 +136,7 @@ struct DotOpRewritePattern : public OpRewritePattern<triton::DotOp> {
       nPerWave = nPerBlock;
       mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
     }
-    int64_t nWaves = nPerBlock / nPerWave;
+    uint32_t nWaves = nPerBlock / nPerWave;
 
     LLVM_DEBUG(llvm::dbgs() << "mPerBlock:      " << mPerBlock << "\n"
                             << "kPerBlock:      " << kPerBlock << "\n"
@@ -393,26 +383,16 @@ private:
       uint32_t kPerBlock = aShape[1];
       uint32_t nPerBlock = bShape[1];
 
-      // The GPU kernel is launched with blockSize = 32*numWarps
-      // TODO: make it less confusing when working on AMDGPUs
-      // TODO: enable warpSize = 64
       uint32_t numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
       uint32_t blockSize = 64 * numWarps;
 
-      constexpr int64_t waveSize = 64;
+      constexpr uint32_t waveSize = 64;
       uint32_t numWaves = blockSize / waveSize;
 
       // Tuning parameters
-      // TODO: make kpack come from a single source of truth. E.g. tuning
-      // parameter when launching the kernel
-      int64_t kpack = 4;
-      int64_t kpacksPerBlock = kPerBlock / kpack;
-      // TODO: in rocMLIR, blockSize is derived from [m|n]PerBlock,
-      // [m|n]PerWave, and waveSize. In triton, blockSize and [m|n]PerBlock are
-      // given. Therefore, mPerWave and nPerWave need to be derived.
-      // TODO: this is a duplicate from BlockedToMFMA in the
-      // tritongpu-accelerate-matmul pass. We should unify them in the future.
-      uint32_t mPerWave = std::min<uint32_t>(16, mPerBlock);
+      uint32_t kpack = triton::gpu::TritonGPUDialect::getKPack(mod);
+      uint32_t kpacksPerBlock = kPerBlock / kpack;
+      uint32_t mPerWave = triton::gpu::TritonGPUDialect::getMPerWave(mod);
       uint32_t nPerWave = mPerBlock * nPerBlock / numWarps / mPerWave;
       if (mPerBlock * nPerBlock / (mPerWave * nPerWave) != numWaves) {
         emitError(loc) << "Need to pick another [m|n]PerWave!\n";
@@ -423,7 +403,7 @@ private:
         nPerWave = nPerBlock;
         mPerWave = mPerBlock * nPerBlock / numWarps / nPerWave;
       }
-      int64_t nWaves = nPerBlock / nPerWave;
+      uint32_t nWaves = nPerBlock / nPerWave;
 
       LLVM_DEBUG(llvm::dbgs() << "mPerBlock:      " << mPerBlock << "\n"
                               << "kPerBlock:      " << kPerBlock << "\n"

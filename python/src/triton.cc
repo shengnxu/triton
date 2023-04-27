@@ -1543,9 +1543,9 @@ void init_triton_ir(py::module &&m) {
              self.addPass(mlir::triton::createCombineOpsPass());
            })
       .def("add_convert_triton_to_tritongpu_pass",
-           [](mlir::PassManager &self, int numWarps) {
+           [](mlir::PassManager &self, int numWarps, int kpack, int mPerWave) {
              self.addPass(
-                 mlir::triton::createConvertTritonToTritonGPUPass(numWarps));
+                 mlir::triton::createConvertTritonToTritonGPUPass(numWarps, kpack, mPerWave));
            })
       .def("add_tritongpu_pipeline_pass",
            [](mlir::PassManager &self, int numStages) {

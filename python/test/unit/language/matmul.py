@@ -67,7 +67,7 @@ def get_variant_golden(a, b):
     return c_padded[:SIZE_M, :SIZE_N]
 
 
-def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, SPLIT_K):
+def test_gemm(SIZE_M, SIZE_N, SIZE_K, num_warps, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, SPLIT_K, kpack, mPerWave):
     a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float16)
     b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float16)
     c = torch.zeros((SIZE_M, SIZE_N), device=a.device, dtype=torch.float32)
@@ -85,7 +85,9 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLO
                         BLOCK_SIZE_N=BLOCK_SIZE_N,
                         BLOCK_SIZE_K=BLOCK_SIZE_K,
                         SPLIT_K=SPLIT_K,
-                        num_warps=NUM_WARPS)
+                        num_warps=num_warps,
+                        kpack=kpack, mPerWave=mPerWave
+                        )
     golden = torch.matmul(a, b)
 
     # It's not easy to get a proper error threshold in different size
@@ -119,6 +121,8 @@ def main(args=None):
     parser.add_argument("-blockK", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-splitK", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-num_warps", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("-kpack", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("-mPerWave", type=int, default=argparse.SUPPRESS)
 
     parsed_args = parser.parse_args(args)
 
@@ -130,7 +134,9 @@ def main(args=None):
     BLOCK_N = parsed_args.blockN
     BLOCK_K = parsed_args.blockK
     SPLIT_K = parsed_args.splitK
-    test_gemm(M, N, K, num_warps, BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K)
+    kpack = parsed_args.kpack
+    mPerWave = parsed_args.mPerWave
+    test_gemm(M, N, K, num_warps, BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, kpack, mPerWave)
 
 if __name__ == '__main__':
     sys.exit(main())

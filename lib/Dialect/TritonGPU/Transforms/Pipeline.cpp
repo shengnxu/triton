@@ -163,9 +163,11 @@ ttg::AllocTensorOp LoopPipeliner::allocateEmptyBuffer(Operation *op,
 LogicalResult LoopPipeliner::initialize() {
   Block *loop = forOp.getBody();
 
+  auto mod = forOp->getParentOfType<ModuleOp>();
+
   std::unique_ptr<DataFlowSolver> solver = createDataFlowSolver();
   AxisInfoAnalysis *axisInfoAnalysis = solver->load<AxisInfoAnalysis>();
-  if (failed(solver->initializeAndRun(forOp->getParentOfType<ModuleOp>()))) {
+  if (failed(solver->initializeAndRun(mod))) {
     return failure();
   }
 
@@ -246,9 +248,7 @@ LogicalResult LoopPipeliner::initialize() {
             SmallVector<int64_t> bufferShape(ty.getShape().begin(),
                                              ty.getShape().end());
             bufferShape.insert(bufferShape.begin(), numStages);
-            // TODO: Make kpack one of the tuning parameters and pass it from
-            // kernel launch
-            uint32_t kpack = 4;
+            uint32_t kpack = triton::gpu::TritonGPUDialect::getKPack(mod);
             auto ldsEnc =
                 ttg::LDSEncodingAttr::get(ty.getContext(), dotOpEnc, kpack);
             loadsBufferType[loadOp] =

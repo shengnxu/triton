@@ -127,5 +127,4 @@ do
     done
 done
 
-OUTPUT=triton_perf_config.txt
-echo "$M,$N,$K  best parameters: $bestPerfConfig --> $minTime" | tee -a $OUTPUT
+echo "$M,$N,$K  best parameters: $bestPerfConfig --> $minTime"

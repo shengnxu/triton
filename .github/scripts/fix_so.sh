@@ -87,9 +87,14 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
 
     # Re-bundle whl with so adjustments
     zip -rqy $(basename $pkg) *
+
     # Add manylinux2014 to whl name for pypi.  I believe we have met the criteria for manylinux based on our
     # toolchain and rpath changes to make each whl self contained and built with manylinux versions of python
-    newpkg=$(echo $pkg | sed -e 's/\linux_x86_64/manylinux_2_17_x86_64.manylinux2014_x86_64/g')
+    if [[ -z "${MANYLINUX_VERSION}" ]]; then
+        newpkg=$pkg
+    else
+        newpkg=$(echo $pkg | sed -e "s/\linux_x86_64/${MANYLINUX_VERSION}/g")
+    fi
 
     # Remove original whl
     rm -f $pkg

@@ -207,7 +207,7 @@ class CMakeBuild(build_ext):
 download_and_copy_ptxas()
 
 setup(
-    name="triton",
+    name="pytorch-triton-rocm",
     version="2.0.0",
     author="Philippe Tillet",
     author_email="phil@openai.com",

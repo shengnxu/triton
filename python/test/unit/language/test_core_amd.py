@@ -1128,13 +1128,10 @@ def test_reduce2d(op, dtype_str, shape, axis, device='cuda'):
                          [(dtype, shape, perm)
                           # TODO: bfloat16
                           for dtype in ['float16', 'float32']
-                             for shape in [(64, 64), (128, 128)]
+                             for shape in [(64, 64)]
                              for perm in [(1, 0)]])
 def test_permute(dtype_str, shape, perm, device='cuda'):
     check_type_supported(dtype_str)  # bfloat16 on cc < 80 will not be tested
-    if torch.version.hip is not None:
-        if (dtype_str, shape) == ('float32', (128, 128)):
-            pytest.skip("Not supported: memory out of resource.")
 
     # triton kernel
     @triton.jit

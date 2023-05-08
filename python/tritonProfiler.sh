@@ -127,4 +127,4 @@ do
     done
 done
 
-echo "$M,$N,$K  best parameters: $bestPerfConfig --> $minTime"
+echo "Best Result: $M,$N,$K  best parameters: $bestPerfConfig --> $minTime"

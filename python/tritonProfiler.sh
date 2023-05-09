@@ -1,13 +1,13 @@
 #! /bin/bash
 
-## $1: input file
+## $1: driver program
 ## $2: M
 ## $3: N
 ## $4: K
 ## $5: 1: reduced tuning space
 
 if [[ $# -lt 5 ]];then
-    echo "Usage: ./prof.sh <driver program> M N K <reduceTuningSpace>"
+    echo "Usage: ./tritonProfiler.sh <driver program> M N K <reduceTuningSpace>"
     exit
 fi
 
@@ -99,7 +99,6 @@ do
                         for kpack in ${KPACK_RANGE[@]}
                         do
                             perfConfig="$BLOCK_M,$BLOCK_N,$BLOCK_K,$SPLIT_K,$mPerWave,$kpack,$num_warps"
-                            rm -rf ~/.triton/cache
                             Msg=$(rocprof --stats python $DRIVER -m $M -n $N -k $K \
                                           -blockM ${BLOCK_M} -blockN ${BLOCK_N} -blockK ${BLOCK_K} \
                                           -num_warps ${num_warps} -splitK ${SPLIT_K}\

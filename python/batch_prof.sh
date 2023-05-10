@@ -51,7 +51,7 @@ do
     ## Add the profiler and driver program
     sed -i "s#^#${PrWD}/tritonProfiler.sh $DRIVER #"  ${split_files[$gpu]}
     ## Use the whole tuning space
-    sed -i "s/$/ 0/"  ${split_files[$gpu]}
+    sed -i "s/$/ 1/"  ${split_files[$gpu]}
     sed -i "1s/^/export ROCM_VISIBLE_DEVICES=$gpu\n/" ${split_files[$gpu]}
 done
 wait

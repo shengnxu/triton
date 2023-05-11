@@ -1,15 +1,10 @@
 #include "ViewOpToLLVM.h"
-#include "DotOpHelpers.h"
 
 using namespace mlir;
 using namespace mlir::triton;
 
-using ::mlir::LLVM::DotOpFMAConversionHelper;
-using ::mlir::LLVM::DotOpMmaV1ConversionHelper;
-using ::mlir::LLVM::DotOpMmaV2ConversionHelper;
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
-using ::mlir::LLVM::MMA16816ConversionHelper;
-using ::mlir::triton::gpu::getElemsPerThread;
+using ::mlir::triton::gpu::getTotalElemsPerThread;
 
 struct SplatOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::SplatOp> {
@@ -29,7 +24,7 @@ struct SplatOpConversion
     auto tensorTy = resType.cast<RankedTensorType>();
     auto srcType = typeConverter->convertType(elemType);
     auto llSrc = bitcast(constVal, srcType);
-    size_t elemsPerThread = getElemsPerThread(tensorTy);
+    size_t elemsPerThread = getTotalElemsPerThread(tensorTy);
     llvm::SmallVector<Value> elems(elemsPerThread, llSrc);
     return typeConverter->packLLElements(loc, elems, rewriter, resType);
   }
@@ -101,7 +96,7 @@ struct CatOpConversion : public ConvertTritonGPUOpToLLVMPattern<CatOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op->getLoc();
     auto resultTy = op.getType().template cast<RankedTensorType>();
-    unsigned elems = getElemsPerThread(resultTy);
+    unsigned elems = getTotalElemsPerThread(resultTy);
     Type elemTy =
         this->getTypeConverter()->convertType(resultTy.getElementType());
     SmallVector<Type> types(elems, elemTy);

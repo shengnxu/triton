@@ -45,7 +45,8 @@ struct NVVMMetadata {
 };
 
 // Add the nvvm related metadata to LLVM IR.
-static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata) {
+static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
+                          bool isROCM) {
   auto *module = func->getParent();
   auto &ctx = func->getContext();
 
@@ -75,19 +76,19 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata) {
   }
 
   if (metadata.isKernel) {
-#ifndef USE_ROCM
-    llvm::Metadata *mdargs[] = {
-        llvm::ValueAsMetadata::get(func), llvm::MDString::get(ctx, "kernel"),
-        llvm::ValueAsMetadata::get(
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 1))};
-    module->getOrInsertNamedMetadata("nvvm.annotations")
-        ->addOperand(llvm::MDNode::get(ctx, mdargs));
-#else // AMDGCN
-    func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-    func->addFnAttr("amdgpu-flat-work-group-size", "1, 1024");
-    func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
-    func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
-#endif
+    if (isROCM) {
+      func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+      func->addFnAttr("amdgpu-flat-work-group-size", "1, 1024");
+      func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
+      func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
+    } else {
+      llvm::Metadata *mdArgs[] = {
+          llvm::ValueAsMetadata::get(func), llvm::MDString::get(ctx, "kernel"),
+          llvm::ValueAsMetadata::get(
+              llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 1))};
+      module->getOrInsertNamedMetadata("nvvm.annotations")
+          ->addOperand(llvm::MDNode::get(ctx, mdArgs));
+    }
   }
 }
 
@@ -216,7 +217,7 @@ static void linkLibdevice(llvm::Module &module) {
 }
 
 static bool linkExternLib(llvm::Module &module, llvm::StringRef name,
-                          llvm::StringRef path) {
+                          llvm::StringRef path, bool isROCM) {
   llvm::SMDiagnostic err;
   auto &ctx = module.getContext();
 
@@ -235,19 +236,22 @@ static bool linkExternLib(llvm::Module &module, llvm::StringRef name,
     return true;
   }
 
-#ifndef USE_ROCM
-  if (name == "libdevice") {
-    linkLibdevice(module);
-  } else {
-    assert(false && "unknown extern lib: ");
+  // check if ROCM
+  if (!isROCM) {
+    if (name == "libdevice") {
+      linkLibdevice(module);
+    }
+    // else {
+    //   assert(false && "unknown extern lib: ");
+    // }
   }
-#endif
 
   return false;
 }
 
 std::unique_ptr<llvm::Module>
-translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module) {
+translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module,
+                      bool isROCM) {
   DialectRegistry registry;
   mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
@@ -274,7 +278,7 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module) {
   // dead code.
   auto externLibs = getExternLibs(module);
   for (auto &lib : externLibs) {
-    if (linkExternLib(*llvmModule, lib.first, lib.second))
+    if (linkExternLib(*llvmModule, lib.first, lib.second, isROCM))
       return nullptr;
   }
 
@@ -290,7 +294,7 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module) {
   for (auto &func : llvmModule->functions()) {
     auto it = nvvmMetadata.find(func.getName());
     if (it != nvvmMetadata.end())
-      amendLLVMFunc(&func, it->second);
+      amendLLVMFunc(&func, it->second, isROCM);
   }
 
   return llvmModule;
@@ -298,7 +302,8 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module) {
 
 std::unique_ptr<llvm::Module>
 translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
-                           mlir::ModuleOp module, int computeCapability) {
+                           mlir::ModuleOp module, int computeCapability,
+                           bool isROCM) {
   mlir::PassManager pm(module->getContext());
   mlir::registerPassManagerCLOptions();
   if (failed(applyPassManagerCLOptions(pm))) {
@@ -338,6 +343,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(createConvertRockToLLVMPass(computeCapability));
   pm.addPass(mlir::createArithToLLVMConversionPass(
       setIndexBitWidth(ArithToLLVMConversionPassOptions{}, 32)));
+
   pm.addPass(mlir::createCanonicalizerPass());
   // Simplify the IR
   pm.addPass(mlir::createCSEPass());
@@ -352,8 +358,11 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
     llvm::errs() << "Pass execution failed";
     return nullptr;
   }
-
-  auto llvmIR = translateLLVMToLLVMIR(llvmContext, module);
+#ifdef USE_ROCM
+  auto llvmIR = translateLLVMToLLVMIR(llvmContext, module, true);
+#else
+  auto llvmIR = translateLLVMToLLVMIR(llvmContext, module, false);
+#endif
   if (!llvmIR) {
     llvm::errs() << "Translate to LLVM IR failed";
     return nullptr;
@@ -364,8 +373,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
     std::unique_ptr<llvm::raw_string_ostream> ir_ss(
         new llvm::raw_string_ostream(mod_string));
     llvmIR->print(*ir_ss, nullptr);
-    std::cout << "// -----// LLVM IR Dump //----- //\n"
-              << mod_string << std::endl;
+    llvm::dbgs() << "// -----// LLVM IR Dump //----- //\n" << mod_string << '\n';
   }
 
   return llvmIR;

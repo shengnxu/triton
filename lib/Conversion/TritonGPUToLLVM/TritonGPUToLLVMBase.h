@@ -4,12 +4,10 @@
 // TODO: refactor so that it doesn't fail if Allocation.h
 // is included after utility.h (due to conflict in `store` macro
 // and <atomic>
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "triton/Analysis/Allocation.h"
 
 #include "TypeConverter.h"
 //
-#include "DotOpHelpers.h"
 #include "Utility.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "triton/Analysis/AxisInfo.h"
@@ -43,12 +41,12 @@ void vprintf_array(Value thread, ArrayRef<Value> arr, std::string info,
 // TODO(Superjomn): remove the code when MLIR v15.0 is included.
 // All the rights are reserved by the LLVM community.
 
-struct FuncOpConversionBase : public ConvertOpToLLVMPattern<func::FuncOp> {
+struct FuncOpConversionBase : public ConvertOpToLLVMPattern<triton::FuncOp> {
 private:
   /// Only retain those attributes that are not constructed by
   /// `LLVMFuncOp::build`. If `filterArgAttrs` is set, also filter out argument
   /// attributes.
-  static void filterFuncAttributes(func::FuncOp op, bool filterArgAttrs,
+  static void filterFuncAttributes(triton::FuncOp op, bool filterArgAttrs,
                                    SmallVectorImpl<NamedAttribute> &result) {
 
     for (const auto &attr : op->getAttrs()) {
@@ -68,12 +66,12 @@ private:
   }
 
 protected:
-  using ConvertOpToLLVMPattern<func::FuncOp>::ConvertOpToLLVMPattern;
+  using ConvertOpToLLVMPattern<triton::FuncOp>::ConvertOpToLLVMPattern;
 
   // Convert input FuncOp to LLVMFuncOp by using the LLVMTypeConverter provided
   // to this legalization pattern.
   LLVM::LLVMFuncOp
-  convertFuncOpToLLVMFuncOp(func::FuncOp funcOp,
+  convertFuncOpToLLVMFuncOp(triton::FuncOp funcOp,
                             ConversionPatternRewriter &rewriter) const {
     // Convert the original function arguments. They are converted using the
     // LLVMTypeConverter provided to this legalization pattern.
@@ -278,7 +276,7 @@ public:
 
     auto srcEncoding = srcTy.getEncoding();
     auto srcShape = srcTy.getShape();
-    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
     // swizzling params as described in TritonGPUAttrDefs.td
     unsigned outVec = resSharedLayout.getVec();
     unsigned perPhase = resSharedLayout.getPerPhase();
@@ -378,7 +376,7 @@ public:
 
     auto srcEncoding = srcTy.getEncoding();
     auto srcShape = srcTy.getShape();
-    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
     unsigned kpack = resLDSLayout.getKpack();
     // order
     auto inOrder = triton::gpu::getOrder(srcEncoding);
@@ -436,7 +434,7 @@ public:
     unsigned minVec = std::min(outVec, inVec);
     unsigned perPhase = dstSharedLayout.getPerPhase();
     unsigned maxPhase = dstSharedLayout.getMaxPhase();
-    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
     assert(numElems == srcIndices.size());
     auto inVals =
         getTypeConverter()->unpackLLElements(loc, llSrc, rewriter, srcTy);
@@ -490,7 +488,7 @@ public:
             : 1;
     unsigned outVec = dstLDSLayout.getKpack();
     unsigned minVec = std::min(outVec, inVec);
-    unsigned numElems = triton::gpu::getElemsPerThread(srcTy);
+    unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
     assert(numElems == srcIndices.size());
     auto inVals =
         getTypeConverter()->unpackLLElements(loc, llSrc, rewriter, srcTy);
@@ -612,7 +610,7 @@ public:
 
   SmallVector<Value> emitBaseIndexForLayout(Location loc,
                                             ConversionPatternRewriter &rewriter,
-                                            const Attribute &layout,
+                                            Attribute layout,
                                             RankedTensorType type) const {
     IndexCacheKeyT key = std::make_pair(layout, type);
     auto cache = indexCacheInfo.baseIndexCache;
@@ -644,7 +642,7 @@ public:
   }
 
   SmallVector<SmallVector<unsigned>>
-  emitOffsetForLayout(const Attribute &layout, RankedTensorType type) const {
+  emitOffsetForLayout(Attribute layout, RankedTensorType type) const {
     if (auto blockedLayout = layout.dyn_cast<BlockedEncodingAttr>())
       return emitOffsetForBlockedLayout(blockedLayout, type);
     if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
@@ -661,7 +659,7 @@ public:
   // -----------------------------------------------------------------------
   SmallVector<SmallVector<Value>> emitIndices(Location loc,
                                               ConversionPatternRewriter &b,
-                                              const Attribute &layout,
+                                              Attribute layout,
                                               RankedTensorType type) const {
     IndexCacheKeyT key(layout, type);
     auto cache = indexCacheInfo.indexCache;
@@ -829,7 +827,7 @@ private:
                                   threadOffset * sizePerThread[k] + elemOffset);
     }
 
-    unsigned elemsPerThread = triton::gpu::getElemsPerThread(type);
+    unsigned elemsPerThread = triton::gpu::getTotalElemsPerThread(type);
     unsigned totalSizePerThread = product<unsigned>(sizePerThread);
     SmallVector<SmallVector<unsigned>> reorderedOffset(elemsPerThread);
     for (unsigned n = 0; n < elemsPerThread; ++n) {
@@ -861,7 +859,7 @@ private:
     auto shape = type.getShape();
 
     auto wpt = mmaLayout.getWarpsPerCTA();
-    auto fpw = LLVM::DotOpMmaV1ConversionHelper::fpw;
+    static constexpr std::array<int, 3> fpw{{2, 2, 1}};
     auto [isARow, isBRow, isAVec4, isBVec4, _] =
         mmaLayout.decodeVoltaLayoutStates();
 
@@ -951,7 +949,7 @@ private:
     auto bRep = bEncoding.getMMAv1Rep();
 
     auto wpt = mmaLayout.getWarpsPerCTA();
-    auto fpw = LLVM::DotOpMmaV1ConversionHelper::fpw;
+    static constexpr std::array<int, 3> fpw{{2, 2, 1}};
     SmallVector<int, 2> rep({aRep[0], bRep[1]});
     SmallVector<int, 2> spw({aSpw[0], bSpw[1]});
     SmallVector<unsigned, 2> shapePerCTA({spw[0] * wpt[0], spw[1] * wpt[1]});
@@ -1030,8 +1028,8 @@ private:
   // Emit indices calculation within each ConversionPattern, and returns a
   // [elemsPerThread X rank] index matrix.
   SmallVector<SmallVector<Value>> emitIndicesForDistributedLayout(
-      Location loc, ConversionPatternRewriter &rewriter,
-      const Attribute &layout, RankedTensorType type) const {
+      Location loc, ConversionPatternRewriter &rewriter, Attribute layout,
+      RankedTensorType type) const {
     // step 1, delinearize threadId to get the base index
     auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type);
     // step 2, get offset of each element

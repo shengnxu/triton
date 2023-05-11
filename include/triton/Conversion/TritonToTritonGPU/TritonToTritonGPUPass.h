@@ -6,7 +6,7 @@
 namespace mlir {
 
 #define GEN_PASS_DECL_CONVERTTRITONTOTRITONGPU
-#include "triton/Conversion/Passes.h.inc"
+#include "triton/Conversion/TritonToTritonGPU/Passes.h.inc"
 
 class ModuleOp;
 template <typename T> class OperationPass;

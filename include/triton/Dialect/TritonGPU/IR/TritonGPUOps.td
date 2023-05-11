@@ -68,7 +68,7 @@ def TTG_AsyncCommitGroupOp : TTG_Op<"async_commit_group"> {
 // handle encodings
 // e.g., https://github.com/llvm/llvm-project/blob/main/mlir/include/mlir/Dialect/Arith/IR/ArithOps.td#L111
 def TTG_CmpIOp : TTG_Op<"cmpi", [Pure, Elementwise,
-                                 SameOperandsAndResultShape, 
+                                 SameOperandsAndResultShape,
                                  SameOperandsAndResultEncoding]> {
   let summary = "integer comparison operation";
 
@@ -82,7 +82,7 @@ def TTG_CmpIOp : TTG_Op<"cmpi", [Pure, Elementwise,
 }
 
 def TTG_CmpFOp : TTG_Op<"cmpf", [Pure, Elementwise,
-                                 SameOperandsAndResultShape, 
+                                 SameOperandsAndResultShape,
                                  SameOperandsAndResultEncoding]> {
   let summary = "floating-point comparison operation";
 
@@ -107,7 +107,7 @@ def TTG_SelectOp : TTG_Op<"select", [Pure, Elementwise,
                        TT_Tensor:$true_value,
                        TT_Tensor:$false_value);
 
-  let results = (outs TT_Tensor:$result);
+  let results = (outs TT_Type:$result);
 }
 
 

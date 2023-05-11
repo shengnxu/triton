@@ -8,7 +8,7 @@ using namespace mlir;
 using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
-using ::mlir::triton::gpu::getElemsPerThread;
+using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::LDSEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
@@ -29,7 +29,7 @@ struct LoadStoreConversionBase {
     if (!tensorTy)
       return 1;
     auto contiguity = getContiguity(ptr);
-    auto pointeeBitWidth = getPointeeBitWidth(tensorTy);
+    auto pointeeBitWidth = triton::getPointeeBitWidth(tensorTy);
     // The maximum vector size is 128 bits on NVIDIA GPUs.
     return std::min<unsigned>(128 / pointeeBitWidth, contiguity);
   }
@@ -73,7 +73,7 @@ struct LoadOpConversion
     Type valueElemTy =
         typeConverter->convertType(getElementTypeOrSelf(valueTy));
     unsigned vec = getVectorSize(ptr);
-    unsigned numElems = getElemsPerThread(ptr.getType());
+    unsigned numElems = getTotalElemsPerThread(ptr.getType());
     if (llMask)
       vec = std::min<size_t>(vec, getMaskAlignment(mask));
 
@@ -109,7 +109,7 @@ struct LoadOpConversion
     }
 
     // vectorized iteration through all the pointer/mask/other elements
-    const int valueElemNbits =
+    const int valueElemNBits =
         std::max(8u, valueElemTy.getIntOrFloatBitWidth());
     const int numVecs = numElems / vec;
 
@@ -118,12 +118,14 @@ struct LoadOpConversion
       // TODO: optimization when ptr is GEP with constant offset
       size_t in_off = 0;
 
-      const size_t maxWordWidth = std::max<size_t>(32, valueElemNbits);
-      const size_t totalWidth = valueElemNbits * vec;
+      const size_t maxWordWidth = std::max<size_t>(32, valueElemNBits);
+      const size_t totalWidth = valueElemNBits * vec;
       const size_t width = std::min(totalWidth, maxWordWidth);
       const size_t nWords = std::max<size_t>(1, totalWidth / width);
-      const size_t wordNElems = width / valueElemNbits;
+      const size_t wordNElems = width / valueElemNBits;
+      const size_t movWidth = width < 16 ? 16 : width;
       assert(wordNElems * nWords * numVecs == numElems);
+
 #ifdef USE_ROCM
       Value pred = mask ? maskElems[vecStart] : int_val(1, 1);
       for (size_t wordIdx = 0; wordIdx < nWords; ++wordIdx) {
@@ -183,7 +185,8 @@ struct LoadOpConversion
       // prepare asm operands
       auto *dstsOpr = ptxBuilder.newListOperand();
       for (size_t wordIdx = 0; wordIdx < nWords; ++wordIdx) {
-        auto *opr = ptxBuilder.newOperand(writeConstraint); // =r operations
+        auto *opr = ptxBuilder.newOperand(writeConstraint,
+                                          /*init=*/true); // =r operations
         dstsOpr->listAppend(opr);
       }
 
@@ -218,11 +221,10 @@ struct LoadOpConversion
       if (other) {
         for (size_t ii = 0; ii < nWords; ++ii) {
           // PTX doesn't support mov.u8, so we need to use mov.u16
-          auto movWidth = width < 16 ? 16 : width;
           PTXInstr &mov =
               ptxBuilder.create<>("mov")->o("u" + std::to_string(movWidth));
 
-          size_t size = width / valueElemNbits;
+          size_t size = width / valueElemNBits;
 
           auto vecTy = LLVM::getFixedVectorType(valueElemTy, size);
           Value v = undef(vecTy);
@@ -235,9 +237,12 @@ struct LoadOpConversion
           v = bitcast(v, IntegerType::get(getContext(), width));
 
           PTXInstr::Operand *opr{};
-          if (otherIsSplatConstInt)
+
+          if (otherIsSplatConstInt) {
+            for (size_t s = 0; s < 32; s += valueElemNBits)
+              splatVal |= splatVal << valueElemNBits;
             opr = ptxBuilder.newConstantOperand(splatVal);
-          else
+          } else
             opr = ptxBuilder.newOperand(v, readConstraint);
 
           mov(dstsOpr->listGet(ii), opr).predicateNot(pred, "b");
@@ -266,10 +271,10 @@ struct LoadOpConversion
           curr = ret;
         }
         curr = bitcast(curr, LLVM::getFixedVectorType(valueElemTy,
-                                                      width / valueElemNbits));
+                                                      width / valueElemNBits));
         rets.push_back(curr);
       }
-      int tmp = width / valueElemNbits;
+      int tmp = width / valueElemNBits;
       for (size_t ii = 0; ii < vec; ++ii) {
         Value vecIdx = createIndexAttrConstant(
             rewriter, loc, this->getTypeConverter()->getIndexType(), ii % tmp);
@@ -316,7 +321,7 @@ struct StoreOpConversion
         typeConverter->convertType(getElementTypeOrSelf(valueTy));
 
     unsigned vec = getVectorSize(ptr);
-    unsigned elemsPerThread = getElemsPerThread(ptr.getType());
+    unsigned elemsPerThread = getTotalElemsPerThread(ptr.getType());
 
     auto ptrElems = getTypeConverter()->unpackLLElements(loc, llPtr, rewriter,
                                                          ptr.getType());
@@ -346,18 +351,18 @@ struct StoreOpConversion
 
     const size_t dtsize =
         std::max<int>(1, valueElemTy.getIntOrFloatBitWidth() / 8);
-    const size_t valueElemNbits = dtsize * 8;
+    const size_t valueElemNBits = dtsize * 8;
 
     const int numVecs = elemsPerThread / vec;
     for (size_t vecStart = 0; vecStart < elemsPerThread; vecStart += vec) {
       // TODO: optimization when ptr is AddPtr with constant offset
       size_t in_off = 0;
 
-      const size_t maxWordWidth = std::max<size_t>(32, valueElemNbits);
-      const size_t totalWidth = valueElemNbits * vec;
+      const size_t maxWordWidth = std::max<size_t>(32, valueElemNBits);
+      const size_t totalWidth = valueElemNBits * vec;
       const size_t width = std::min(totalWidth, maxWordWidth);
       const size_t nWords = std::max<size_t>(1, totalWidth / width);
-      const size_t wordNElems = width / valueElemNbits;
+      const size_t wordNElems = width / valueElemNBits;
       assert(wordNElems * nWords * numVecs == elemsPerThread);
 
       // TODO(Superjomn) Add cache policy fields to StoreOp.
@@ -378,6 +383,7 @@ struct StoreOpConversion
           if (elem.getType().isInteger(1))
             elem = sext(i8_ty, elem);
           elem = bitcast(elem, valueElemTy);
+
           llWord = insert_element(wordTy, llWord, elem, i32_val(elemIdx));
         }
         llWord = bitcast(llWord, valArgTy);
@@ -532,6 +538,7 @@ struct AtomicCASOpConversion
     Type valueElemTy =
         TensorTy ? getTypeConverter()->convertType(TensorTy.getElementType())
                  : op.getResult().getType();
+    auto valueElemNBits = valueElemTy.getIntOrFloatBitWidth();
     auto tid = tid_val();
     Value pred = icmp_eq(tid, i32_val(0));
     PTXBuilder ptxBuilderMemfence;
@@ -542,13 +549,12 @@ struct AtomicCASOpConversion
 
     Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
     atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
-
     Value casPtr = ptrElements[0];
     Value casCmp = cmpElements[0];
     Value casVal = valElements[0];
 
     PTXBuilder ptxBuilderAtomicCAS;
-    auto *dstOpr = ptxBuilderAtomicCAS.newOperand("=r");
+    auto *dstOpr = ptxBuilderAtomicCAS.newOperand("=r", /*init=*/true);
     auto *ptrOpr = ptxBuilderAtomicCAS.newAddrOperand(casPtr, "l");
     auto *cmpOpr = ptxBuilderAtomicCAS.newOperand(casCmp, "r");
     auto *valOpr = ptxBuilderAtomicCAS.newOperand(casVal, "r");
@@ -559,7 +565,7 @@ struct AtomicCASOpConversion
     barrier();
 
     PTXBuilder ptxBuilderStore;
-    auto *dstOprStore = ptxBuilderStore.newAddrOperand(atomPtr, "l");
+    auto *dstOprStore = ptxBuilderStore.newAddrOperand(atomPtr, "r");
     auto *valOprStore = ptxBuilderStore.newOperand(old, "r");
     auto &st = *ptxBuilderStore.create<PTXInstr>("st");
     st.shared().o("b32");
@@ -648,7 +654,7 @@ struct AtomicRMWOpConversion
         tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
                  : opResult.getType();
     const size_t valueElemNbits = valueElemTy.getIntOrFloatBitWidth();
-    auto elemsPerThread = getElemsPerThread(val.getType());
+    auto elemsPerThread = getTotalElemsPerThread(val.getType());
     // vec = 1, numElements = 1 for scalar
     auto vec = getVectorSize(ptr);
     int numElems = 1;
@@ -753,8 +759,8 @@ struct AtomicRMWOpConversion
     Type valueElemTy =
         tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
                  : op.getResult().getType();
-    const size_t valueElemNbits = valueElemTy.getIntOrFloatBitWidth();
-    auto elemsPerThread = getElemsPerThread(val.getType());
+    const size_t valueElemNBits = valueElemTy.getIntOrFloatBitWidth();
+    auto elemsPerThread = getTotalElemsPerThread(val.getType());
     // vec = 1, numElements = 1 for scalar
     auto vec = getVectorSize(ptr);
     int numElems = 1;
@@ -784,16 +790,16 @@ struct AtomicRMWOpConversion
       Value rmwMask = llMask ? and_(mask, maskElements[i]) : mask;
       std::string sTy;
       PTXBuilder ptxBuilderAtomicRMW;
-      std::string tyId = valueElemNbits * vec == 64
+      std::string tyId = valueElemNBits * vec == 64
                              ? "l"
-                             : (valueElemNbits * vec == 32 ? "r" : "h");
-      auto *dstOpr = ptxBuilderAtomicRMW.newOperand("=" + tyId);
+                             : (valueElemNBits * vec == 32 ? "r" : "h");
+      auto *dstOpr = ptxBuilderAtomicRMW.newOperand("=" + tyId, /*init=*/true);
       auto *ptrOpr = ptxBuilderAtomicRMW.newAddrOperand(rmwPtr, "l");
       auto *valOpr = ptxBuilderAtomicRMW.newOperand(rmwVal, tyId);
 
       auto &atom = ptxBuilderAtomicRMW.create<>("atom")->global().o("gpu");
       auto rmwOp = stringifyRMWOp(atomicRmwAttr).str();
-      auto sBits = std::to_string(valueElemNbits);
+      auto sBits = std::to_string(valueElemNBits);
       switch (atomicRmwAttr) {
       case RMWOp::AND:
         sTy = "b" + sBits;
@@ -809,9 +815,9 @@ struct AtomicRMWOpConversion
         break;
       case RMWOp::FADD:
         rmwOp = "add";
-        rmwOp += (valueElemNbits == 16 ? ".noftz" : "");
+        rmwOp += (valueElemNBits == 16 ? ".noftz" : "");
         sTy = "f" + sBits;
-        sTy += (vec == 2 && valueElemNbits == 16) ? "x2" : "";
+        sTy += (vec == 2 && valueElemNBits == 16) ? "x2" : "";
         break;
       case RMWOp::MAX:
         sTy = "s" + sBits;
@@ -853,7 +859,14 @@ struct AtomicRMWOpConversion
         auto old = ptxBuilderAtomicRMW.launch(rewriter, loc, valueElemTy);
         Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
         atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
-        store(old, atomPtr);
+        // Only threads with rmwMask = True store the result
+        PTXBuilder ptxBuilderStore;
+        auto &storeShared =
+            ptxBuilderStore.create<>("st")->shared().o("b" + sBits);
+        auto *ptrOpr = ptxBuilderStore.newAddrOperand(atomPtr, "r");
+        auto *valOpr = ptxBuilderStore.newOperand(old, tyId);
+        storeShared(ptrOpr, valOpr).predicate(rmwMask);
+        ptxBuilderStore.launch(rewriter, loc, void_ty(ctx));
         barrier();
         Value ret = load(atomPtr);
         barrier();
@@ -1031,7 +1044,7 @@ struct InsertSliceAsyncOpConversion
     unsigned inVec = getContiguity(src);
     unsigned outVec = resSharedLayout.getVec();
     unsigned minVec = std::min(outVec, inVec);
-    unsigned numElems = getElemsPerThread(srcTy);
+    unsigned numElems = getTotalElemsPerThread(srcTy);
     unsigned perPhase = resSharedLayout.getPerPhase();
     unsigned maxPhase = resSharedLayout.getMaxPhase();
     auto sizePerThread = srcBlockedLayout.getSizePerThread();

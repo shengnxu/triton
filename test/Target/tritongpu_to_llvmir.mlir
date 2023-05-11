@@ -1,4 +1,4 @@
-// RUN: triton-translate --target=llvmir --sm=80 %s | FileCheck %s
+// RUN: %PYTHON -m triton.tools.aot %s --target=llvm-ir --sm=80 | FileCheck %s
 
 // == LLVM IR check begin ==
 // CHECK-LABEL: ; ModuleID = 'LLVMDialectModule'
@@ -8,9 +8,9 @@
 
 module attributes {"triton_gpu.num-warps" = 4 : i32} {
 
-func.func @test_empty_kernel(%lb : index, %A : !tt.ptr<f16>) {
+tt.func @test_empty_kernel(%lb : index, %A : !tt.ptr<f16>) {
 
-  return
+  tt.return
 }
 
 }

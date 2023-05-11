@@ -29,6 +29,7 @@ public:
   TritonGPUToLLVMTypeConverter(MLIRContext *ctx, LowerToLLVMOptions &option,
                                const DataLayoutAnalysis *analysis = nullptr);
 
+  Type getElementTypeForStruct(RankedTensorType type);
   Type convertTritonPointerType(triton::PointerType type);
 
   Value packLLElements(Location loc, ValueRange resultVals,
@@ -38,7 +39,7 @@ public:
                                       ConversionPatternRewriter &rewriter,
                                       Type type);
 
-  llvm::Optional<Type> convertTritonTensorType(RankedTensorType type);
+  Type convertTritonTensorType(RankedTensorType type);
 };
 
 #endif

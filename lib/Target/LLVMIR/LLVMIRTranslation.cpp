@@ -18,6 +18,7 @@
 #include "triton/Conversion/TritonGPUToLLVM/RockToLLVMPass.h"
 #include "triton/Conversion/TritonGPUToLLVM/TritonGPUToRockPass.h"
 #include "triton/Dialect/Rock/Passes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
@@ -330,14 +331,14 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createConvertIndexToLLVMPass());
   pm.addPass(createConvertTritonGPUToRockPass(computeCapability));
   // Rock in-dialect transforms
-  pm.addNestedPass<func::FuncOp>(
+  pm.addNestedPass<triton::FuncOp>(
       mlir::rock::createRockBlockwiseGemmToThreadwisePass());
-  pm.addNestedPass<mlir::func::FuncOp>(
+  pm.addNestedPass<triton::FuncOp>(
       mlir::rock::createRockThreadwiseGemmLoweringPass());
-  pm.addNestedPass<mlir::func::FuncOp>(
+  pm.addNestedPass<triton::FuncOp>(
       mlir::rock::createRockSugarToLoopsPass());
-  pm.addNestedPass<mlir::func::FuncOp>(mlir::rock::createRockCleanMathPass());
-  pm.addNestedPass<mlir::func::FuncOp>(
+  pm.addNestedPass<triton::FuncOp>(mlir::rock::createRockCleanMathPass());
+  pm.addNestedPass<triton::FuncOp>(
       mlir::rock::createRockBufferLoadMergePass());
   pm.addPass(mlir::rock::createRockLoopsToCfPass());
   pm.addPass(createConvertRockToLLVMPass(computeCapability));

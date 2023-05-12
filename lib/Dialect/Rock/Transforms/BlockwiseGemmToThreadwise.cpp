@@ -35,6 +35,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Rock/IR/MfmaInsnGroup.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"

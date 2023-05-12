@@ -21,6 +21,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/Passes.h"
 #include "triton/Dialect/Rock/Passes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
 
 #define DEBUG_TYPE "rock-buffer-load-merge"
@@ -90,7 +91,7 @@ struct RockBufferLoadMergePass final
     llvm::DenseMap<Value, bool> isMergeableCache;
     llvm::SmallVector<Operation *, 0> toRemove;
 
-    func::FuncOp op = getOperation();
+    triton::FuncOp op = getOperation();
     op.walk([&](amdgpu::RawBufferLoadOp op) {
       if (!isMergeable(op.getMemref(), isMergeableCache))
         return;

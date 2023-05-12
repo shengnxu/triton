@@ -30,6 +30,7 @@
 #include "triton/Dialect/Rock/Passes.h"
 #include "triton/Dialect/Rock/utility/builderUtils.h"
 #include "triton/Dialect/Rock/utility/transformMapUtils.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
@@ -386,7 +387,7 @@ struct XdlopsGemmV2RewritePattern : public OpConversionPattern<XdlopsGemmV2Op> {
 };
 
 void RockThreadwiseGemmLoweringPass::runOnOperation() {
-  func::FuncOp op = getOperation();
+  triton::FuncOp op = getOperation();
   MLIRContext *ctx = &getContext();
   ConversionTarget target(*ctx);
   target.addIllegalOp<rock::ThreadwiseGemmOp, rock::XdlopsGemmV2Op>();

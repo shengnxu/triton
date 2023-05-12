@@ -47,27 +47,27 @@ def RockGridwiseGemmToBlockwisePass : Pass<"rock-gridwise-gemm-to-blockwise", ":
   let dependentDialects = ["rock::RockDialect", "AffineDialect", "gpu::GPUDialect", "vector::VectorDialect", "memref::MemRefDialect"];
 }
 
-def RockBlockwiseGemmToThreadwisePass : Pass<"rock-blockwise-gemm-to-threadwise", "::mlir::func::FuncOp"> {
+def RockBlockwiseGemmToThreadwisePass : Pass<"rock-blockwise-gemm-to-threadwise", "::mlir::triton::FuncOp"> {
   let summary = "Expand blockwise gemm into threadwise gemm and clean up fusion-related shorthand";
   let dependentDialects = ["rock::RockDialect", "AffineDialect", "gpu::GPUDialect", "memref::MemRefDialect"];
 }
 
-def RockThreadwiseGemmLoweringPass : Pass<"rock-threadwise-gemm-lowering", "::mlir::func::FuncOp"> {
+def RockThreadwiseGemmLoweringPass : Pass<"rock-threadwise-gemm-lowering", "::mlir::triton::FuncOp"> {
   let summary = "expand threadwise gemm to final implementation.";
   let dependentDialects = ["gpu::GPUDialect", "rock::RockDialect", "amdgpu::AMDGPUDialect", "vector::VectorDialect", "AffineDialect", "memref::MemRefDialect"];
 }
 
-def RockSugarToLoopsPass : Pass<"rock-sugar-to-loops", "::mlir::func::FuncOp"> {
+def RockSugarToLoopsPass : Pass<"rock-sugar-to-loops", "::mlir::triton::FuncOp"> {
   let summary = "Expand shorthand, like transforming_for and extract_slice, to other dialects";
   let dependentDialects = ["rock::RockDialect", "vector::VectorDialect", "arith::ArithDialect",
     "gpu::GPUDialect", "memref::MemRefDialect", "AffineDialect", "amdgpu::AMDGPUDialect"];
 }
 
-def RockCleanMathPass : Pass<"rock-clean-math", "::mlir::func::FuncOp"> {
+def RockCleanMathPass : Pass<"rock-clean-math", "::mlir::triton::FuncOp"> {
   let summary = "Clean up math using integer range analysis and other MLIR passes";
 }
 
-def RockBufferLoadMergePass : Pass<"rock-buffer-load-merge", "::mlir::func::FuncOp"> {
+def RockBufferLoadMergePass : Pass<"rock-buffer-load-merge", "::mlir::triton::FuncOp"> {
   let summary = "Merge identical memory loads to buffers only read. Assumes noalias.";
   let dependentDialects = ["::mlir::amdgpu::AMDGPUDialect"];
 }

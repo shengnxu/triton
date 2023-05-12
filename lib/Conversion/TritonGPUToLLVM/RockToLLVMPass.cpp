@@ -150,7 +150,7 @@ public:
     mlir::LowerToLLVMOptions option(context);
     option.overrideIndexBitwidth(32);
     TritonGPUToLLVMTypeConverter typeConverter(context, option);
-    TritonLLVMConversionTarget target(*context, isROCM);
+    TritonLLVMConversionTarget target(*context, /*isROCM*/ true);
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
     /* allocate shared memory and set barrier */
@@ -163,7 +163,7 @@ public:
       mlir::LowerToLLVMOptions option(context);
       option.overrideIndexBitwidth(32);
       TritonGPUToLLVMTypeConverter typeConverter(context, option);
-      TritonLLVMFunctionConversionTarget funcTarget(*context, isROCM);
+      TritonLLVMFunctionConversionTarget funcTarget(*context, /*isROCM*/ true);
       RewritePatternSet funcPatterns(context);
       funcPatterns.add<FuncOpConversion>(typeConverter, numWarps,
                                          /*benefit=*/1);

@@ -21,6 +21,7 @@ In doing so, you will learn about:
 # Custom GPU kernels for elementwise additions are educationally valuable but won't get you very far in practice.
 # Let us consider instead the case of a simple (numerically stabilized) softmax operation:
 
+import pandas as pd
 import torch
 
 import triton
@@ -191,7 +192,6 @@ def benchmark(M, N, provider):
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
-import pandas as pd
 pd.set_option('display.max_rows', 500)
 benchmark.run(show_plots=True, print_data=True)
 

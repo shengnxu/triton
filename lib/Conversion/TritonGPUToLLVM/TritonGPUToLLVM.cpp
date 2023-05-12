@@ -175,7 +175,7 @@ struct PrintOpConversion
   // The code is borrowed from https://reviews.llvm.org/D110448
   // from GPUPrintfOpToHIPLowering::matchAndRewrite().
   void llPrintfHIP(triton::PrintOp op, StringRef msg, ValueRange args,
-                ConversionPatternRewriter &rewriter) const {
+                   ConversionPatternRewriter &rewriter) const {
     mlir::Location loc = op->getLoc();
 
     mlir::Type llvmI8 = typeConverter->convertType(rewriter.getI8Type());

@@ -70,6 +70,7 @@ def to_triton(x: np.ndarray, device='cuda', dst_type=None) -> Union[TensorWrappe
             return torch.tensor(x, device=device).bfloat16()
         return torch.tensor(x, device=device)
 
+
 def to_numpy(x):
     if isinstance(x, TensorWrapper):
         return x.base.cpu().numpy().astype(getattr(np, torch_dtype_name(x.dtype)))
@@ -94,6 +95,8 @@ def to_numpy(x):
 #    output matrix as the building block for larger matrices.
 # 6. The smallest K dim is 16, which is a restriction from triton
 #    https://github.com/openai/triton/blob/7f3f58f3322d537125c6f6a18d50f070d643994b/python/triton/language/semantic.py#L1182
+
+
 @pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype",
                          [(*shape_nw, col_a, col_b, epilogue, allow_tf32, dtype)
                           for shape_nw in [[128, 64, 16, 16], [64, 128, 16, 16],
@@ -281,7 +284,7 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype, devi
     else:
         y = numpy_random((K, N), dtype_str=dtype, rs=rs)
     w = numpy_random((N, N), dtype_str=dtype, rs=rs)
-    #print(x)
+    # print(x)
     if 'int' not in dtype:
         x *= .1
         y *= .1
@@ -289,7 +292,7 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype, devi
         x = (x.view('uint32') & np.uint32(0xffffe000)).view('float32')
         y = (y.view('uint32') & np.uint32(0xffffe000)).view('float32')
         w = (w.view('uint32') & np.uint32(0xffffe000)).view('float32')
-    #print(x)
+    # print(x)
     x_tri = to_triton(x, device=device)
     y_tri = to_triton(y, device=device)
     w_tri = to_triton(w, device=device)

@@ -22,9 +22,9 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/AMDGPU/AMDGPUDialect.h"
+#include "mlir/Dialect/Affine/Analysis/LoopAnalysis.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
-#include "mlir/Dialect/Affine/Analysis/LoopAnalysis.h"
 #include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -183,188 +183,189 @@ static void generateUnrolledLoop(
 
 namespace mlir {
 namespace rock {
-    LogicalResult loopUnrollFull(AffineForOp forOp);
-    /// Helper to replace uses of loop carried values (iter_args) and loop
-    /// yield values while promoting single iteration affine.for ops.
-    static void replaceIterArgsAndYieldResults(AffineForOp forOp) {
-        // Replace uses of iter arguments with iter operands (initial values).
-        auto iterOperands = forOp.getIterOperands();
-        auto iterArgs = forOp.getRegionIterArgs();
-        for (auto e : llvm::zip(iterOperands, iterArgs))
-            std::get<1>(e).replaceAllUsesWith(std::get<0>(e));
+LogicalResult loopUnrollFull(AffineForOp forOp);
+/// Helper to replace uses of loop carried values (iter_args) and loop
+/// yield values while promoting single iteration affine.for ops.
+static void replaceIterArgsAndYieldResults(AffineForOp forOp) {
+  // Replace uses of iter arguments with iter operands (initial values).
+  auto iterOperands = forOp.getIterOperands();
+  auto iterArgs = forOp.getRegionIterArgs();
+  for (auto e : llvm::zip(iterOperands, iterArgs))
+    std::get<1>(e).replaceAllUsesWith(std::get<0>(e));
 
-        // Replace uses of loop results with the values yielded by the loop.
-        auto outerResults = forOp.getResults();
-        auto innerResults = forOp.getBody()->getTerminator()->getOperands();
-        for (auto e : llvm::zip(outerResults, innerResults))
-            std::get<0>(e).replaceAllUsesWith(std::get<1>(e));
-    }
+  // Replace uses of loop results with the values yielded by the loop.
+  auto outerResults = forOp.getResults();
+  auto innerResults = forOp.getBody()->getTerminator()->getOperands();
+  for (auto e : llvm::zip(outerResults, innerResults))
+    std::get<0>(e).replaceAllUsesWith(std::get<1>(e));
+}
 
-  /// Promotes the loop body of a forOp to its containing block if the forOp
-  /// was known to have a single iteration.
-  // TODO: extend this for arbitrary affine bounds.
-    LogicalResult promoteIfSingleIteration(AffineForOp forOp) {
-        std::optional<uint64_t> tripCount = getConstantTripCount(forOp);
-        if (!tripCount || *tripCount != 1)
-            return failure();
+/// Promotes the loop body of a forOp to its containing block if the forOp
+/// was known to have a single iteration.
+// TODO: extend this for arbitrary affine bounds.
+LogicalResult promoteIfSingleIteration(AffineForOp forOp) {
+  std::optional<uint64_t> tripCount = getConstantTripCount(forOp);
+  if (!tripCount || *tripCount != 1)
+    return failure();
 
-        if (forOp.getLowerBoundMap().getNumResults() != 1)
-            return failure();
+  if (forOp.getLowerBoundMap().getNumResults() != 1)
+    return failure();
 
-        // Replaces all IV uses to its single iteration value.
-        auto iv = forOp.getInductionVar();
-        auto *parentBlock = forOp->getBlock();
-        if (!iv.use_empty()) {
-            if (forOp.hasConstantLowerBound()) {
-                OpBuilder topBuilder(forOp->getParentOfType<mlir::triton::FuncOp>().getBody());
-                auto constOp = topBuilder.create<arith::ConstantIndexOp>(
-                    forOp.getLoc(), forOp.getConstantLowerBound());
-                iv.replaceAllUsesWith(constOp);
-            } else {
-                auto lbOperands = forOp.getLowerBoundOperands();
-                auto lbMap = forOp.getLowerBoundMap();
-                OpBuilder builder(forOp);
-                if (lbMap == builder.getDimIdentityMap()) {
-                    // No need of generating an affine.apply.
-                    iv.replaceAllUsesWith(lbOperands[0]);
-                } else {
-                    auto affineApplyOp =
-                        builder.create<AffineApplyOp>(forOp.getLoc(), lbMap, lbOperands);
-                    iv.replaceAllUsesWith(affineApplyOp);
-                }
-            }
-        }
-
-        mlir::rock::replaceIterArgsAndYieldResults(forOp);
-
-        // Move the loop body operations, except for its terminator, to the loop's
-        // containing block.
-        forOp.getBody()->back().erase();
-        parentBlock->getOperations().splice(Block::iterator(forOp),
-                                            forOp.getBody()->getOperations());
-        forOp.erase();
-        return success();
-    }
-
-    /// Helper to generate cleanup loop for unroll or unroll-and-jam when the trip
-    /// count is not a multiple of `unrollFactor`.
-    static LogicalResult generateCleanupLoopForUnroll(AffineForOp forOp,
-                                                      uint64_t unrollFactor) {
-        // Insert the cleanup loop right after 'forOp'.
-        OpBuilder builder(forOp->getBlock(), std::next(Block::iterator(forOp)));
-        auto cleanupForOp = cast<AffineForOp>(builder.clone(*forOp));
-
-        // Update uses of `forOp` results. `cleanupForOp` should use `forOp` result
-        // and produce results for the original users of `forOp` results.
-        auto results = forOp.getResults();
-        auto cleanupResults = cleanupForOp.getResults();
-        auto cleanupIterOperands = cleanupForOp.getIterOperands();
-
-        for (auto e : llvm::zip(results, cleanupResults, cleanupIterOperands)) {
-            std::get<0>(e).replaceAllUsesWith(std::get<1>(e));
-            cleanupForOp->replaceUsesOfWith(std::get<2>(e), std::get<0>(e));
-        }
-
-        AffineMap cleanupMap;
-        SmallVector<Value, 4> cleanupOperands;
-        getCleanupLoopLowerBound(forOp, unrollFactor, cleanupMap, cleanupOperands);
-        if (!cleanupMap)
-            return failure();
-
-        cleanupForOp.setLowerBound(cleanupOperands, cleanupMap);
-        // Promote the loop body up if this has turned into a single iteration loop.
-        (void)mlir::rock::promoteIfSingleIteration(cleanupForOp);
-
-        // Adjust upper bound of the original loop; this is the same as the lower
-        // bound of the cleanup loop.
-        forOp.setUpperBound(cleanupOperands, cleanupMap);
-        return success();
-    }
-
-    /// Unrolls this loop by the specified factor. Returns success if the loop
-    /// is successfully unrolled.
-    LogicalResult loopUnrollByFactor(
-        AffineForOp forOp, uint64_t unrollFactor,
-        function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn = nullptr,
-        bool cleanUpUnroll = false) {
-        assert(unrollFactor > 0 && "unroll factor should be positive");
-
-        std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
-        if (unrollFactor == 1) {
-            if (mayBeConstantTripCount && *mayBeConstantTripCount == 1 &&
-                failed(mlir::rock::promoteIfSingleIteration(forOp)))
-                return failure();
-            return success();
-        }
-
-        // Nothing in the loop body other than the terminator.
-        if (llvm::hasSingleElement(forOp.getBody()->getOperations()))
-            return success();
-
-        // If the trip count is lower than the unroll factor, no unrolled body.
-        if (mayBeConstantTripCount && *mayBeConstantTripCount < unrollFactor) {
-            if (cleanUpUnroll) {
-                // Unroll the cleanup loop if cleanUpUnroll is specified.
-                return mlir::rock::loopUnrollFull(forOp);
-            }
-
-            return failure();
-        }
-
-        // Generate the cleanup loop if trip count isn't a multiple of unrollFactor.
-        if (getLargestDivisorOfTripCount(forOp) % unrollFactor != 0) {
-            // Loops where the lower bound is a max expression or the upper bound is
-            // a min expression and the trip count doesn't divide the unroll factor
-            // can't be unrolled since the lower bound of the cleanup loop in such cases
-            // cannot be expressed as an affine function or a max over affine functions.
-            if (forOp.getLowerBoundMap().getNumResults() != 1 ||
-                forOp.getUpperBoundMap().getNumResults() != 1)
-                return failure();
-            if (cleanUpUnroll)
-                // Force unroll including cleanup loop
-                return mlir::rock::loopUnrollFull(forOp);
-            if (failed(mlir::rock::generateCleanupLoopForUnroll(forOp, unrollFactor)))
-                assert(false && "cleanup loop lower bound map for single result lower "
-                       "and upper bound maps can always be determined");
-        }
-
-        ValueRange iterArgs(forOp.getRegionIterArgs());
-        auto yieldedValues = forOp.getBody()->getTerminator()->getOperands();
-
-        // Scale the step of loop being unrolled by unroll factor.
-        int64_t step = forOp.getStep();
-        forOp.setStep(step * unrollFactor);
-        generateUnrolledLoop(
-            forOp.getBody(), forOp.getInductionVar(), unrollFactor,
-            [&](unsigned i, Value iv, OpBuilder b) {
-                // iv' = iv + i * step
-                auto d0 = b.getAffineDimExpr(0);
-                auto bumpMap = AffineMap::get(1, 0, d0 + i * step);
-                return b.create<AffineApplyOp>(forOp.getLoc(), bumpMap, iv);
-            },
-            /*annotateFn=*/annotateFn,
-            /*iterArgs=*/iterArgs, /*yieldedValues=*/yieldedValues);
-
-        // Promote the loop body up if this has turned into a single iteration loop.
-        (void)mlir::rock::promoteIfSingleIteration(forOp);
-        return success();
-    }
-
-  LogicalResult loopUnrollFull(AffineForOp forOp) {
-      std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
-      if (mayBeConstantTripCount.has_value()) {
-          uint64_t tripCount = *mayBeConstantTripCount;
-          if (tripCount == 0)
-              return success();
-          if (tripCount == 1)
-              return mlir::rock::promoteIfSingleIteration(forOp);
-          //return emitError(forOp.getLoc()) << "tripCount > 1.\n";
-          return mlir::rock::loopUnrollByFactor(forOp, tripCount);
+  // Replaces all IV uses to its single iteration value.
+  auto iv = forOp.getInductionVar();
+  auto *parentBlock = forOp->getBlock();
+  if (!iv.use_empty()) {
+    if (forOp.hasConstantLowerBound()) {
+      OpBuilder topBuilder(
+          forOp->getParentOfType<mlir::triton::FuncOp>().getBody());
+      auto constOp = topBuilder.create<arith::ConstantIndexOp>(
+          forOp.getLoc(), forOp.getConstantLowerBound());
+      iv.replaceAllUsesWith(constOp);
+    } else {
+      auto lbOperands = forOp.getLowerBoundOperands();
+      auto lbMap = forOp.getLowerBoundMap();
+      OpBuilder builder(forOp);
+      if (lbMap == builder.getDimIdentityMap()) {
+        // No need of generating an affine.apply.
+        iv.replaceAllUsesWith(lbOperands[0]);
+      } else {
+        auto affineApplyOp =
+            builder.create<AffineApplyOp>(forOp.getLoc(), lbMap, lbOperands);
+        iv.replaceAllUsesWith(affineApplyOp);
       }
-      return failure();
+    }
   }
+
+  mlir::rock::replaceIterArgsAndYieldResults(forOp);
+
+  // Move the loop body operations, except for its terminator, to the loop's
+  // containing block.
+  forOp.getBody()->back().erase();
+  parentBlock->getOperations().splice(Block::iterator(forOp),
+                                      forOp.getBody()->getOperations());
+  forOp.erase();
+  return success();
 }
+
+/// Helper to generate cleanup loop for unroll or unroll-and-jam when the trip
+/// count is not a multiple of `unrollFactor`.
+static LogicalResult generateCleanupLoopForUnroll(AffineForOp forOp,
+                                                  uint64_t unrollFactor) {
+  // Insert the cleanup loop right after 'forOp'.
+  OpBuilder builder(forOp->getBlock(), std::next(Block::iterator(forOp)));
+  auto cleanupForOp = cast<AffineForOp>(builder.clone(*forOp));
+
+  // Update uses of `forOp` results. `cleanupForOp` should use `forOp` result
+  // and produce results for the original users of `forOp` results.
+  auto results = forOp.getResults();
+  auto cleanupResults = cleanupForOp.getResults();
+  auto cleanupIterOperands = cleanupForOp.getIterOperands();
+
+  for (auto e : llvm::zip(results, cleanupResults, cleanupIterOperands)) {
+    std::get<0>(e).replaceAllUsesWith(std::get<1>(e));
+    cleanupForOp->replaceUsesOfWith(std::get<2>(e), std::get<0>(e));
+  }
+
+  AffineMap cleanupMap;
+  SmallVector<Value, 4> cleanupOperands;
+  getCleanupLoopLowerBound(forOp, unrollFactor, cleanupMap, cleanupOperands);
+  if (!cleanupMap)
+    return failure();
+
+  cleanupForOp.setLowerBound(cleanupOperands, cleanupMap);
+  // Promote the loop body up if this has turned into a single iteration loop.
+  (void)mlir::rock::promoteIfSingleIteration(cleanupForOp);
+
+  // Adjust upper bound of the original loop; this is the same as the lower
+  // bound of the cleanup loop.
+  forOp.setUpperBound(cleanupOperands, cleanupMap);
+  return success();
 }
+
+/// Unrolls this loop by the specified factor. Returns success if the loop
+/// is successfully unrolled.
+LogicalResult loopUnrollByFactor(
+    AffineForOp forOp, uint64_t unrollFactor,
+    function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn = nullptr,
+    bool cleanUpUnroll = false) {
+  assert(unrollFactor > 0 && "unroll factor should be positive");
+
+  std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
+  if (unrollFactor == 1) {
+    if (mayBeConstantTripCount && *mayBeConstantTripCount == 1 &&
+        failed(mlir::rock::promoteIfSingleIteration(forOp)))
+      return failure();
+    return success();
+  }
+
+  // Nothing in the loop body other than the terminator.
+  if (llvm::hasSingleElement(forOp.getBody()->getOperations()))
+    return success();
+
+  // If the trip count is lower than the unroll factor, no unrolled body.
+  if (mayBeConstantTripCount && *mayBeConstantTripCount < unrollFactor) {
+    if (cleanUpUnroll) {
+      // Unroll the cleanup loop if cleanUpUnroll is specified.
+      return mlir::rock::loopUnrollFull(forOp);
+    }
+
+    return failure();
+  }
+
+  // Generate the cleanup loop if trip count isn't a multiple of unrollFactor.
+  if (getLargestDivisorOfTripCount(forOp) % unrollFactor != 0) {
+    // Loops where the lower bound is a max expression or the upper bound is
+    // a min expression and the trip count doesn't divide the unroll factor
+    // can't be unrolled since the lower bound of the cleanup loop in such cases
+    // cannot be expressed as an affine function or a max over affine functions.
+    if (forOp.getLowerBoundMap().getNumResults() != 1 ||
+        forOp.getUpperBoundMap().getNumResults() != 1)
+      return failure();
+    if (cleanUpUnroll)
+      // Force unroll including cleanup loop
+      return mlir::rock::loopUnrollFull(forOp);
+    if (failed(mlir::rock::generateCleanupLoopForUnroll(forOp, unrollFactor)))
+      assert(false && "cleanup loop lower bound map for single result lower "
+                      "and upper bound maps can always be determined");
+  }
+
+  ValueRange iterArgs(forOp.getRegionIterArgs());
+  auto yieldedValues = forOp.getBody()->getTerminator()->getOperands();
+
+  // Scale the step of loop being unrolled by unroll factor.
+  int64_t step = forOp.getStep();
+  forOp.setStep(step * unrollFactor);
+  generateUnrolledLoop(
+      forOp.getBody(), forOp.getInductionVar(), unrollFactor,
+      [&](unsigned i, Value iv, OpBuilder b) {
+        // iv' = iv + i * step
+        auto d0 = b.getAffineDimExpr(0);
+        auto bumpMap = AffineMap::get(1, 0, d0 + i * step);
+        return b.create<AffineApplyOp>(forOp.getLoc(), bumpMap, iv);
+      },
+      /*annotateFn=*/annotateFn,
+      /*iterArgs=*/iterArgs, /*yieldedValues=*/yieldedValues);
+
+  // Promote the loop body up if this has turned into a single iteration loop.
+  (void)mlir::rock::promoteIfSingleIteration(forOp);
+  return success();
+}
+
+LogicalResult loopUnrollFull(AffineForOp forOp) {
+  std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
+  if (mayBeConstantTripCount.has_value()) {
+    uint64_t tripCount = *mayBeConstantTripCount;
+    if (tripCount == 0)
+      return success();
+    if (tripCount == 1)
+      return mlir::rock::promoteIfSingleIteration(forOp);
+    // return emitError(forOp.getLoc()) << "tripCount > 1.\n";
+    return mlir::rock::loopUnrollByFactor(forOp, tripCount);
+  }
+  return failure();
+}
+} // namespace rock
+} // namespace mlir
 
 namespace {
 struct RockSugarToLoopsPass

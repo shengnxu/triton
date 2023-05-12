@@ -437,7 +437,7 @@ MmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
 }
 
 unsigned MfmaEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
-                                             Type eltTy) const {
+                                                  Type eltTy) const {
   size_t rank = shape.size();
   assert(rank == 2 && "Unexpected rank of mfma layout");
 
@@ -451,7 +451,7 @@ unsigned MfmaEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
 }
 
 unsigned LDSEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
-                                            Type eltTy) const {
+                                                 Type eltTy) const {
   llvm_unreachable("Unexpected LDS layout");
   return 0;
 }

@@ -73,14 +73,14 @@ def optimize_ttgir(mod, num_stages, arch):
     if isinstance(arch, int):
         pm.add_tritongpu_accelerate_matmul_pass(arch)
     else:
-        ## For AMDGPU, arch is a string
-        ## We set -1 as the computeCapability since it is
-        ## not used in the accelerate_matmul_pass for AMDGPU
+        # For AMDGPU, arch is a string
+        # We set -1 as the computeCapability since it is
+        # not used in the accelerate_matmul_pass for AMDGPU
         pm.add_tritongpu_accelerate_matmul_pass(-1)
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     # TODO enable this pass for AMD GPU when it is ready
-    #if torch.version.hip is None:
+    # if torch.version.hip is None:
     pm.add_tritongpu_pipeline_pass(num_stages)
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()

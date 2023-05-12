@@ -1409,6 +1409,7 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, stride_am, stride_ak, stride_bk, stride_b
     c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
     tl.store(c_ptrs, accumulator)
 
+
 def get_variant_golden(a, b):
     SIZE_M = a.shape[0]
     SIZE_K = a.shape[1]
@@ -1424,6 +1425,7 @@ def get_variant_golden(a, b):
     b_padded = torch.cat((b_padded, zero_3K_N, zero_3K_N), 1)
     c_padded = torch.matmul(a_padded, b_padded)
     return c_padded[:SIZE_M, :SIZE_N]
+
 
 @pytest.mark.parametrize('SIZE_M,SIZE_N,SIZE_K,NUM_WARPS,BLOCK_SIZE_M,BLOCK_SIZE_N,BLOCK_SIZE_K', [
     [64, 32, 128, 4, 64, 32, 64],

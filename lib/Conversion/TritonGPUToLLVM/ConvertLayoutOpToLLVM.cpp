@@ -250,8 +250,8 @@ private:
     // elements each thread handles within one CTA.
     if (type.getEncoding().isa<MfmaEncodingAttr>()) {
       auto mfmaLayout = type.getEncoding().dyn_cast<MfmaEncodingAttr>();
-      accumSizePerThread =
-          mfmaLayout.getTotalElemsPerThread(type.getShape(), type.getElementType());
+      accumSizePerThread = mfmaLayout.getTotalElemsPerThread(
+          type.getShape(), type.getElementType());
     }
     SmallVector<unsigned> numCTAs(rank);
     auto shapePerCTA = getShapePerCTA(layout, type.getShape());

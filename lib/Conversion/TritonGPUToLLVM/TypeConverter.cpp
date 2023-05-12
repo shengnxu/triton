@@ -132,13 +132,12 @@ Type TritonGPUToLLVMTypeConverter::convertTritonTensorType(
   SmallVector<int64_t> shape(type.getShape().begin(), type.getShape().end());
   Type eltType = getElementTypeForStruct(type);
 
-  if (layout.isa<SharedEncodingAttr>() ||
-      layout.isa<LDSEncodingAttr>()) {
+  if (layout.isa<SharedEncodingAttr>() || layout.isa<LDSEncodingAttr>()) {
     SmallVector<Type, 4> types;
     // base ptr
     auto ptrType = LLVM::LLVMPointerType::get(eltType, 3);
     if (layout.isa<LDSEncodingAttr>())
-        ptrType = LLVM::LLVMPointerType::get(ctx, 3);
+      ptrType = LLVM::LLVMPointerType::get(ctx, 3);
     types.push_back(ptrType);
     // shape dims
     auto rank = type.getRank();

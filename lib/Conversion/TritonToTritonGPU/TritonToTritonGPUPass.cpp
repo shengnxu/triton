@@ -326,7 +326,10 @@ struct TritonCatPattern : public OpConversionPattern<triton::CatOp> {
 
 struct TritonTransPattern : public OpConversionPattern<triton::TransOp> {
 
-  using OpConversionPattern<triton::TransOp>::OpConversionPattern;
+  uint32_t kpack;
+  TritonTransPattern(TritonGPUTypeConverter &typeConverter, MLIRContext* context, uint32_t kpack):
+    OpConversionPattern<triton::TransOp>(typeConverter, context), kpack(kpack){ 
+  }
 
   LogicalResult
   matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
@@ -336,7 +339,12 @@ struct TritonTransPattern : public OpConversionPattern<triton::TransOp> {
     Attribute srcEncoding = srcType.getEncoding();
     if (!srcEncoding)
       return failure();
+#ifndef USE_ROCM
     if (!srcEncoding.isa<triton::gpu::SharedEncodingAttr>()) {
+#else
+    if (!srcEncoding.isa<triton::gpu::LDSEncodingAttr>()) {
+#endif
+
       // TODO: end-to-end correctness is broken if
       // the input is blocked and the output is shared
       // with different order. Maybe a backend issue in BlockedToShared?
@@ -344,8 +352,13 @@ struct TritonTransPattern : public OpConversionPattern<triton::TransOp> {
       if (auto srcBlockedEncoding =
               srcEncoding.dyn_cast<triton::gpu::BlockedEncodingAttr>())
         llvm::copy(srcBlockedEncoding.getOrder(), order.begin());
+#ifndef USE_ROCM
       srcEncoding =
           triton::gpu::SharedEncodingAttr::get(getContext(), 1, 1, 1, order);
+#else
+      srcEncoding =
+          triton::gpu::LDSEncodingAttr::get(getContext(), kpack, order); 
+#endif
       srcType = RankedTensorType::get(srcType.getShape(),
                                       srcType.getElementType(), srcEncoding);
       src = rewriter.create<triton::gpu::ConvertLayoutOp>(src.getLoc(), srcType,
@@ -516,7 +529,7 @@ struct TritonAssertPattern : public OpConversionPattern<triton::AssertOp> {
 };
 
 void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
-                            RewritePatternSet &patterns) {
+                            RewritePatternSet &patterns, uint32_t kpack) {
   MLIRContext *context = patterns.getContext();
   patterns
       .insert< // TODO: view should have custom pattern that views the layout
@@ -527,10 +540,11 @@ void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
           TritonGenericPattern<triton::PtrToIntOp>,
           TritonGenericPattern<triton::SplatOp>, TritonBroadcastPattern,
           TritonGenericPattern<triton::AddPtrOp>, TritonCatPattern,
-          TritonReducePattern, TritonTransPattern, TritonExpandDimsPattern,
+          TritonReducePattern, TritonExpandDimsPattern,
           TritonMakeRangePattern, TritonDotPattern, TritonLoadPattern,
           TritonStorePattern, TritonExtElemwisePattern, TritonPrintPattern,
           TritonAssertPattern, TritonAtomicRMWPattern>(typeConverter, context);
+  patterns.insert<TritonTransPattern>(typeConverter, context, kpack);
 }
 
 //
@@ -784,7 +798,7 @@ public:
     populateStdPatternsAndLegality(typeConverter, patterns, target);
     populateArithPatternsAndLegality(typeConverter, patterns, target);
     populateMathPatternsAndLegality(typeConverter, patterns, target);
-    populateTritonPatterns(typeConverter, patterns);
+    populateTritonPatterns(typeConverter, patterns, kpack);
     // TODO: can we use
     //    mlir::scf::populateSCFStructurealTypeConversionsAndLegality(...) here?
     populateSCFPatterns(typeConverter, patterns);

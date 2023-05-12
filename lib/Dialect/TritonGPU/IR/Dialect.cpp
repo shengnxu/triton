@@ -1003,6 +1003,7 @@ struct TritonGPUInferLayoutInterface
 
   LogicalResult inferTransOpEncoding(Attribute operandEncoding,
                                      Attribute &resultEncoding) const override {
+#ifndef USE_ROCM
     SharedEncodingAttr sharedEncoding =
         operandEncoding.dyn_cast<SharedEncodingAttr>();
     if (!sharedEncoding)
@@ -1013,6 +1014,17 @@ struct TritonGPUInferLayoutInterface
     resultEncoding = SharedEncodingAttr::get(
         getDialect()->getContext(), sharedEncoding.getVec(),
         sharedEncoding.getPerPhase(), sharedEncoding.getMaxPhase(), retOrder);
+#else
+    LDSEncodingAttr LDSEncoding =
+        operandEncoding.dyn_cast<LDSEncodingAttr>();
+    if (!LDSEncoding)
+      return failure();
+    SmallVector<unsigned> retOrder(LDSEncoding.getOrder().begin(),
+                                   LDSEncoding.getOrder().end());
+    std::reverse(retOrder.begin(), retOrder.end());
+    resultEncoding = LDSEncodingAttr::get(
+        getDialect()->getContext(), LDSEncoding.getKpack(), retOrder);
+#endif
     return mlir::success();
   }
 

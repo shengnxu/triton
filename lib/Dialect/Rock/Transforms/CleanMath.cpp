@@ -20,6 +20,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 #include "triton/Dialect/Rock/Passes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 // Remove these includes after we're not working with a test pass upstream
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
@@ -123,10 +124,10 @@ static void rewrite(DataFlowSolver &solver, MLIRContext *context,
 // end removeable part
 
 void RockCleanMathPass::runOnOperation() {
-  func::FuncOp op = getOperation();
+  triton::FuncOp op = getOperation();
 
   // Run canonicalizers and CSE to clean up the code created by loop unrolling
-  OpPassManager preAnalysisPipeline("func.func");
+  OpPassManager preAnalysisPipeline("tt.func");
   preAnalysisPipeline.addPass(createCanonicalizerPass());
   preAnalysisPipeline.addPass(createCSEPass());
   (void)runPipeline(preAnalysisPipeline, op);
@@ -140,7 +141,7 @@ void RockCleanMathPass::runOnOperation() {
   rewrite(solver, op->getContext(), op->getRegions());
   // end removable part
 
-  OpPassManager postAnalysisPipeline("func.func");
+  OpPassManager postAnalysisPipeline("tt.func");
   postAnalysisPipeline.addPass(createCanonicalizerPass());
   postAnalysisPipeline.addPass(arith::createArithUnsignedWhenEquivalentPass());
   (void)runPipeline(postAnalysisPipeline, op);

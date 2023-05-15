@@ -79,6 +79,7 @@ Math Ops
     :toctree: generated
     :nosignatures:
 
+    abs
     exp
     log
     cos
@@ -95,9 +96,13 @@ Reduction Ops
     :toctree: generated
     :nosignatures:
 
+    argmax
+    argmin
     max
     min
+    reduce
     sum
+    xor_sum
 
 
 Atomic Ops

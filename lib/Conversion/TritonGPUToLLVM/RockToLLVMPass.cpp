@@ -41,47 +41,32 @@ using namespace mlir::triton;
 
 namespace mlir {
 #define GEN_PASS_DEF_CONVERTROCKTOLLVM
-#include "triton/Conversion/Passes.h.inc"
+#include "triton/Conversion/TritonGPUToLLVM/Passes.h.inc"
 } // namespace mlir
 
 namespace {
 
 class TritonLLVMFunctionConversionTarget : public ConversionTarget {
 public:
-  explicit TritonLLVMFunctionConversionTarget(MLIRContext &ctx)
+  explicit TritonLLVMFunctionConversionTarget(MLIRContext &ctx, bool isROCM)
       : ConversionTarget(ctx) {
     addLegalDialect<index::IndexDialect>();
     addLegalDialect<LLVM::LLVMDialect>();
-#ifdef USE_ROCM
-    addLegalDialect<ROCDL::ROCDLDialect>();
-    addLegalDialect<mlir::scf::SCFDialect>();
-#else
-    addLegalDialect<NVVM::NVVMDialect>();
-#endif
-    addIllegalOp<mlir::func::FuncOp>();
+    if (isROCM) {
+      addLegalDialect<ROCDL::ROCDLDialect>();
+      addLegalDialect<mlir::scf::SCFDialect>();
+    } else {
+      addLegalDialect<NVVM::NVVMDialect>();
+    }
     addLegalOp<mlir::UnrealizedConversionCastOp>();
   }
 };
 
-class TritonPTXConversionTarget : public ConversionTarget {
-public:
-  explicit TritonPTXConversionTarget(MLIRContext &ctx) : ConversionTarget(ctx) {
-    addDynamicallyLegalDialect<LLVM::LLVMDialect>(
-        [&](Operation *op) { return isLegalElementwiseOp(op); });
-#ifdef USE_ROCM
-    addLegalDialect<ROCDL::ROCDLDialect>();
-#else
-    addLegalDialect<NVVM::NVVMDialect>();
-#endif
-    addLegalOp<mlir::UnrealizedConversionCastOp>();
-  }
-};
-
-struct ReturnOpConversion : public ConvertOpToLLVMPattern<func::ReturnOp> {
-  using ConvertOpToLLVMPattern<func::ReturnOp>::ConvertOpToLLVMPattern;
+struct ReturnOpConversion : public ConvertOpToLLVMPattern<triton::ReturnOp> {
+  using ConvertOpToLLVMPattern<triton::ReturnOp>::ConvertOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(func::ReturnOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::ReturnOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     unsigned numArguments = op.getNumOperands();
 
@@ -107,7 +92,7 @@ struct FuncOpConversion : public FuncOpConversionBase {
       : FuncOpConversionBase(converter, benefit), numWarps(numWarps) {}
 
   LogicalResult
-  matchAndRewrite(func::FuncOp funcOp, OpAdaptor adaptor,
+  matchAndRewrite(triton::FuncOp funcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto newFuncOp = convertFuncOpToLLVMFuncOp(funcOp, rewriter);
     if (!newFuncOp) {
@@ -135,15 +120,15 @@ private:
 
 class TritonLLVMConversionTarget : public ConversionTarget {
 public:
-  explicit TritonLLVMConversionTarget(MLIRContext &ctx)
+  explicit TritonLLVMConversionTarget(MLIRContext &ctx, bool isROCM)
       : ConversionTarget(ctx) {
     addLegalDialect<LLVM::LLVMDialect>();
-#ifdef USE_ROCM
-    addLegalDialect<ROCDL::ROCDLDialect>();
-    addLegalDialect<mlir::scf::SCFDialect>();
-#else
-    addLegalDialect<NVVM::NVVMDialect>();
-#endif
+    if (isROCM) {
+      addLegalDialect<ROCDL::ROCDLDialect>();
+      addLegalDialect<mlir::scf::SCFDialect>();
+    } else {
+      addLegalDialect<NVVM::NVVMDialect>();
+    }
     addIllegalDialect<triton::TritonDialect>();
     addIllegalDialect<triton::gpu::TritonGPUDialect>();
     addIllegalDialect<mlir::gpu::GPUDialect>();
@@ -165,7 +150,7 @@ public:
     mlir::LowerToLLVMOptions option(context);
     option.overrideIndexBitwidth(32);
     TritonGPUToLLVMTypeConverter typeConverter(context, option);
-    TritonLLVMConversionTarget target(*context);
+    TritonLLVMConversionTarget target(*context, /*isROCM*/ true);
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
     /* allocate shared memory and set barrier */
@@ -178,7 +163,7 @@ public:
       mlir::LowerToLLVMOptions option(context);
       option.overrideIndexBitwidth(32);
       TritonGPUToLLVMTypeConverter typeConverter(context, option);
-      TritonLLVMFunctionConversionTarget funcTarget(*context);
+      TritonLLVMFunctionConversionTarget funcTarget(*context, /*isROCM*/ true);
       RewritePatternSet funcPatterns(context);
       funcPatterns.add<FuncOpConversion>(typeConverter, numWarps,
                                          /*benefit=*/1);
@@ -258,6 +243,7 @@ public:
     populatePatterns1(populateLoadStoreOpToLLVMPatterns);
     populatePatterns1(populateReduceOpToLLVMPatterns);
     populatePatterns2(populateViewOpToLLVMPatterns);
+
     // Native lowering patterns
 #ifdef USE_ROCM
     // GPUToROCDL lowering patterns
@@ -277,21 +263,6 @@ public:
                                                           patterns);
     if (failed(applyPartialConversion(mod, target, std::move(patterns))))
       return signalPassFailure();
-
-#ifndef USE_ROCM
-    // Use our custom converters to convert some operations to PTX to avoid
-    // using NVPTX for two reasons:
-    // 1. NVPTX backend is flaky on data types like float16 and bfloat16
-    // 2. In some cases, we may generate faster PTX code than NVPTX backend
-    TritonPTXConversionTarget ptxTarget(*context);
-    RewritePatternSet ptxPatterns(context);
-    // Add patterns to convert LLVM to PTX
-    populateElementwiseOpToPTXPatterns(typeConverter, ptxPatterns,
-                                       /*benefits=*/10);
-
-    if (failed(applyPartialConversion(mod, ptxTarget, std::move(ptxPatterns))))
-      return signalPassFailure();
-#endif
   }
 
 private:
@@ -305,6 +276,7 @@ private:
       indexCache;
 
   int computeCapability{};
+  bool isROCM{};
 
   void initSharedMemory(size_t size,
                         TritonGPUToLLVMTypeConverter &typeConverter) {

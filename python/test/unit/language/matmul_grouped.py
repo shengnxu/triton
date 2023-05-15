@@ -1,3 +1,6 @@
+import argparse
+import sys
+
 import pytest
 import torch
 from torch.testing import assert_close
@@ -5,8 +8,6 @@ from torch.testing import assert_close
 import triton
 import triton.language as tl
 
-import argparse
-import sys
 
 @triton.jit
 def matmul_kernel(
@@ -76,7 +77,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, num_warps, BLOCK_SIZE_M, BLOCK_SIZE_N, BLO
     a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float16)
     b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float16)
     c = torch.zeros((SIZE_M, SIZE_N), device=a.device, dtype=torch.float32)
-    #grid = lambda META: (1, )
+    # grid = lambda META: (1, )
     grid = lambda META: (
         triton.cdiv(SIZE_M, BLOCK_SIZE_M) * triton.cdiv(SIZE_N, BLOCK_SIZE_N),
         SPLIT_K
@@ -145,6 +146,7 @@ def main(args=None):
     kpack = parsed_args.kpack
     mPerWave = parsed_args.mPerWave
     test_gemm(M, N, K, num_warps, BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, kpack, mPerWave, GROUP_M)
+
 
 if __name__ == '__main__':
     sys.exit(main())

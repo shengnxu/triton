@@ -46,7 +46,7 @@ using namespace mlir::rock;
 
 namespace mlir {
 #define GEN_PASS_DEF_CONVERTTRITONGPUTOROCK
-#include "triton/Conversion/Passes.h.inc"
+#include "triton/Conversion/TritonGPUToLLVM/Passes.h.inc"
 #include "triton/Dialect/Rock/Passes.h.inc"
 } // namespace mlir
 
@@ -746,7 +746,7 @@ private:
           srcType.getEncoding().dyn_cast<triton::gpu::MmaEncodingAttr>();
       auto dstDotOp =
           dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
-      if (srcMma && dstDotOp && !isMmaToDotShortcut(srcMma, dstDotOp)) {
+      if (srcMma && dstDotOp && !isMmaToDotShortcut(srcType, dstType)) {
         auto tmpType = RankedTensorType::get(
             dstType.getShape(), dstType.getElementType(),
             triton::gpu::BlockedEncodingAttr::get(
@@ -851,6 +851,8 @@ private:
       auto loadOp = builder.create<triton::LoadOp>(
           insertSliceAsyncOp.getLoc(), tmpTy, insertSliceAsyncOp.getSrc(),
           insertSliceAsyncOp.getMask(), insertSliceAsyncOp.getOther(),
+          // TODO(Chenggang): confirm `boundaryCheck` and `padding`
+          /*boundaryCheck=*/nullptr, /*padding=*/nullptr,
           insertSliceAsyncOp.getCache(), insertSliceAsyncOp.getEvict(),
           insertSliceAsyncOp.getIsVolatile());
 

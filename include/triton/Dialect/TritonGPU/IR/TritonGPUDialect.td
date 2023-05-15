@@ -43,7 +43,7 @@ def TritonGPU_Dialect : Dialect {
       return mod->getAttr("triton_gpu.mPerWave").cast<IntegerAttr>().getInt();
     }
   }];
-  
+
   let useDefaultAttributePrinterParser = 1;
 }
 

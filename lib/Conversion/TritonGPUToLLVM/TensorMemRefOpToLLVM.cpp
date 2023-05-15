@@ -8,7 +8,6 @@ using namespace mlir;
 using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
-using ::mlir::triton::gpu::getElemsPerThread;
 using ::mlir::triton::gpu::LDSEncodingAttr;
 
 struct TensorToMemRefOpConversion

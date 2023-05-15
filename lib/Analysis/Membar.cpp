@@ -23,8 +23,9 @@ void MembarAnalysis::resolve(Operation *operation, OpBuilder *builder) {
       // Check if the operation belongs to scf dialect, if so, we need to
       // throw an error
       if (op.getDialect()->getNamespace() == "scf") {
-        op.emitError("scf dialect is not supported in membar. Please lower it "
-                     "to cf dialect first.");
+        llvm::report_fatal_error(
+            "scf dialect is not supported in membar. Please lower it "
+            "to cf dialect first.");
         return;
       }
     }
@@ -73,7 +74,10 @@ void MembarAnalysis::visitTerminator(Operation *op,
     return;
   }
   // Otherwise, it could be a return op
-  assert(isa<func::ReturnOp>(op) && "Unknown terminator");
+  if (isa<triton::ReduceReturnOp>(op) || isa<triton::ReturnOp>(op)) {
+    return;
+  }
+  llvm_unreachable("Unknown terminator encountered in membar analysis");
 }
 
 void MembarAnalysis::update(Operation *op, BlockInfo *blockInfo,

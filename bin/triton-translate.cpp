@@ -1,3 +1,5 @@
+#include "mlir/ExecutionEngine/ExecutionEngine.h"
+#include "mlir/ExecutionEngine/OptUtils.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
@@ -92,12 +94,11 @@ LogicalResult tritonTranslateMain(int argc, char **argv,
       llvm::cl::value_desc("architecture"), llvm::cl::init("90a"));
 
   static llvm::cl::opt<std::string> GCNTriple(
-      "amdgcn",
-      llvm::cl::desc("AMDGCN triple vendor and platfom. e.g. '-amd-amdhsa'"),
+      "amdgcn", llvm::cl::desc("AMDGCN triple. e.g. '-amd-amdhsa'"),
       llvm::cl::value_desc("target triple"), llvm::cl::init("-amd-amdhsa"));
 
   static llvm::cl::opt<std::string> GCNFeatures(
-      "features", llvm::cl::desc("AMDGCN features. e.g. '+sramecc,-xnack'"),
+      "", llvm::cl::desc("AMDGCN features. e.g. '+sramecc,-xnack'"),
       llvm::cl::value_desc("features"), llvm::cl::init("+sramecc,-xnack"));
 
   llvm::InitLLVM y(argc, argv);
@@ -120,8 +121,13 @@ LogicalResult tritonTranslateMain(int argc, char **argv,
   }
 
   llvm::LLVMContext llvmContext;
-  auto llvmir =
-      translateTritonGPUToLLVMIR(&llvmContext, *module, SMArch.getValue());
+#if 1 // USE_ROCM doesnot work here
+  auto llvmir = translateTritonGPUToLLVMIR(&llvmContext, *module,
+                                           SMArch.getValue(), true /*isRocm*/);
+#else
+  auto llvmir = translateTritonGPUToLLVMIR(&llvmContext, *module,
+                                           SMArch.getValue(), false /*isRocm*/);
+#endif
   if (!llvmir) {
     llvm::errs() << "Translate to LLVM IR failed";
   }
@@ -132,11 +138,9 @@ LogicalResult tritonTranslateMain(int argc, char **argv,
     llvm::outs() << ::triton::translateLLVMIRToPTX(*llvmir, SMArch.getValue(),
                                                    ptxVersion.getValue());
   else if (targetKind == "hsaco") {
-    const std::string arch = "gfx" + GCNArch.getValue();
-    const std::string triple = "amdgcn" + GCNTriple.getValue();
-    const std::string features = GCNFeatures.getValue();
-    auto [module, hsaco] =
-        ::triton::translateLLVMIRToHSACO(*llvmir, arch, triple, features);
+    auto [module, hsaco] = ::triton::translateLLVMIRToHSACO(
+        *llvmir, GCNArch.getValue(), GCNTriple.getValue(),
+        GCNFeatures.getValue());
     llvm::outs() << hsaco;
   } else {
     llvm::errs() << "Error: Unknown target specified: " << targetKind << "\n";

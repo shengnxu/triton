@@ -148,6 +148,7 @@ public:
     /* preprocess */
     decomposeMmaToDotOperand(mod, numWarps);
     decomposeBlockedToDotOperand(mod);
+    cvtTransExtfPatternRewrite(mod);
     if (failed(decomposeInsertSliceAsyncOp(mod)))
       return signalPassFailure();
 
@@ -306,6 +307,54 @@ private:
         cvtOp.replaceAllUsesWith(newConvert.getResult());
         cvtOp.erase();
       }
+    });
+  }
+
+  // Replace pattern extf(trans(cvt(x))) with trans(extf(cvt(x)))
+  //
+  // Currently TransOp will always use shared encoding in ttgir. If input is not
+  // in shared encoding convert_layout will be inserted. In flash attention,
+  // this causes extf operation (that comes after trans) to use shared
+  // encoding. Triton currently doesn't support code generation for elmtwise ops
+  // in shared encoding. To work around this issue, order of these instructions
+  // is inverted (since it doesn't affect the result), thus ensuring extf is not
+  // using shared encoding.
+  void cvtTransExtfPatternRewrite(ModuleOp mod) const {
+    mod.walk([&](mlir::arith::ExtFOp op) -> void {
+      OpBuilder builder(op);
+
+      auto transOp = dyn_cast<triton::TransOp>(op.getOperand().getDefiningOp());
+      if (!transOp)
+        return;
+
+      auto cvtOp = dyn_cast<triton::gpu::ConvertLayoutOp>(
+          transOp.getOperand().getDefiningOp());
+      if (!cvtOp)
+        return;
+
+      auto inTypeCvt = cvtOp.getOperand().getType().cast<RankedTensorType>();
+      auto outTypeCvt = cvtOp.getResult().getType().cast<RankedTensorType>();
+      auto outTypeExtf = op.getResult().getType().cast<RankedTensorType>();
+
+      auto newExtfType = RankedTensorType::get(inTypeCvt.getShape(),
+                                               outTypeExtf.getElementType(),
+                                               inTypeCvt.getEncoding());
+      auto newExtfOp = builder.create<mlir::arith::ExtFOp>(
+          op.getLoc(), newExtfType, cvtOp.getOperand());
+
+      auto newCvtTy = RankedTensorType::get(inTypeCvt.getShape(),
+                                            outTypeExtf.getElementType(),
+                                            outTypeCvt.getEncoding());
+      auto newCvt = builder.create<triton::gpu::ConvertLayoutOp>(
+          cvtOp.getLoc(), newCvtTy, newExtfOp);
+      auto newTrans = builder.create<triton::TransOp>(transOp.getLoc(), newCvt);
+
+      op.replaceAllUsesWith(newTrans.getResult());
+
+      // DCE
+      op.erase();
+      transOp.erase();
+      cvtOp.erase();
     });
   }
 

@@ -109,10 +109,10 @@ private:
       return multiDimOffset;
     }
     if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-      // First locate the current wave in the CTA
+      // First locate the first [4,1] block in the CTA for the thread
       auto multiDimOffsetFirstElem =
           emitBaseIndexForLayout(loc, rewriter, mfmaLayout, type);
-      // Second loacate the xdlops within the warp
+      // Second locate the xdlops within the CTA
       auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
       auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
       unsigned nonKDim = mfmaLayout.getNonKDim();

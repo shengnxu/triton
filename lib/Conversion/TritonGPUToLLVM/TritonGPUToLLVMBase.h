@@ -21,6 +21,7 @@ using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::MmaEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
+using ::mlir::triton::gpu::getTotalElemsPerThread;
 
 namespace mlir {
 namespace LLVM {
@@ -645,6 +646,8 @@ public:
   emitOffsetForLayout(Attribute layout, RankedTensorType type) const {
     if (auto blockedLayout = layout.dyn_cast<BlockedEncodingAttr>())
       return emitOffsetForBlockedLayout(blockedLayout, type);
+    if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
+      return emitOffsetForMfmaLayout(mfmaLayout, type);
     if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
       if (mmaLayout.isVolta())
         return emitOffsetForMmaLayoutV1(mmaLayout, type);
@@ -675,6 +678,8 @@ public:
         result = emitIndicesForDistributedLayout(loc, b, blocked, type);
       } else if (auto mma = layout.dyn_cast<MmaEncodingAttr>()) {
         result = emitIndicesForDistributedLayout(loc, b, mma, type);
+      } else if (auto mfma = layout.dyn_cast<MfmaEncodingAttr>()) {
+        result = emitIndicesForDistributedLayout(loc, b, mfma, type);
       } else if (auto slice = layout.dyn_cast<SliceEncodingAttr>()) {
         result = emitIndicesForSliceLayout(loc, b, slice, type);
       } else {
@@ -793,6 +798,54 @@ private:
                                   mul(multiDimWarpId[k], threadsPerWarpK)));
     }
     return multiDimBase;
+  }
+
+  SmallVector<SmallVector<unsigned>>
+  emitOffsetForMfmaLayout(const MfmaEncodingAttr &mfmaLayout,
+                          RankedTensorType type) const {
+    auto shape = type.getShape();
+    size_t rank = shape.size();
+    assert(rank == 2 && "Unexpected rank of mfma layout");
+
+    unsigned elemsPerThread = getTotalElemsPerThread(type);
+
+    // The logic here is copied from the mfma case in
+    // getMultiDimOffset()
+    // TODO:
+    //   getMultiDimOffset() should be able call this function
+    //   to compute the numericla offset of each element
+    auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
+    auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+    unsigned nonKDim = mfmaLayout.getNonKDim();
+    auto order = getOrder(mfmaLayout);
+    unsigned warpSize = 64;
+    unsigned m = shape[order[1]];
+    unsigned n = shape[order[0]];
+    unsigned mPerWave = m / warpsPerCTA[order[1]];
+    unsigned nPerWave = n / warpsPerCTA[order[0]];
+    unsigned mPerXdlop = mPerWave / xdlopsPerWarp[order[1]];
+    unsigned nPerXdlop = nPerWave / xdlopsPerWarp[order[0]];
+    unsigned elemsPerXdlops = mPerXdlop * nPerXdlop / warpSize;
+
+    SmallVector<SmallVector<unsigned>> offset(elemsPerThread);
+    for (unsigned elemId = 0; elemId < elemsPerThread; ++elemId) {
+      // locate the xdlops in the CTA
+      unsigned xdlopId = elemId / elemsPerXdlops;
+      SmallVector<unsigned> multiDimXdlopId =
+          getMultiDimIndex<unsigned>(xdlopId, xdlopsPerWarp, order);
+      // locate the element in the xdlops
+      unsigned elemIdInXdlop = elemId % elemsPerXdlops;
+      unsigned groupId = elemIdInXdlop / 4;
+      unsigned groupRowOff = warpSize / nonKDim * groupId * 4;
+      unsigned elemIdInUnitBlock = elemIdInXdlop % 4;
+      unsigned rowOff =
+          elemIdInUnitBlock + groupRowOff + nonKDim * multiDimXdlopId[order[1]];
+      unsigned colOff = nonKDim * multiDimXdlopId[order[0]];
+      offset[elemId].push_back(rowOff);
+      offset[elemId].push_back(colOff);
+    }
+
+    return offset;
   }
 
   SmallVector<SmallVector<unsigned>>

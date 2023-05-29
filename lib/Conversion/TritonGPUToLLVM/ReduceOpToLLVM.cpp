@@ -17,6 +17,7 @@ public:
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+      llvm::outs() << "Are we lowering the reduce op ?\n";
     if (ReduceOpHelper(op).isFastReduction())
       return matchAndRewriteFast(op, adaptor, rewriter);
     return matchAndRewriteBasic(op, adaptor, rewriter);
@@ -146,7 +147,9 @@ private:
     auto llvmIndexTy = getTypeConverter()->getIndexType();
     auto indexPtrTy = LLVM::LLVMPointerType::get(llvmIndexTy, 3);
 
+    llvm::outs() << "About to get smemShape for reduction\n";
     auto smemShape = helper.getScratchConfigBasic();
+    llvm::outs() << "Can we get smemShape for reduction\n";
     unsigned elems = product<unsigned>(smemShape);
 
     SmallVector<Value> smemBases(op.getNumOperands());
@@ -297,6 +300,7 @@ private:
     Location loc = op->getLoc();
     unsigned axis = adaptor.getAxis();
 
+    llvm::outs() << "stamp 1\n";
     auto srcTys = op.getInputTypes();
     auto srcLayout = helper.getSrcLayout();
     if (!helper.isSupportedLayout()) {
@@ -311,13 +315,13 @@ private:
       auto llvmElemTy = getTypeConverter()->convertType(ty);
       elemPtrTys[i] = LLVM::LLVMPointerType::get(llvmElemTy, 3);
     }
-    auto llvmIndexTy = getTypeConverter()->getIndexType();
-    auto indexPtrTy = LLVM::LLVMPointerType::get(llvmIndexTy, 3);
 
     auto smemShapes = helper.getScratchConfigsFast();
     unsigned elems = product<unsigned>(smemShapes[0]);
     unsigned maxElems = std::max(elems, product<unsigned>(smemShapes[1]));
 
+
+    llvm::outs() << "stamp 2\n";
     SmallVector<Value> smemBases(op.getNumOperands());
     smemBases[0] = bitcast(
         getSharedMemoryBase(loc, rewriter, op.getOperation()), elemPtrTys[0]);
@@ -327,12 +331,15 @@ private:
                   elemPtrTys[i]);
     }
 
+    llvm::outs() << "stamp 3\n";
     unsigned sizeIntraWarps = helper.getIntraWarpSize();
     unsigned sizeInterWarps = helper.getInterWarpSize();
 
     unsigned srcElems = getTotalElemsPerThread(srcTys[0]);
     auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTys[0]);
     auto srcValues = unpackInputs(loc, op, adaptor, rewriter);
+
+    llvm::outs() << "stamp 4\n";
 
     std::map<SmallVector<unsigned>, SmallVector<Value>> accs;
     std::map<SmallVector<unsigned>, SmallVector<Value>> indices;
@@ -343,6 +350,8 @@ private:
 
     auto *combineOp = &op.getCombineOp();
 
+    llvm::outs() << "stamp 5\n";
+
     // reduce within threads
     for (unsigned i = 0; i < srcElems; ++i) {
       SmallVector<unsigned> key = offset[i];
@@ -352,6 +361,8 @@ private:
       if (isFirst)
         indices[key] = srcIndices[i];
     }
+
+    llvm::outs() << "After reduce within threads\n";
 
     Value threadId = getThreadId(rewriter, loc);
 #ifdef USE_ROCM
@@ -365,8 +376,10 @@ private:
     auto threadsPerWarp = triton::gpu::getThreadsPerWarp(srcLayout);
     auto warpsPerCTA = triton::gpu::getWarpsPerCTA(srcLayout);
     auto order = getOrder(srcLayout);
+    llvm::outs() << "stamp 6\n";
     SmallVector<Value> multiDimLaneId =
         delinearize(rewriter, loc, laneId, threadsPerWarp, order);
+    llvm::outs() << "stamp 7\n";
     SmallVector<Value> multiDimWarpId =
         delinearize(rewriter, loc, warpId, warpsPerCTA, order);
 
@@ -376,6 +389,7 @@ private:
     Value zero = i32_val(0);
     Value laneZero = icmp_eq(laneIdAxis, zero);
 
+    llvm::outs() << "stamp 8\n";
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
       SmallVector<Value> acc = it.second;
@@ -398,6 +412,8 @@ private:
         storeShared(rewriter, loc, writePtr, acc[i], laneZero);
       }
     }
+
+    llvm::outs() << "stamp 9\n";
 
     barrier();
 

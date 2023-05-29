@@ -75,10 +75,37 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
   inVec = outOrd[0] == 0 ? 1 : inOrd[0] == 0 ? 1 : srcContigPerThread;
   outVec = outOrd[0] == 0 ? 1 : dstContigPerThread;
 
+  llvm::outs() << "getScratchConfigForCvtLayout\n";
+  llvm::outs() << "srcLayout: ";
+  srcLayout.print(llvm::outs());
+  llvm::outs() << "\ndstLayout: ";
+  dstLayout.print(llvm::outs());
+  llvm::outs() << "\n";
   auto srcShape = srcTy.getShape();
   auto dstShape = dstTy.getShape();
+
+  llvm::outs() << "srcShape: ";
+  for (auto s : srcShape)
+      llvm::outs() << s << " ";
+  llvm::outs() << "\n";
+  llvm::outs() << "dstShape: ";
+  for (auto s : dstShape)
+      llvm::outs() << s << " ";
+  llvm::outs() << "\n";
+
+  llvm::outs() << "getting srcShapePerCTA\n";
   auto srcShapePerCTA = getShapePerCTA(srcLayout, srcShape);
+  llvm::outs() << "srcShapePerCTA: ";
+  for (auto s : srcShapePerCTA)
+      llvm::outs() << s << " ";
+  llvm::outs() << "\n";
+
+  llvm::outs() << "getting dstShapePerCTA\n";
   auto dstShapePerCTA = getShapePerCTA(dstLayout, dstShape);
+  llvm::outs() << "dstShapePerCTA: ";
+  for (auto s : dstShapePerCTA)
+      llvm::outs() << s << " ";
+  llvm::outs() << "\n";
 
   unsigned rank = dstTy.getRank();
   SmallVector<unsigned> paddedRepShape(rank);

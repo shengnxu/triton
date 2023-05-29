@@ -91,6 +91,9 @@ bool ReduceOpHelper::isSupportedLayout() {
       return true;
     }
   }
+  if (auto mfmaLayout = srcLayout.dyn_cast<triton::gpu::MfmaEncodingAttr>()) {
+    return true;
+  }
   return false;
 }
 

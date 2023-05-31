@@ -2125,6 +2125,14 @@ class MmaLayout:
         return f"#triton_gpu.mma<{{versionMajor={self.version[0]}, versionMinor={self.version[1]}, warpsPerCTA={self.warps_per_cta}}}>"
 
 
+class MfmaLayout:
+    def __init__(self, warps_per_cta):
+        self.warps_per_cta = str(warps_per_cta)
+
+    def __str__(self):
+        return f"#triton_gpu.mfma<{{warpsPerCTA = {self.warps_per_cta}}}>"
+
+
 class BlockedLayout:
     def __init__(self, size_per_thread, threads_per_warp, warps_per_cta, order):
         self.sz_per_thread = str(size_per_thread)
@@ -2202,6 +2210,52 @@ module attributes {"triton_gpu.num-warps" = 4 : i32} {
 }
 """
 
+    x = to_triton(numpy_random(shape, dtype_str=dtype))
+    z = torch.empty_like(x)
+
+    # write the IR to a temporary file using mkstemp
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.ttgir') as f:
+        f.write(ir)
+        f.flush()
+        kernel = triton.compile(f.name)
+    kernel[(1, 1, 1)](x.data_ptr(), z.data_ptr())
+
+    assert torch.equal(z, x)
+
+
+@pytest.mark.parametrize("shape", [(64, 64)])
+@pytest.mark.parametrize("dtype", ['float16'])
+@pytest.mark.parametrize("src_layout", [MfmaLayout(warps_per_cta=[2, 1]), MfmaLayout(warps_per_cta=[4, 1])])
+@pytest.mark.parametrize("dst_layout", [BlockedLayout([1, 4], [4, 16], [1, 1], [1, 0])])
+def test_make_range(dtype, shape, src_layout, dst_layout, device='cuda'):
+    ir = f"""
+#src = {src_layout}
+#dst = {dst_layout}
+""" + """
+module attributes {"triton_gpu.num-warps" = 2 : i32} {
+  tt.func public @kernel_0d1d(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}) {
+    %cst = arith.constant dense<64> : tensor<64x1xi32, #src>
+    %0 = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32, #triton_gpu.slice<{dim = 1, parent = #src}>>
+    %1 = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32, #triton_gpu.slice<{dim = 0, parent = #src}>>
+    %2 = tt.splat %arg0 : (!tt.ptr<f16>) -> tensor<64x64x!tt.ptr<f16>, #dst>
+    %4 = tt.expand_dims %0 {axis = 1 : i32} : (tensor<64xi32, #triton_gpu.slice<{dim = 1, parent = #src}>>) -> tensor<64x1xi32, #src>
+    %5 = arith.muli %4, %cst : tensor<64x1xi32, #src>
+    %6 = tt.expand_dims %1 {axis = 0 : i32} : (tensor<64xi32, #triton_gpu.slice<{dim = 0, parent = #src}>>) -> tensor<1x64xi32, #src>
+    %7 = tt.broadcast %6 : (tensor<1x64xi32, #src>) -> tensor<64x64xi32, #src>
+    %8 = tt.broadcast %5 : (tensor<64x1xi32, #src>) -> tensor<64x64xi32, #src>
+    %9 = arith.addi %8, %7 : tensor<64x64xi32, #src>
+    %33 = triton_gpu.convert_layout %9 : (tensor<64x64xi32, #src>) ->  tensor<64x64xi32, #dst>
+    %10 = tt.addptr %2, %33 : tensor<64x64x!tt.ptr<f16>, #dst>, tensor<64x64xi32, #dst>
+    %11 = tt.load %10 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<64x64xf16, #dst>
+    %3 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<64x64x!tt.ptr<f16>, #dst>
+    %12 = triton_gpu.convert_layout %9 : (tensor<64x64xi32, #src>) -> tensor<64x64xi32, #dst>
+    %14 = tt.addptr %3, %12 : tensor<64x64x!tt.ptr<f16>, #dst>, tensor<64x64xi32, #dst>
+    tt.store %14, %11 : tensor<64x64xf16, #dst>
+    tt.return
+  }
+}
+"""
     x = to_triton(numpy_random(shape, dtype_str=dtype))
     z = torch.empty_like(x)
 

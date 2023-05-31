@@ -50,6 +50,8 @@ SmallVector<unsigned> getElemsPerThread(Attribute layout,
     return sliceLayout.getElemsPerThread(shape, eltTy);
   } else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return mmaLayout.getElemsPerThread(shape, eltTy);
+  } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return mfmaLayout.getElemsPerThread(shape, eltTy);
   } else {
     assert(0 && "getElemsPerThread not implemented");
     return SmallVector<unsigned>();
@@ -129,6 +131,10 @@ SmallVector<unsigned> getWarpsPerCTA(Attribute layout) {
   if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return SmallVector<unsigned>(mmaLayout.getWarpsPerCTA().begin(),
                                  mmaLayout.getWarpsPerCTA().end());
+  }
+  if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return SmallVector<unsigned>(mfmaLayout.getWarpsPerCTA().begin(),
+                                 mfmaLayout.getWarpsPerCTA().end());
   }
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
     auto parent = sliceLayout.getParent();

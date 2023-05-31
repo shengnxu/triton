@@ -309,14 +309,7 @@ public:
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
     // Preprocess
-    mlir::RewritePatternSet ppPatterns(context);
-    ppPatterns.add<ReduceInBlockedLayout>(context, mod);
-
-    if (mlir::applyPatternsAndFoldGreedily(mod, std::move(ppPatterns))
-            .failed()) {
-      signalPassFailure();
-    }
-
+    convertReduceToBlocked(mod, numWarps);
     decomposeMmaToDotOperand(mod, numWarps);
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
@@ -450,28 +443,16 @@ private:
   // operation back to its original MFMA encoding.
   // This is a workaround that enables forward pass of the triton flash
   // attention algorithm to run successefully on MI100/MI200 hardware using
-  // tensor cores for dot operation. This pattern should be removed once Reduce
+  // tensor cores for dot operation. This function should be removed once Reduce
   // operation is supported in MFMA layout.
-  class ReduceInBlockedLayout : public mlir::RewritePattern {
-  public:
-    explicit ReduceInBlockedLayout(mlir::MLIRContext *context, ModuleOp &m)
-        : mlir::RewritePattern(triton::ReduceOp::getOperationName(), 2,
-                               context),
-          mod(m) {}
-    ModuleOp mod;
-
-    mlir::LogicalResult
-    matchAndRewrite(mlir::Operation *op,
-                    mlir::PatternRewriter &rewriter) const override {
-
-      auto reduceOp = llvm::dyn_cast<triton::ReduceOp>(op);
-      if (!reduceOp)
-        return mlir::failure();
+  void convertReduceToBlocked(ModuleOp mod, int numWarps) const {
+    mod.walk([&](triton::ReduceOp reduceOp) -> void {
+      OpBuilder builder(reduceOp);
 
       // Verify the operation has only one operand.
       auto inVals = reduceOp.getOperands();
       if (inVals.size() != 1)
-        return mlir::failure();
+        return;
 
       // Get the input and output types.
       auto input = inVals[0];
@@ -482,38 +463,38 @@ private:
       auto inMfma =
           inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
       if (!inMfma)
-        return mlir::failure();
+        return;
 
       // Create a blocked encoding attribute for the input type.
       int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
       auto order = getOrder(inMfma);
       auto blockedEncoding = triton::gpu::BlockedEncodingAttr::get(
-          getContext(), inputTy.getShape(), getSizePerThread(inMfma), order,
+          mod.getContext(), inputTy.getShape(), getSizePerThread(inMfma), order,
           numWarps);
       auto blockedType = RankedTensorType::get(
           inputTy.getShape(), inputTy.getElementType(), blockedEncoding);
-      rewriter.setInsertionPoint(reduceOp);
+      builder.setInsertionPoint(reduceOp);
 
       // Create a ConvertLayout that converts input type to the equivalent type
       // with a blocked encoding attribute and create a new Reduce operation.
-      auto toBlock = rewriter.create<triton::gpu::ConvertLayoutOp>(
+      auto toBlock = builder.create<triton::gpu::ConvertLayoutOp>(
           reduceOp.getLoc(), blockedType, input);
-      auto newReduceOp = rewriter.create<triton::ReduceOp>(
+      auto newReduceOp = builder.create<triton::ReduceOp>(
           reduceOp.getLoc(), toBlock.getResult(), reduceOp.getAxis());
       auto &newCombineOp = newReduceOp.getCombineOp();
-      rewriter.cloneRegionBefore(reduceOp.getCombineOp(), newCombineOp,
-                                 newCombineOp.end());
+      IRMapping mapping;
+      reduceOp.getCombineOp().cloneInto(&newCombineOp, newCombineOp.end(),
+                                        mapping);
 
       // Create another ConvertLayout operation to convert the output of the
       // Reduce operation back to mfma layout.
-      auto toMfma = rewriter.create<triton::gpu::ConvertLayoutOp>(
+      auto toMfma = builder.create<triton::gpu::ConvertLayoutOp>(
           reduceOp.getLoc(), outTy, newReduceOp.getResult());
-      rewriter.replaceAllUsesWith(reduceOp.getResult(), toMfma.getResult());
-      rewriter.eraseOp(reduceOp);
-
-      return success();
-    }
-  };
+      std::vector<Value> results{toMfma.getResult()};
+      reduceOp.replaceAllUsesWith(results);
+      reduceOp.erase();
+    });
+  }
 
   void decomposeMmaToDotOperand(ModuleOp mod, int numWarps) const {
     // Replace `mma -> dot_op` with `mma -> blocked -> dot_op`

@@ -308,7 +308,6 @@ public:
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
     // Preprocess
-    convertReduceToBlocked(mod, numWarps);
     decomposeMmaToDotOperand(mod, numWarps);
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
@@ -434,65 +433,6 @@ private:
     mod->setAttr("triton_gpu.shared",
                  mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32),
                                         allocation.getSharedMemorySize()));
-  }
-
-  // Transforms the input of the Reduce operation,
-  // initially presented in MFMA encoding, into an equivalent input with a
-  // blocked encoding. Subsequently, it converts the output of the
-  // operation back to its original MFMA encoding.
-  // This is a workaround that enables forward pass of the triton flash
-  // attention algorithm to run successefully on MI100/MI200 hardware using
-  // tensor cores for dot operation. This function should be removed once Reduce
-  // operation is supported in MFMA layout.
-  void convertReduceToBlocked(ModuleOp mod, int numWarps) const {
-    mod.walk([&](triton::ReduceOp reduceOp) -> void {
-      OpBuilder builder(reduceOp);
-
-      // Verify the operation has only one operand.
-      auto inVals = reduceOp.getOperands();
-      if (inVals.size() != 1)
-        return;
-
-      // Get the input and output types.
-      auto input = inVals[0];
-      auto inputTy = input.getType().cast<RankedTensorType>();
-      auto outTy = reduceOp.getResults()[0].getType();
-
-      // Check if the input type has MfmaEncodingAttr attribute.
-      auto inMfma =
-          inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-      if (!inMfma)
-        return;
-
-      // Create a blocked encoding attribute for the input type.
-      int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
-      auto order = getOrder(inMfma);
-      auto blockedEncoding = triton::gpu::BlockedEncodingAttr::get(
-          mod.getContext(), inputTy.getShape(), getSizePerThread(inMfma), order,
-          numWarps);
-      auto blockedType = RankedTensorType::get(
-          inputTy.getShape(), inputTy.getElementType(), blockedEncoding);
-      builder.setInsertionPoint(reduceOp);
-
-      // Create a ConvertLayout that converts input type to the equivalent type
-      // with a blocked encoding attribute and create a new Reduce operation.
-      auto toBlock = builder.create<triton::gpu::ConvertLayoutOp>(
-          reduceOp.getLoc(), blockedType, input);
-      auto newReduceOp = builder.create<triton::ReduceOp>(
-          reduceOp.getLoc(), toBlock.getResult(), reduceOp.getAxis());
-      auto &newCombineOp = newReduceOp.getCombineOp();
-      IRMapping mapping;
-      reduceOp.getCombineOp().cloneInto(&newCombineOp, newCombineOp.end(),
-                                        mapping);
-
-      // Create another ConvertLayout operation to convert the output of the
-      // Reduce operation back to mfma layout.
-      auto toMfma = builder.create<triton::gpu::ConvertLayoutOp>(
-          reduceOp.getLoc(), outTy, newReduceOp.getResult());
-      std::vector<Value> results{toMfma.getResult()};
-      reduceOp.replaceAllUsesWith(results);
-      reduceOp.erase();
-    });
   }
 
   void decomposeMmaToDotOperand(ModuleOp mod, int numWarps) const {

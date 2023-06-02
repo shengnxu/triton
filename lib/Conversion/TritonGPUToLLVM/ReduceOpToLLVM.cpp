@@ -17,6 +17,18 @@ public:
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+#ifdef USE_ROCM
+    //  matchAndRewriteFast algorithm currently doesn't work properly for
+    //  MFMA layout. In that case fall back to matchAndRewriteBasic algorithm.
+    auto inputTy = op.getInputTypes()[0].cast<RankedTensorType>();
+    // Check if the inputs type have MfmaEncodingAttr attribute.
+    auto inMfma =
+        inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
+    if (inMfma)
+      return matchAndRewriteBasic(op, adaptor, rewriter);
+#endif
+
     if (ReduceOpHelper(op).isFastReduction())
       return matchAndRewriteFast(op, adaptor, rewriter);
     return matchAndRewriteBasic(op, adaptor, rewriter);
@@ -101,6 +113,12 @@ private:
     Value axisSizePerThread = ints[sizePerThread[axis]];
     Value _8 = ints[8];
     Value _16 = ints[16];
+#ifdef USE_ROCM
+    Value _2 = ints[2];
+    Value _4 = ints[4];
+    Value _32 = ints[32];
+#endif
+
     if (layout.isa<BlockedEncodingAttr>()) {
       // A single thread owns axisSizePerThread contiguous values
       // on the reduction axis. After within thread reduction,
@@ -119,6 +137,17 @@ private:
         // is: (warp_index) x 8 + (row index within warp)
         writeIdx[axis] =
             add(mul(udiv(index[axis], _16), _8), urem(index[axis], _8));
+      } else {
+        // Same as BlockedEncodingAttr case
+        writeIdx[axis] = udiv(index[axis], axisSizePerThread);
+      }
+    } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+      if (axis == 0) {
+        // Because warpTileSize = [32, 32] and threadsPerWarp = [2, 32], each 2
+        // rows in smem would correspond to a warp. The mapping
+        // is: (warp_index) x 2 + (row index within warp)
+        writeIdx[axis] = add(mul(udiv(index[axis], _32), _2),
+                             udiv(urem(index[axis], _32), _4));
       } else {
         // Same as BlockedEncodingAttr case
         writeIdx[axis] = udiv(index[axis], axisSizePerThread);
@@ -203,7 +232,11 @@ private:
     ints[sizePerThread[axis]] = i32_val(sizePerThread[axis]);
     ints[8] = i32_val(8);
     ints[16] = i32_val(16);
-
+#ifdef USE_ROCM
+    ints[2] = i32_val(2);
+    ints[4] = i32_val(4);
+    ints[32] = i32_val(32);
+#endif
     // reduce across threads
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;

@@ -86,7 +86,7 @@ SmallVector<unsigned> getThreadsPerWarp(Attribute layout) {
       return {8, 4};
   }
   if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {32, 2};
+    return {2, 32};
   }
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
     auto parent = sliceLayout.getParent();

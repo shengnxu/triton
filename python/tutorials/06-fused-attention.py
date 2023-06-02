@@ -307,6 +307,7 @@ def test_op(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     # compare
     assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
     if torch.version.hip is None:
+        # TODO: Enable backward pass for MFMA dot.
         assert torch.allclose(ref_dv, tri_dv, atol=1e-2, rtol=0)
         assert torch.allclose(ref_dk, tri_dk, atol=1e-2, rtol=0)
         assert torch.allclose(ref_dq, tri_dq, atol=1e-2, rtol=0)

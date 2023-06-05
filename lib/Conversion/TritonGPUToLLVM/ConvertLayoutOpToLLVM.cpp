@@ -64,11 +64,14 @@ public:
     auto dstTy = dst.getType().cast<RankedTensorType>();
     Attribute srcLayout = srcTy.getEncoding();
     Attribute dstLayout = dstTy.getEncoding();
+    llvm::outs() << "\n@Lowering ConvertLayoutOp: ";
     if (isaDistributedLayout(srcLayout) &&
         dstLayout.isa<SharedEncodingAttr>()) {
+        llvm::outs() << "going to distributedToShared\n";
       return lowerDistributedToShared(op, adaptor, rewriter);
     }
     if (isaDistributedLayout(srcLayout) && dstLayout.isa<LDSEncodingAttr>()) {
+        llvm::outs() << "going to distributedToLDS\n";
       return lowerDistributedToLds(op, adaptor, rewriter);
     }
     if (srcLayout.isa<SharedEncodingAttr>() &&
@@ -76,6 +79,7 @@ public:
       return lowerSharedToDotOperand(op, adaptor, rewriter);
     }
     if (isaDistributedLayout(srcLayout) && isaDistributedLayout(dstLayout)) {
+        llvm::outs() << "going to distributedToDistributed\n";
       return lowerDistributedToDistributed(op, adaptor, rewriter);
     }
     if (srcLayout.isa<MmaEncodingAttr>() &&
@@ -278,6 +282,7 @@ private:
     auto llvmElemTy = getTypeConverter()->convertType(elemTy);
 
     for (unsigned ctaId = 0; ctaId < accumNumCTAsEachRep; ++ctaId) {
+        llvm::outs() << "ctaId = " << ctaId << "\n";
       auto multiDimCTAInRepId =
           getMultiDimIndex<unsigned>(ctaId, numCTAsEachRep, order);
       SmallVector<unsigned> multiDimCTAId(rank);
@@ -288,10 +293,12 @@ private:
 
       auto linearCTAId =
           getLinearIndex<unsigned>(multiDimCTAId, numCTAs, order);
+      llvm::outs() << "linearCTAId = " << linearCTAId << "\n";
       // TODO: This is actually redundant index calculation, we should
       //       consider of caching the index calculation result in case
       //       of performance issue observed.
       for (unsigned elemId = 0; elemId < accumSizePerThread; elemId += vec) {
+          llvm::outs() << "elemId = " << elemId << "\n";
         SmallVector<Value> multiDimOffset =
             getMultiDimOffset(layout, loc, rewriter, elemId, type,
                               multiDimCTAInRepId, shapePerCTA);
@@ -437,12 +444,20 @@ private:
                                 OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
     auto loc = op.getLoc();
+    llvm::outs() << "\n@lowerDistributedToDistributed@\n";
     Value src = op.getSrc();
     Value dst = op.getResult();
     auto srcTy = src.getType().cast<RankedTensorType>();
     auto dstTy = dst.getType().cast<RankedTensorType>();
     Attribute srcLayout = srcTy.getEncoding();
     Attribute dstLayout = dstTy.getEncoding();
+    llvm::outs() << "src layout: ";
+    srcLayout.print(llvm::outs());
+    llvm::outs() << "\n";
+    llvm::outs() << "dst layout: ";
+    dstLayout.print(llvm::outs());
+    llvm::outs() << "\n";
+
     auto llvmElemTy = getTypeConverter()->convertType(dstTy.getElementType());
     Value smemBase = getSharedMemoryBase(loc, rewriter, op.getOperation());
     auto elemPtrTy = ptr_ty(llvmElemTy, 3);
@@ -494,11 +509,17 @@ private:
     unsigned outVec = 0;
     auto paddedRepShape = getScratchConfigForCvtLayout(op, inVec, outVec);
 
+    llvm::outs() << "rank = " << rank << "\n";
+
     unsigned outElems = getTotalElemsPerThread(dstTy);
     auto outOrd = getOrder(dstLayout);
     SmallVector<Value> outVals(outElems);
 
+
+    llvm::outs() << "outElems = " << outElems << "\n";
+    llvm::outs() << "accumNumReplicates = " << accumNumReplicates << "\n";
     for (unsigned repId = 0; repId < accumNumReplicates; ++repId) {
+        llvm::outs() << "rep " << repId << "\n";
       auto multiDimRepId =
           getMultiDimIndex<unsigned>(repId, numReplicates, outOrd);
       if (repId != 0)
@@ -543,6 +564,7 @@ private:
     Type structTy = struct_ty(types);
     Value result =
         getTypeConverter()->packLLElements(loc, outVals, rewriter, dstTy);
+    llvm::outs() << "\n@lowerDistributedToDistributed finished@\n";
     rewriter.replaceOp(op, result);
 
     return success();
@@ -590,6 +612,7 @@ private:
   lowerDistributedToLds(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
                         ConversionPatternRewriter &rewriter) const {
     auto loc = op.getLoc();
+    llvm::outs() << "\n@lowerDistributedToLds@\n";
     Value src = op.getSrc();
     Value dst = op.getResult();
     auto srcTy = src.getType().cast<RankedTensorType>();
@@ -613,6 +636,7 @@ private:
     auto smemObj =
         SharedMemoryObject(smemBase, dstShape, outOrd, loc, rewriter);
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
+    llvm::outs() << "@lowerDistributedToLds finished@\n";
     rewriter.replaceOp(op, retVal);
     return success();
   }

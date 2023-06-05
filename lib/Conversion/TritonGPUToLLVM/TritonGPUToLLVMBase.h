@@ -673,6 +673,7 @@ public:
                                               ConversionPatternRewriter &b,
                                               Attribute layout,
                                               RankedTensorType type) const {
+    llvm::outs() << "\n@emitIndices\n";
     IndexCacheKeyT key(layout, type);
     auto cache = indexCacheInfo.indexCache;
     assert(cache && "indexCache is nullptr");
@@ -684,12 +685,15 @@ public:
       restoreInsertionPointIfSet(insertPt, b);
       SmallVector<SmallVector<Value>> result;
       if (auto blocked = layout.dyn_cast<BlockedEncodingAttr>()) {
+        llvm::outs() << "going to emitIndices for blocked\n";
         result = emitIndicesForDistributedLayout(loc, b, blocked, type);
       } else if (auto mma = layout.dyn_cast<MmaEncodingAttr>()) {
         result = emitIndicesForDistributedLayout(loc, b, mma, type);
       } else if (auto mfma = layout.dyn_cast<MfmaEncodingAttr>()) {
+        llvm::outs() << "going to emitIndices for mfma\n";
         result = emitIndicesForDistributedLayout(loc, b, mfma, type);
       } else if (auto slice = layout.dyn_cast<SliceEncodingAttr>()) {
+        llvm::outs() << "going to emitIndices for slice\n";
         result = emitIndicesForDistributedLayout(loc, b, slice, type);
       } else {
         llvm_unreachable(
@@ -698,6 +702,7 @@ public:
       }
       cache->insert(std::make_pair(key, result));
       *insertPt = b.saveInsertionPoint();
+      llvm::outs() << "@emitIndices finished@\n";
       return result;
     }
   }
@@ -1111,10 +1116,14 @@ private:
   SmallVector<SmallVector<Value>> emitIndicesForDistributedLayout(
       Location loc, ConversionPatternRewriter &rewriter, Attribute layout,
       RankedTensorType type) const {
+    llvm::outs() << "\n@emitIndicesForDistributedLayout@\n";
     // step 1, delinearize threadId to get the base index
+    llvm::outs() << "    emitIndicesFrDistributed step 1\n";
     auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type);
     // step 2, get offset of each element
+    llvm::outs() << "    emitIndicesFrDistributed step 2\n";
     auto offset = emitOffsetForLayout(layout, type);
+    llvm::outs() << "    emitIndicesFrDistributed step 2 finished\n";
     // step 3, add offset to base, and reorder the sequence of indices to
     // guarantee that elems in the same sizePerThread are adjacent in order
     auto shape = type.getShape();
@@ -1125,6 +1134,7 @@ private:
     for (unsigned n = 0; n < elemsPerThread; ++n)
       for (unsigned k = 0; k < rank; ++k)
         multiDimIdx[n][k] = add(multiDimBase[k], i32_val(offset[n][k]));
+    llvm::outs() << "@emitIndicesForDistributedLayout finished@\n";
     return multiDimIdx;
   }
 
@@ -1132,6 +1142,7 @@ private:
   emitOffsetForSliceLayout(const SliceEncodingAttr &sliceLayout,
                            RankedTensorType type) const {
     auto parentEncoding = sliceLayout.getParent();
+    llvm::outs() << "@emitOffsetForSliceLayout@\n";
     unsigned dim = sliceLayout.getDim();
     auto parentShape = sliceLayout.paddedShape(type.getShape());
     RankedTensorType parentTy = RankedTensorType::get(
@@ -1139,6 +1150,7 @@ private:
     auto parentOffsets = emitOffsetForLayout(parentEncoding, parentTy);
 
     unsigned numOffsets = parentOffsets.size();
+    llvm::outs() << "got " << numOffsets << " offsets from parent encoding\n";
     SmallVector<SmallVector<unsigned>> resultOffsets;
     std::set<SmallVector<unsigned>> uniqueOffsets;
 
@@ -1150,6 +1162,7 @@ private:
         uniqueOffsets.insert(offsets);
       }
     }
+    llvm::outs() << "@emitOffsetForSliceLayout finished@\n";
     return resultOffsets;
   }
 

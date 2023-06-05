@@ -17,7 +17,6 @@ public:
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-      llvm::outs() << "Are we lowering the reduce op ?\n";
     if (ReduceOpHelper(op).isFastReduction())
       return matchAndRewriteFast(op, adaptor, rewriter);
     return matchAndRewriteBasic(op, adaptor, rewriter);
@@ -298,6 +297,7 @@ private:
                                     ConversionPatternRewriter &rewriter) const {
     ReduceOpHelper helper(op);
     Location loc = op->getLoc();
+    llvm::outs() << "\n@Lowering recude op@\n";
     unsigned axis = adaptor.getAxis();
 
     llvm::outs() << "stamp 1\n";
@@ -411,6 +411,7 @@ private:
         Value writePtr = gep(elemPtrTys[i], smemBases[i], writeOffset);
         storeShared(rewriter, loc, writePtr, acc[i], laneZero);
       }
+      flag ++;
     }
 
     llvm::outs() << "stamp 9\n";
@@ -431,18 +432,23 @@ private:
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 32;
 #endif
     unsigned elemsPerThread = std::max<unsigned>(elems / numThreads, 1);
+    llvm::outs() << "numThreads = " << numThreads << "\n";
+    llvm::outs() << "elemsPerThread = " << elemsPerThread << "\n";
     Value readOffset = threadId;
     for (unsigned round = 0; round < elemsPerThread; ++round) {
       // FIXME(Qingyi): need predicate icmp_slt(threadId,
       // i32_val(sizeInerWarps))
       SmallVector<Value> acc(op.getNumOperands());
+      llvm::outs() << "reading partial acc from lds\n";
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
         Value readPtr = gep(elemPtrTys[i], smemBases[i], readOffset);
         acc[i] = load(readPtr);
       }
 
+      llvm::outs() << "reducing within warps\n";
       for (unsigned N = sizeInterWarps / 2; N > 0; N >>= 1) {
         SmallVector<Value> shfl(op.getNumOperands());
+        llvm::outs() << "  N = " << N << "\n";
         for (unsigned i = 0; i < op.getNumOperands(); ++i) {
           shfl[i] = shflSync(loc, rewriter, acc[i], N);
         }
@@ -470,24 +476,32 @@ private:
       }
     }
 
+    llvm::outs() << "stamp 10\n";
+
     // We could avoid this barrier in some of the layouts, however this is not
     // the general case.
     // TODO: optimize the barrier in case the layouts are accepted.
     barrier();
 
     // set output values
+    llvm::outs() << "set output\n";
     SmallVector<Value> results(op.getNumOperands());
     for (unsigned i = 0; i < op.getNumOperands(); ++i) {
       if (auto resultTy =
               op.getResult()[i].getType().dyn_cast<RankedTensorType>()) {
+        llvm::outs() << "in case of tensor\n";
         // nd-tensor where n >= 1
         auto resultLayout = resultTy.getEncoding().cast<SliceEncodingAttr>();
+        llvm::outs() << "Trying to getTotalElemsPerThread() ...\n";
         unsigned resultElems = getTotalElemsPerThread(resultTy);
+        llvm::outs() << "Can we?\n";
+        llvm::outs() << "  resultElems = " << resultElems << "\n";
         auto resultIndices = emitIndices(loc, rewriter, resultLayout, resultTy);
         assert(resultIndices.size() == resultElems);
 
         SmallVector<Value> resultVals(resultElems);
         for (size_t j = 0; j < resultElems; ++j) {
+            //llvm::outs() << "  dealing with elem " << j << "\n";
           SmallVector<Value> readIdx = resultIndices[j];
           readIdx.insert(readIdx.begin() + axis, i32_val(0));
           Value readOffset =
@@ -503,6 +517,8 @@ private:
         results[i] = load(smemBases[i]);
       }
     }
+
+    llvm::outs() << "stamp 11 end\n";
     rewriter.replaceOp(op, results);
 
     return success();

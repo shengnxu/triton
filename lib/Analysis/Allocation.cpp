@@ -58,7 +58,7 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
   auto dstTy = op.getResult().getType().cast<RankedTensorType>();
   Attribute srcLayout = srcTy.getEncoding();
   Attribute dstLayout = dstTy.getEncoding();
-
+  llvm::outs() << "\n@getScratchConfigForCvtLayout@\n";
   // MmaToDotShortcut doesn't use shared mem
   if (srcLayout.isa<MmaEncodingAttr>() &&
       dstLayout.isa<DotOperandEncodingAttr>())
@@ -75,7 +75,6 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
   inVec = outOrd[0] == 0 ? 1 : inOrd[0] == 0 ? 1 : srcContigPerThread;
   outVec = outOrd[0] == 0 ? 1 : dstContigPerThread;
 
-  llvm::outs() << "getScratchConfigForCvtLayout\n";
   llvm::outs() << "srcLayout: ";
   srcLayout.print(llvm::outs());
   llvm::outs() << "\ndstLayout: ";
@@ -93,16 +92,14 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
       llvm::outs() << s << " ";
   llvm::outs() << "\n";
 
-  llvm::outs() << "getting srcShapePerCTA\n";
+  llvm::outs() << "getting srcShapePerCTA: ";
   auto srcShapePerCTA = getShapePerCTA(srcLayout, srcShape);
-  llvm::outs() << "srcShapePerCTA: ";
   for (auto s : srcShapePerCTA)
       llvm::outs() << s << " ";
   llvm::outs() << "\n";
 
-  llvm::outs() << "getting dstShapePerCTA\n";
+  llvm::outs() << "getting dstShapePerCTA: ";
   auto dstShapePerCTA = getShapePerCTA(dstLayout, dstShape);
-  llvm::outs() << "dstShapePerCTA: ";
   for (auto s : dstShapePerCTA)
       llvm::outs() << s << " ";
   llvm::outs() << "\n";
@@ -115,13 +112,24 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
         std::max(std::min<unsigned>(srcTy.getShape()[d], srcShapePerCTA[d]),
                  std::min<unsigned>(dstTy.getShape()[d], dstShapePerCTA[d]));
   }
-  if (rank == 1)
+  if (rank == 1){
+      llvm::outs() << "paddedRepShape: ";
+      for (auto s : paddedRepShape)
+          llvm::outs() << s << " ";
+      llvm::outs() << "\n";
+      llvm::outs() << "@getScratchConfigForCvtLayout finished with rank = 1@\n";
     return paddedRepShape;
+  }
   unsigned paddedDim = 1;
   if (auto dstBlockedLayout = dstLayout.dyn_cast<BlockedEncodingAttr>()) {
     paddedDim = dstBlockedLayout.getOrder()[0];
   }
   paddedRepShape[paddedDim] += pad;
+  llvm::outs() << "paddedRepShape: ";
+  for (auto s : paddedRepShape)
+      llvm::outs() << s << " ";
+  llvm::outs() << "\n";
+  llvm::outs() << "@getScratchConfigForCvtLayout finished@\n";
   return paddedRepShape;
 }
 

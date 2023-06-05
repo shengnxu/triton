@@ -248,26 +248,24 @@ private:
                       ArrayRef<unsigned> outOrd, SmallVector<Value> &vals,
                       Value smemBase) const {
     auto accumNumCTAsEachRep = product<unsigned>(numCTAsEachRep);
+    if (stNotRd)
+        llvm::outs() << "\n@processReplica for store@\n";
+    else
+        llvm::outs() << "\n@processReplica for load@\n";
     auto layout = type.getEncoding();
     auto rank = type.getRank();
     auto sizePerThread = getSizePerThread(layout);
     auto accumSizePerThread = product<unsigned>(sizePerThread);
-    // For MfmaEncodingAttr, the CTA always covers the whole tensor.
-    // And sizePerThread is set to [4,1], which does not represent
-    // the total number of element each thread needs to handle.
-    // Therefore, we use getTotalElemsPerThread to obtain the number of
-    // elements each thread handles within one CTA.
-    if (type.getEncoding().isa<MfmaEncodingAttr>()) {
-      auto mfmaLayout = type.getEncoding().dyn_cast<MfmaEncodingAttr>();
-      accumSizePerThread = mfmaLayout.getTotalElemsPerThread(
-          type.getShape(), type.getElementType());
-    }
+    llvm::outs() << "accumSizePerThread = " << accumSizePerThread << "\n";
+    llvm::outs() << "rank = " << rank << "\n";
     SmallVector<unsigned> numCTAs(rank);
     auto shapePerCTA = getShapePerCTA(layout, type.getShape());
+    llvm::outs() << "shapePerCTA = " << shapePerCTA[0] << "\n";
     auto order = getOrder(layout);
     for (unsigned d = 0; d < rank; ++d) {
       numCTAs[d] = ceil<unsigned>(type.getShape()[d], shapePerCTA[d]);
     }
+    llvm::outs() << "numCTAs[0] = " << numCTAs[0] << "\n";
     auto elemTy = type.getElementType();
     bool isInt1 = elemTy.isInteger(1);
     bool isPtr = elemTy.isa<triton::PointerType>();

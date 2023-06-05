@@ -131,7 +131,11 @@ SmallVector<unsigned> getSizePerThread(Attribute layout) {
       llvm_unreachable("Unexpected mma version");
     }
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {1, 4};
+      // The following logic is copied from mfma.getElemsPerThread()
+      // For mfma encoding, getSizePerThread and getElemsPerThread should
+      // refer to the same shape, since the tensor is always covered by
+      // a single CTA.
+      return mfmaLayout.getDataPerThread();
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     assert(parentLayout && "DotOperandEncodingAttr must have a parent");
@@ -202,6 +206,7 @@ SmallVector<unsigned> getUniqueContigPerThread(Type type) {
   return ret;
 }
 
+// Not in use
 SmallVector<unsigned> getThreadsPerCTA(Attribute layout) {
   SmallVector<unsigned> threads;
   if (auto blockedLayout = layout.dyn_cast<BlockedEncodingAttr>()) {
@@ -480,21 +485,30 @@ MmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   return elemsPerThread;
 }
 
+unsigned MmaEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
+                                                 Type eltTy) const {
+    return product<unsigned>(getElemsPerThread(shape, eltTy));
+}
+
+SmallVector<unsigned>
+MfmaEncodingAttr::getDataPerThread() const {
+  auto xdlopsPerWarp = getXdlopsPerWarp();
+  unsigned nonKDim = getNonKDim();
+  unsigned waveSize = 64;
+  SmallVector<unsigned> elemsPerThread(2);
+  // within each xdlops, one thread only has one element per row
+  // elemsRow is the number of elements each thread has on all rows
+  unsigned elemsRow = nonKDim * nonKDim / waveSize;
+  elemsPerThread[0] = elemsRow * xdlopsPerWarp[0];
+  elemsPerThread[1] = xdlopsPerWarp[1];
+  return elemsPerThread;
+}
+
 SmallVector<unsigned>
 MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   size_t rank = shape.size();
   assert(rank == 2 && "Unexpected rank of mfma layout");
-  auto warpsPerCTA = getWarpsPerCTA();
-  auto xdlopsPerWarp = getXdlopsPerWarp();
-  unsigned nonKDim = getNonKDim();
-  unsigned waveSize = 64;
-  SmallVector<unsigned> elemsPerThread(rank);
-  // within each xdlops, one thread only has one element per row
-  // elemsRow is the number of element each thread has on all rows
-  unsigned elemsRow = nonKDim * nonKDim / waveSize;
-  elemsPerThread[0] = elemsRow * xdlopsPerWarp[0] * warpsPerCTA[0];
-  elemsPerThread[1] = xdlopsPerWarp[1] * warpsPerCTA[1];
-  return elemsPerThread;
+  return getDataPerThread();
 }
 
 unsigned MfmaEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
@@ -506,11 +520,6 @@ unsigned LDSEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
                                                  Type eltTy) const {
   llvm_unreachable("Unexpected LDS layout");
   return 0;
-}
-
-unsigned MmaEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
-                                                 Type eltTy) const {
-  return product<unsigned>(getElemsPerThread(shape, eltTy));
 }
 
 SmallVector<unsigned>

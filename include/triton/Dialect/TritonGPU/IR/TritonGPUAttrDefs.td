@@ -626,6 +626,14 @@ and `nonKDim=32`. The chosen instruction is `mfma_32x32xkxf16`.
   );
 
   let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = extraBaseClassDeclaration # [{
+    // get the number of elements assigned to each thread
+    // This returns the same shape as getSizePerThread and
+    // getElemsPerThread, since the tensor is always covered
+    // by one single CTA for the mfma encoding
+    SmallVector<unsigned> getDataPerThread() const;
+  }];
 }
 
 

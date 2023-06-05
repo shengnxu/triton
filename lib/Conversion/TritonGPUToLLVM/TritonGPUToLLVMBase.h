@@ -817,25 +817,44 @@ private:
     assert(rank == 2 && "Unexpected rank of mfma layout");
 
     unsigned elemsPerThread = getTotalElemsPerThread(type);
-
+    llvm::outs() << "emitOffsetForMfmaLayout\n";
+    auto tmpLayout = type.getEncoding();
+    tmpLayout.print(llvm::outs());
+    llvm::outs() << "\n";
+    llvm::outs() << "elemsPerThread = " << elemsPerThread << "\n";
     // The logic here is copied from the mfma case in
     // getMultiDimOffset()
     // TODO:
-    //   getMultiDimOffset() should be able call this function
+    //   getMultiDimOffset() should be able to call this function
     //   to compute the numericla offset of each element
     auto xdlopsPerWarp = mfmaLayout.getXdlopsPerWarp();
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
     unsigned nonKDim = mfmaLayout.getNonKDim();
     auto order = getOrder(mfmaLayout);
+    llvm::outs() << "order: " << order[0] << ", " << order[1] << "\n";
+    llvm::outs() << "shape: " << shape[0] << ", " << shape[1] << "\n";
     unsigned warpSize = 64;
-    unsigned m = shape[order[1]];
-    unsigned n = shape[order[0]];
+    // When mfma layout is the parent of a slice layout, either m or n
+    // is set to 1, which does not reflect the correct shape of the
+    // tensor to compute the offset.
+    // Since the mfma layout has everything required to describe the
+    // shape of the tensor, we'll use the mfma layout to restore the
+    // shape first.
+    SmallVector<unsigned> newShape(rank);
+    newShape[0] = nonKDim * warpsPerCTA[0] * xdlopsPerWarp[0];
+    newShape[1] = nonKDim * warpsPerCTA[1] * xdlopsPerWarp[1];
+    unsigned m = newShape[order[1]];
+    unsigned n = newShape[order[0]];
     unsigned mPerWave = m / warpsPerCTA[order[1]];
     unsigned nPerWave = n / warpsPerCTA[order[0]];
     unsigned mPerXdlop = mPerWave / xdlopsPerWarp[order[1]];
     unsigned nPerXdlop = nPerWave / xdlopsPerWarp[order[0]];
     unsigned elemsPerXdlops = mPerXdlop * nPerXdlop / warpSize;
 
+    llvm::outs() << "(m,n) = " << m <<"," << n <<"\n";
+    llvm::outs() << "(mPerWave, nPerWave) = " << mPerWave << ", " << nPerWave << "\n";
+    llvm::outs() << "(mPerXdlop, nPerXdlop) = " << mPerXdlop << ", " << nPerXdlop << "\n";
+    llvm::outs() << "elemsPerXdlops = " << elemsPerXdlops << "\n";
     SmallVector<SmallVector<unsigned>> offset(elemsPerThread);
     for (unsigned elemId = 0; elemId < elemsPerThread; ++elemId) {
       // locate the xdlops in the CTA

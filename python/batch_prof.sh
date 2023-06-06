@@ -2,7 +2,7 @@
 
 ##
 ## Usage:
-##   ./batchprof.sh CONFIG_FILE OUTPUT
+##   ./batch_prof.sh CONFIG_FILE OUTPUT
 ## This script runs the tuning script for each gemm config in CONFIG_FILE.
 ## Configs will be splitted on multiple GPUs on the system.
 ## The results are collected in OUTPUT. If OUTPUT is not provided,
@@ -31,7 +31,12 @@ if [[ $OUTPUT == "" ]];then
     OUTPUT="${PrWD}/triton_prof_results.txt"
 fi
 
-DRIVER="${PrWD}/test/unit/language/matmul.py"
+DRIVER_SMALL="${PrWD}/test/unit/language/matmul.py"
+DRIVER_LARGE="${PrWD}/test/unit/language/matmul_grouped.py"
+
+# pick one of the drivers manually
+DRIVER=$DRIVER_LARGE
+#DRIVER=$DRIVER_SMALL
 
 DATESTR=$(date +'%Y%m%d_%H%M%S')
 RANDSTR=$RANDOM

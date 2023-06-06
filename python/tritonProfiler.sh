@@ -30,13 +30,19 @@ if [[ $reduceSpace -eq 0 ]];then
     mPerWave_RANGE=(16 32 64)
 else ## Reduced tuning space
     ## Tuning space for Triton
-    BLOCK_RANGE=(32 64 128)
+    BLOCK_RANGE=(16 32 64 128)
     SPLIT_K_RANGE=(1 2 5 8 10 12 18 24)
     NUM_WARPS_RANGE=(1 2 4 8)
     GROUP_M_RANGE=(4 8 12)
     ## Tuning space for rocMLIR
     KPACK_RANGE=(4 8)
     mPerWave_RANGE=(16 32)
+fi
+
+SMALL_M=0
+if [[ $M -le 16 ]];then
+    GROUP_M_RANGE=(1)
+    SMALL_M=1
 fi
 
 echo "Tuning GEMM for M=$M, N=$N, K=$K"
@@ -56,10 +62,12 @@ do
     ##################################
     for GROUP_M in ${GROUP_M_RANGE[@]}
     do
-        num_block_m=$((M/BLOCK_M))
-        ## Skip GROUP_M if it it too large
-        if [[ $num_block_m -lt $GROUP_M ]];then
-            continue
+        if [[ ${SMALL_M} -eq 0 ]]; then
+            num_block_m=$((M/BLOCK_M))
+            ## Skip GROUP_M if it it too large
+            if [[ $num_block_m -lt $GROUP_M ]];then
+                continue
+            fi
         fi
         ##################################
         ## Looping BLOCK_N              ##
@@ -111,11 +119,18 @@ do
                             for kpack in ${KPACK_RANGE[@]}
                             do
                                 perfConfig="$BLOCK_M,$BLOCK_N,$BLOCK_K,$SPLIT_K,$GROUP_M,$mPerWave,$kpack,$num_warps"
-                                Msg=$(rocprof --stats python $DRIVER -m $M -n $N -k $K \
-                                              -blockM ${BLOCK_M} -blockN ${BLOCK_N} -blockK ${BLOCK_K} \
-                                              -num_warps ${num_warps} -splitK ${SPLIT_K} \
-                                              -kpack $kpack -mPerWave $mPerWave \
-                                              -groupM ${GROUP_M})
+                                if [[ ${SMALL_M} -eq 0 ]]; then
+                                    Msg=$(rocprof --stats python $DRIVER -m $M -n $N -k $K \
+                                                  -blockM ${BLOCK_M} -blockN ${BLOCK_N} -blockK ${BLOCK_K} \
+                                                  -num_warps ${num_warps} -splitK ${SPLIT_K} \
+                                                  -kpack $kpack -mPerWave $mPerWave \
+                                                  -groupM ${GROUP_M})
+                                else
+                                    Msg=$(rocprof --stats python $DRIVER -m $M -n $N -k $K \
+                                                  -blockM ${BLOCK_M} -blockN ${BLOCK_N} -blockK ${BLOCK_K} \
+                                                  -num_warps ${num_warps} -splitK ${SPLIT_K} \
+                                                  -kpack $kpack -mPerWave $mPerWave)
+                                fi
 
                                 ## Skip if there is an error (invalid kpack)
                                 if [[ $? != 0 ]]; then

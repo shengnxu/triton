@@ -47,7 +47,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       }
     int numElems = product(origType.getShape());
 #ifdef USE_ROCM
-    int numThreads = numWarps * 64;
+    // int numThreads = numWarps * 64;
+    int numThreads = numWarps * 32;
 #else
     int numThreads = numWarps * 32;
 #endif

@@ -385,7 +385,8 @@ private:
 
     Value threadId = getThreadId(rewriter, loc);
 #ifdef USE_ROCM
-    Value warpSize = i32_val(64);
+    // Value warpSize = i32_val(64);
+    Value warpSize = i32_val(32);
 #else
     Value warpSize = i32_val(32);
 #endif
@@ -452,8 +453,8 @@ private:
     // Each thread needs to process:
     //   elemsPerThread = sizeInterWarps * s1 * s2 .. Sn / numThreads
 #ifdef USE_ROCM
-    unsigned numThreads =
-        product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 64;
+    // unsigned numThreads = product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 64;
+    unsigned numThreads = product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 32;
 #else
     unsigned numThreads =
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 32;

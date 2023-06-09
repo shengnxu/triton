@@ -480,7 +480,8 @@ public:
       auto order = triton::gpu::getOrder(layout);
       auto shapePerCTA = triton::gpu::getShapePerCTA(layout, shape);
 #ifdef USE_ROCM
-      Value warpSize = i32_val(64);
+      // Value warpSize = i32_val(64);
+      Value warpSize = i32_val(32);
 #else
       Value warpSize = i32_val(32);
 #endif
@@ -720,7 +721,8 @@ private:
     auto shape = type.getShape();
     Value threadId = getThreadId(rewriter, loc);
 #ifdef USE_ROCM
-    Value warpSize = i32_val(64);
+    // Value warpSize = i32_val(64);
+    Value warpSize = i32_val(32);
 #else
     Value warpSize = i32_val(32);
 #endif

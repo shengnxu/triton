@@ -241,8 +241,10 @@ for
                      "unsigned":$numWarps), [{
       int rank = sizePerThread.size();
 #ifdef USE_ROCM
-      unsigned remainingLanes = 64;
-      unsigned remainingThreads = numWarps*64;
+      // unsigned remainingLanes = 64;
+      // unsigned remainingThreads = numWarps*64;
+      unsigned remainingLanes = 32;
+      unsigned remainingThreads = numWarps*32;
 #else
       unsigned remainingLanes = 32;
       unsigned remainingThreads = numWarps*32;
@@ -265,7 +267,8 @@ for
       }
       // Expand the last dimension to fill the remaining lanes and warps
 #ifdef USE_ROCM
-      threadsPerWarp[order[rank-1]] = 64 / prevLanes;
+      // threadsPerWarp[order[rank-1]] = 64 / prevLanes;
+      threadsPerWarp[order[rank-1]] = 32 / prevLanes;
 #else
       threadsPerWarp[order[rank-1]] = 32 / prevLanes;
 #endif

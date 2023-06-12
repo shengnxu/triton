@@ -17,18 +17,6 @@ public:
   LogicalResult
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-
-#ifdef USE_ROCM
-    //  matchAndRewriteFast algorithm currently doesn't work properly for
-    //  MFMA layout. In that case fall back to matchAndRewriteBasic algorithm.
-    auto inputTy = op.getInputTypes()[0].cast<RankedTensorType>();
-    // Check if the inputs type have MfmaEncodingAttr attribute.
-    auto inMfma =
-        inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-    if (inMfma)
-      return matchAndRewriteBasic(op, adaptor, rewriter);
-#endif
-
     if (ReduceOpHelper(op).isFastReduction())
       return matchAndRewriteFast(op, adaptor, rewriter);
     return matchAndRewriteBasic(op, adaptor, rewriter);
@@ -411,6 +399,17 @@ private:
         delinearize(rewriter, loc, laneId, threadsPerWarp, order);
     SmallVector<Value> multiDimWarpId =
         delinearize(rewriter, loc, warpId, warpsPerCTA, order);
+
+#ifdef USE_ROCM
+    auto inputTy = srcTys[0].getElementType().cast<RankedTensorType>();
+    auto inMfma =
+        inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
+    // TODO: Check why is this not needed for mma layout.
+    if (inMfma) {
+      multiDimLaneId = delinearize(rewriter, loc, laneId, threadsPerWarp);
+      multiDimWarpId = delinearize(rewriter, loc, warpId, warpsPerCTA);
+    }
+#endif
 
     Value laneIdAxis = multiDimLaneId[axis];
     Value warpIdAxis = multiDimWarpId[axis];

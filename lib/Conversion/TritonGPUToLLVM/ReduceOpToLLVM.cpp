@@ -401,7 +401,7 @@ private:
         delinearize(rewriter, loc, warpId, warpsPerCTA, order);
 
 #ifdef USE_ROCM
-    auto inputTy = srcTys[0].getElementType().cast<RankedTensorType>();
+    auto inputTy = srcTys[0].cast<RankedTensorType>();
     auto inMfma =
         inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
     // TODO: Check why is this not needed for mma layout.

@@ -18,6 +18,7 @@ from .core import (
     arange,
     argmin,
     argmax,
+    argmax2,
     atomic_add,
     atomic_and,
     atomic_cas,

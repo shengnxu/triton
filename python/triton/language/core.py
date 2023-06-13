@@ -1345,6 +1345,22 @@ def _argreduce(input, axis, combine_fn, _builder=None, _generator=None):
                               _builder=_builder, _generator=_generator)
     return rindices
 
+@builtin
+def _argreduce2(input, axis, combine_fn, _builder=None, _generator=None):
+    axis = _constexpr_to_value(axis)
+    n = input.shape[axis]
+    index = arange(0, n, _builder=_builder)
+
+    if len(input.shape) > 1:
+        # Broadcast index across the non-reduced axes
+        axes_to_expand = [constexpr(d) for d in range(len(input.shape))]
+        del axes_to_expand[axis]
+        index = expand_dims(index, axes_to_expand, _builder=_builder)
+        index = broadcast_to(index, input.shape, _builder=_builder)
+
+    rvalue, rindices = reduce((input, index), axis, combine_fn,
+                              _builder=_builder, _generator=_generator)
+    return rvalue, rindices
 
 @triton.jit
 def minimum(x, y):
@@ -1400,6 +1416,11 @@ def argmax(input, axis):
     input = _promote_reduction_input(input)
     return _argreduce(input, axis, _argmax_combine)
 
+@triton.jit
+@_add_reduction_docstr("maximum index")
+def argmax2(input, axis):
+    input = _promote_reduction_input(input)
+    return _argreduce2(input, axis, _argmax_combine)
 
 @triton.jit
 def _min_combine(a, b):

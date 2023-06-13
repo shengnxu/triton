@@ -418,8 +418,8 @@ private:
     // Each thread needs to process:
     //   elemsPerThread = sizeInterWarps * s1 * s2 .. Sn / numThreads
 #ifdef USE_ROCM
-    unsigned numThreads =
-        product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 64;
+    // unsigned numThreads = product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 64;
+    unsigned numThreads = product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 32;
 #else
     unsigned numThreads =
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * 32;
@@ -456,6 +456,12 @@ private:
       Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
 
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+        // This barrier is Critical for Navi 31
+        if (i > 0) {
+            GCNBuilder BuilderMemfenceLDS;
+            BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
+            BuilderMemfenceLDS.launch(rewriter, loc, void_ty(rewriter.getContext()));
+        }
         storeShared(rewriter, loc, writePtrs[i], acc[i], pred);
       }
 

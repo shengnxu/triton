@@ -200,7 +200,10 @@ class _attention(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, q, k, v, sm_scale):
-        BLOCK = 128
+        if torch.version.hip is not None:
+            BLOCK = 64
+        else:
+            BLOCK = 128
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv

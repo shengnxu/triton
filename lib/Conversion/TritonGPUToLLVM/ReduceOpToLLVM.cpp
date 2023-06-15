@@ -404,7 +404,10 @@ private:
     auto inputTy = srcTys[0].cast<RankedTensorType>();
     auto inMfma =
         inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-    // TODO: Check why is this not needed for mma layout.
+    // Original logic is buggy for warpsPerCTA=[2, 2], but works fine for
+    // warpsPerCTA=[4, 1] (that is used in flash attention, thus tested).
+    // TODO: Check whether this is the case for MMA layout as well, if yes, this
+    // should be fixed in the upstream repo.
     if (inMfma) {
       multiDimLaneId = delinearize(rewriter, loc, laneId, threadsPerWarp);
       multiDimWarpId = delinearize(rewriter, loc, warpId, warpsPerCTA);

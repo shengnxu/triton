@@ -1253,7 +1253,8 @@ LogicalResult ConvertLayoutOp::canonicalize(ConvertLayoutOp op,
   auto srcType = op.getOperand().getType().cast<RankedTensorType>();
   auto dstType = op.getType().cast<RankedTensorType>();
   if (dstType.getEncoding().isa<triton::gpu::DotOperandEncodingAttr>() &&
-      srcType.getEncoding().isa<triton::gpu::MmaEncodingAttr>())
+      (srcType.getEncoding().isa<triton::gpu::MmaEncodingAttr>() ||
+       srcType.getEncoding().isa<triton::gpu::MfmaEncodingAttr>()))
     return mlir::failure();
   // convert to the same layout -- we can delete
   if (op->getResultTypes() == op->getOperandTypes()) {

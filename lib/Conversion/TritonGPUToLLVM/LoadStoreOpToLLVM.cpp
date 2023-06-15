@@ -708,6 +708,10 @@ struct AtomicRMWOpConversion
                        : extract_element(valueElemTy, retVal, i32_val(ii));
         }
       } else {
+	if (op->user_begin() == op->user_end()) {
+          rewriter.replaceOp(op, {atom});
+          return success();
+        }
         Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
         atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
         store(retVal, atomPtr);

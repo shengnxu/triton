@@ -490,6 +490,12 @@ private:
       Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
 
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+        // This barrier is known to be critical for Navi 2x/3x
+        if (i > 0) {
+            GCNBuilder BuilderMemfenceLDS;
+            BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
+            BuilderMemfenceLDS.launch(rewriter, loc, void_ty(rewriter.getContext()));
+        }
         storeShared(rewriter, loc, writePtrs[i], acc[i], pred);
       }
 

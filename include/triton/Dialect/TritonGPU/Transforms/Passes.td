@@ -22,7 +22,7 @@ def TritonGPUPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
            "int32_t", /*default*/"2",
            "number of pipeline stages">,
     Option<"warpSize", "warp-size",
-           "int32_t", /*default*/"32",
+           "int32_t", /*default*/"64",
            "warp size">
   ];
 }
@@ -89,7 +89,7 @@ def TritonGPUCoalesce: Pass<"tritongpu-coalesce", "mlir::ModuleOp"> {
 
   let options = [
     Option<"warpSize", "warp-size",
-           "int32_t", /*default*/"32",
+           "int32_t", /*default*/"64",
            "warp size">
   ];
 }

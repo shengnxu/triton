@@ -22,7 +22,7 @@ def ConvertTritonToTritonGPU: Pass<"convert-triton-to-tritongpu", "mlir::ModuleO
               "int32_t", /*default*/"4",
               "number of warps">,
        Option<"warpSize", "warp-size",
-              "int32_t", /*default*/"32",
+              "int32_t", /*default*/"64",
               "warp size">
    ];
 }

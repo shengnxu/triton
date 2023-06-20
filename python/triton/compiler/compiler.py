@@ -58,8 +58,8 @@ def optimize_ttir(mod, arch):
 
 
 def ttir_to_ttgir(mod, warpsize, num_warps):
-    print(f"ttir_to_ttgir", file=sys.stderr)
     pm = _triton.ir.pass_manager(mod.context)
+    assert warpsize == 32
     pm.add_convert_triton_to_tritongpu_pass(warpsize, num_warps)
     pm.run(mod)
     return mod

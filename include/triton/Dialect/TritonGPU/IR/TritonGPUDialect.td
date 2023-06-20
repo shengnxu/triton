@@ -30,6 +30,7 @@ def TritonGPU_Dialect : Dialect {
       return numWarps.cast<IntegerAttr>().getInt();
     }
 
+    static std::string getWarpSizeAttrName() { return "triton_gpu.warp-size"; }
     static int getWarpSize(ModuleOp mod) {
       Attribute warpSize = mod->getDiscardableAttr("triton_gpu.warp-size");
       if(!warpSize)

@@ -148,6 +148,10 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         return;
       auto mod = curr->getParentOfType<ModuleOp>();
       int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+      int warpSize = triton::gpu::TritonGPUDialect::getWarpSize(mod);
+      if (warpSize != 32) {
+        std::cerr << "[Debug] " << __PRETTY_FUNCTION__ << " warpSize != 32" << std::endl;
+      }
       auto convertType = getTypeConverter(axisInfoAnalysis, ptr, numWarps);
       layoutMap[ptr] = convertType;
     });

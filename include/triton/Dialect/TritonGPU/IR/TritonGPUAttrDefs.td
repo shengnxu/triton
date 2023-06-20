@@ -79,12 +79,6 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
                      "ArrayRef<unsigned>":$order,
                      "Type":$eltTy), [{
 
-        auto mmaEnc = dotOpEnc.getParent().dyn_cast<MmaEncodingAttr>();
-
-        if(!mmaEnc)
-          return $_get(context, 1, 1, 1, order);
-
-
         int opIdx = dotOpEnc.getOpIdx();
 
         // number of rows per phase
@@ -93,6 +87,42 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 
         // index of the inner dimension in `order`
         unsigned inner = (opIdx == 0) ? 0 : 1;
+#ifdef USE_ROCM
+        // ---- begin MI200 ----
+        auto mfmaEnc = dotOpEnc.getParent().dyn_cast<MfmaEncodingAttr>();
+        if (mfmaEnc) {
+          std::vector<size_t> matShape = {32, 32,
+                                          2 * 64 / eltTy.getIntOrFloatBitWidth()};
+          // for now, disable swizzle when using transposed int8 tensor cores
+          if (eltTy.isInteger(8) && order[0] == inner)
+            return $_get(context, 1, 1, 1, order);
+
+          // --- handle A operand ---
+          if (opIdx == 0) { // compute swizzling for A operand
+              int vec = (order[0] == 1) ? matShape[2] : matShape[0]; // k : m
+              int mmaStride = (order[0] == 1) ? matShape[0] : matShape[2];
+              int maxPhase = mmaStride / perPhase;
+              return $_get(context, vec, perPhase, maxPhase, order);
+          }
+
+          // --- handle B operand ---
+          if (opIdx == 1) {
+              int vec = (order[0] == 1) ? matShape[1] : matShape[2]; // n : k
+              int mmaStride = (order[0] == 1) ? matShape[2] : matShape[1];
+              int maxPhase = mmaStride / perPhase;
+              return $_get(context, vec, perPhase, maxPhase, order);
+          }
+
+          llvm_unreachable("invalid operand index");
+        }
+#else
+
+        auto mmaEnc = dotOpEnc.getParent().dyn_cast<MmaEncodingAttr>();
+
+        if(!mmaEnc)
+          return $_get(context, 1, 1, 1, order);
+
+
 
         // ---- begin Volta ----
         if (mmaEnc.isVolta()) {
@@ -133,36 +163,8 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 
           llvm_unreachable("invalid operand index");
         }
-
-#ifdef USE_ROCM
-        // ---- begin MI200 ----
-        auto mfmaEnc = dotOpEnc.getParent().dyn_cast<MfmaEncodingAttr>();
-        if (mfmaEnc) {
-          std::vector<size_t> matShape = {32, 32,
-                                          2 * 64 / eltTy.getIntOrFloatBitWidth()};
-          // for now, disable swizzle when using transposed int8 tensor cores
-          if (eltTy.isInteger(8) && order[0] == inner)
-            return $_get(context, 1, 1, 1, order);
-
-          // --- handle A operand ---
-          if (opIdx == 0) { // compute swizzling for A operand
-              int vec = (order[0] == 1) ? matShape[2] : matShape[0]; // k : m
-              int mmaStride = (order[0] == 1) ? matShape[0] : matShape[2];
-              int maxPhase = mmaStride / perPhase;
-              return $_get(context, vec, perPhase, maxPhase, order);
-          }
-
-          // --- handle B operand ---
-          if (opIdx == 1) {
-              int vec = (order[0] == 1) ? matShape[1] : matShape[2]; // n : k
-              int mmaStride = (order[0] == 1) ? matShape[2] : matShape[1];
-              int maxPhase = mmaStride / perPhase;
-              return $_get(context, vec, perPhase, maxPhase, order);
-          }
-
-          llvm_unreachable("invalid operand index");
-        }
 #endif
+
         // ---- not implemented ----
         llvm_unreachable("unsupported swizzling for provided MMA version");
     }]>

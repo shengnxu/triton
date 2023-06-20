@@ -149,7 +149,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto numRepM = numReps[0];
   auto numRepK = numReps[1];
 
-  Value waveSize = i32_val(64);
+  unsigned iWaveSize = triton::gpu::getWarpSize(mfmaLayout);
+  Value waveSize = i32_val(iWaveSize);
   Value wave = udiv(thread, waveSize);
   Value lane = urem(thread, waveSize);
 
@@ -224,7 +225,8 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto numRepK = numReps[0];
   auto numRepN = numReps[1];
 
-  Value waveSize = i32_val(64);
+  unsigned iWaveSize = triton::gpu::getWarpSize(mfmaLayout);
+  Value waveSize = i32_val(iWaveSize);
   Value wave = udiv(thread, waveSize);
   Value lane = urem(thread, waveSize);
 

@@ -13,6 +13,7 @@ public:
   using TypeConverter::convertType;
 
   TritonGPUToLLVMTypeConverter(MLIRContext *ctx, LowerToLLVMOptions &option,
+                               int warpSize,
                                const DataLayoutAnalysis *analysis = nullptr);
 
   Type getElementTypeForStruct(RankedTensorType type);
@@ -26,6 +27,10 @@ public:
                                       Type type);
 
   Type convertTritonTensorType(RankedTensorType type);
+
+  int getWarpSize() const { return warpSize; }
+private:
+  int warpSize;
 };
 
 #endif

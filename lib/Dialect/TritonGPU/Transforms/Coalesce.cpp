@@ -46,12 +46,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         }
       }
     int numElems = product(origType.getShape());
-#ifdef USE_ROCM
-    // int numThreads = numWarps * 64;
-    int numThreads = numWarps * 32;
-#else
-    int numThreads = numWarps * 32;
-#endif
+    int numThreads = numWarps * warpSize;
     int numElemsPerThread = std::max(numElems / numThreads, 1);
     // Thread tile size depends on memory alignment
     SmallVector<unsigned, 4> sizePerThread(rank, 1);
@@ -73,7 +68,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     std::iota(dims.begin(), dims.end(), 0);
     // create encoding
     Attribute encoding = triton::gpu::BlockedEncodingAttr::get(
-        &getContext(), origType.getShape(), sizePerThread, order, numWarps);
+        &getContext(), origType.getShape(), sizePerThread, order, numWarps, warpSize);
     return encoding;
   }
 

@@ -11,13 +11,14 @@ template <typename T> class OperationPass;
 namespace triton {
 
 constexpr static char AttrNumWarpsName[] = "triton_gpu.num-warps";
+constexpr static char AttrWarpSizeName[] = "triton_gpu.warp-size";
 
 // Create the pass with numWarps passed from cl::opt.
 std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonToTritonGPUPass();
 
 // Create the pass with numWarps set explicitly.
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonToTritonGPUPass(int numWarps);
+createConvertTritonToTritonGPUPass(int warpSize, int numWarps);
 
 } // namespace triton
 } // namespace mlir

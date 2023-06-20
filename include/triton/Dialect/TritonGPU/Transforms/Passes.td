@@ -20,7 +20,10 @@ def TritonGPUPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
   let options = [
     Option<"numStages", "num-stages",
            "int32_t", /*default*/"2",
-           "number of pipeline stages">
+           "number of pipeline stages">,
+    Option<"warpSize", "warp-size",
+           "int32_t", /*default*/"32",
+           "warp size">
   ];
 }
 
@@ -83,6 +86,12 @@ def TritonGPUCoalesce: Pass<"tritongpu-coalesce", "mlir::ModuleOp"> {
   let constructor = "mlir::createTritonGPUCoalescePass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect"];
+
+  let options = [
+    Option<"warpSize", "warp-size",
+           "int32_t", /*default*/"32",
+           "warp size">
+  ];
 }
 
 

@@ -16,8 +16,9 @@ using ::mlir::triton::gpu::SliceEncodingAttr;
 
 TritonGPUToLLVMTypeConverter::TritonGPUToLLVMTypeConverter(
     MLIRContext *ctx, LowerToLLVMOptions &option,
+    int warpSize,
     const DataLayoutAnalysis *analysis)
-    : LLVMTypeConverter(ctx, option, analysis) {
+    : LLVMTypeConverter(ctx, option, analysis), warpSize(warpSize) {
   addConversion([&](triton::PointerType type) -> std::optional<Type> {
     return convertTritonPointerType(type);
   });

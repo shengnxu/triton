@@ -301,14 +301,16 @@ public:
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
+    int warpSize = triton::gpu::TritonGPUDialect::getWarpSize(mod);
+
     mlir::LowerToLLVMOptions option(context);
     option.overrideIndexBitwidth(32);
-    TritonGPUToLLVMTypeConverter typeConverter(context, option);
+    TritonGPUToLLVMTypeConverter typeConverter(context, option, warpSize);
     TritonLLVMConversionTarget target(*context, isROCM);
     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
 
     // Preprocess
-    decomposeMmaToDotOperand(mod, numWarps);
+    decomposeMmaToDotOperand(mod, numWarps, warpSize);
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
 
@@ -320,7 +322,7 @@ public:
     // Lower functions
     {
       mlir::LowerToLLVMOptions option(context);
-      TritonGPUToLLVMTypeConverter typeConverter(context, option);
+      TritonGPUToLLVMTypeConverter typeConverter(context, option, warpSize);
       TritonLLVMFunctionConversionTarget funcTarget(*context, isROCM);
       RewritePatternSet funcPatterns(context);
       funcPatterns.add<FuncOpConversion>(typeConverter, numWarps, allocation,
@@ -340,7 +342,7 @@ public:
     // Convert call and ret ops
     {
       mlir::LowerToLLVMOptions option(context);
-      TritonGPUToLLVMTypeConverter typeConverter(context, option);
+      TritonGPUToLLVMTypeConverter typeConverter(context, option, warpSize);
       TritonLLVMFunctionConversionTarget funcTarget(*context, isROCM);
       RewritePatternSet funcPatterns(context);
       funcPatterns.add<CallOpConversion>(typeConverter, numWarps, allocation,
@@ -435,7 +437,7 @@ private:
                                         allocation.getSharedMemorySize()));
   }
 
-  void decomposeMmaToDotOperand(ModuleOp mod, int numWarps) const {
+  void decomposeMmaToDotOperand(ModuleOp mod, int numWarps, int warpSize) const {
     // Replace `mma -> dot_op` with `mma -> blocked -> dot_op`
     // unless certain conditions are met
     mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
@@ -451,7 +453,7 @@ private:
             dstType.getShape(), dstType.getElementType(),
             triton::gpu::BlockedEncodingAttr::get(
                 mod.getContext(), srcType.getShape(), getSizePerThread(srcMma),
-                getOrder(srcMma), numWarps));
+                getOrder(srcMma), numWarps, warpSize));
         auto tmp = builder.create<triton::gpu::ConvertLayoutOp>(
             cvtOp.getLoc(), tmpType, cvtOp.getOperand());
         auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(

@@ -29,6 +29,14 @@ def TritonGPU_Dialect : Dialect {
             "TritonGPU module should contain a triton_gpu.num-warps attribute");
       return numWarps.cast<IntegerAttr>().getInt();
     }
+
+    static int getWarpSize(ModuleOp mod) {
+      Attribute warpSize = mod->getDiscardableAttr("triton_gpu.warp-size");
+      if(!warpSize)
+        llvm::report_fatal_error(
+            "TritonGPU module should contain a triton_gpu.warp-size attribute");
+      return warpSize.cast<IntegerAttr>().getInt();
+    }
   }];
 
   let useDefaultAttributePrinterParser = 1;

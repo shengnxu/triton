@@ -1202,7 +1202,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 @pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype",
                          [(*shape, 2, False, False, epilogue, allow_tf32, dtype)
                           for shape in [(64, 64, 64), (32, 32, 32)]
-                          for epilogue in ['none', 'trans', 'add-matrix']
+                          for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [True, False]
                           for dtype in ['float16', 'float32']
                           if not (allow_tf32 and (dtype in ['float16']))] +

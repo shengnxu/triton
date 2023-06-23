@@ -341,7 +341,11 @@ public:
       // decompose the offset into a swizzled factor and a non-swizzled
       // (ordered) factor: colOffSwizzled = ((col // outVec) ^ phase) * outVec
       // colOffOrdered = (col % outVec) // minVec * minVec
+#ifndef USE_ROCM
       Value colOffSwizzled = xor_(udiv(idxCol, i32_val(outVec)), phase);
+#else
+      Value colOffSwizzled = urem(add(udiv(idxCol, i32_val(outVec)), phase), i32_val(32));
+#endif
       colOffSwizzled = mul(colOffSwizzled, i32_val(outVec));
       Value colOffOrdered = urem(idxCol, i32_val(outVec));
       colOffOrdered = udiv(colOffOrdered, i32_val(minVec));

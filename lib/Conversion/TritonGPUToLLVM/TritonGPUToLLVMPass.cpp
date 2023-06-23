@@ -310,6 +310,9 @@ public:
 
     // Preprocess
     decomposeMmaToDotOperand(mod, numWarps, threadsPerWarp);
+#ifdef USE_ROCM
+    decomposeMfmaToDotOperand(mod, numWarps);
+#endif
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
 
@@ -463,6 +466,35 @@ private:
       }
     });
   }
+
+#ifdef USE_ROCM
+  void decomposeMfmaToDotOperand(ModuleOp mod, int numWarps) const {
+    // Replace `mfma -> dot_op` with `mma -> blocked -> dot_op`
+    // unless certain conditions are met
+    mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
+      OpBuilder builder(cvtOp);
+      auto srcType = cvtOp.getOperand().getType().cast<RankedTensorType>();
+      auto dstType = cvtOp.getType().cast<RankedTensorType>();
+      auto srcMma =
+          srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
+      auto dstDotOp =
+          dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+      if (srcMma && dstDotOp && !isMfmaToDotShortcut(srcType, dstType)) {
+        auto tmpType = RankedTensorType::get(
+            dstType.getShape(), dstType.getElementType(),
+            triton::gpu::BlockedEncodingAttr::get(
+                mod.getContext(), srcType.getShape(), getSizePerThread(srcMma),
+                getOrder(srcMma), numWarps));
+        auto tmp = builder.create<triton::gpu::ConvertLayoutOp>(
+            cvtOp.getLoc(), tmpType, cvtOp.getOperand());
+        auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(
+            cvtOp.getLoc(), dstType, tmp);
+        cvtOp.replaceAllUsesWith(newConvert.getResult());
+        cvtOp.erase();
+      }
+    });
+  }
+#endif
 
   void decomposeBlockedToDotOperand(ModuleOp mod) const {
     // Replace `blocked -> dot_op` with `blocked -> shared -> dot_op`

@@ -1,3 +1,4 @@
+#include "Utility.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Analysis/Utility.h"
@@ -153,8 +154,8 @@ public:
 
     triton::gpu::MfmaEncodingAttr mfmaEnc;
     auto warpsPerTile = warpsPerTileMI200(dotOp, retShape, numWarps);
-    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(oldRetType.getContext(),
-                                                 warpsPerTile);
+    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(
+        oldRetType.getContext(), warpsPerTile, /*order*/ {1, 0});
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);
@@ -190,6 +191,192 @@ public:
     return success();
   }
 };
+
+class ChainDotAMD : public mlir::RewritePattern {
+
+public:
+  ChainDotAMD(mlir::MLIRContext *context)
+      : mlir::RewritePattern(triton::DotOp::getOperationName(), 2, context) {}
+
+  bool isChainDot(triton::DotOp &dotOp) const {
+    static int i = 0;
+    auto filter = [&dotOp](Operation *op) {
+      return op->getParentRegion() == dotOp->getParentRegion();
+    };
+
+    SetVector<Operation *> forwardSlices;
+    forwardSlices.clear();
+    mlir::getForwardSlice(dotOp.getResult(), &forwardSlices, filter);
+
+    SetVector<Operation *> bwdSlices;
+    bwdSlices.clear();
+    mlir::getBackwardSlice(dotOp.getResult(), &bwdSlices, filter);
+
+    bool hasDot = false;
+    bool hasView = false;
+
+    for (Operation *op : forwardSlices){
+      // op->dump();
+      if (isa<triton::DotOp>(op) && (op != dotOp))
+        hasDot = true;
+    }
+    for (Operation *op : bwdSlices){
+      // op->dump();
+      if (isa<mlir::triton::ViewOp>(op))
+        hasView = true;
+    }
+    return hasDot && !hasView;
+  }
+
+  mlir::LogicalResult
+  matchAndRewrite(mlir::Operation *op,
+                  mlir::PatternRewriter &rewriter) const override {
+    auto dotOp = cast<triton::DotOp>(op);
+
+    auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
+    if (!supportMFMA(dotOp))
+      return failure();
+
+    if (!isChainDot(dotOp)) {
+      return failure();
+    }
+
+    // get MFMA encoding for the given number of warps
+    auto retShape = oldRetType.getShape();
+    auto mod = op->getParentOfType<mlir::ModuleOp>();
+    int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+
+    // operands
+    Value a = dotOp.getA();
+    Value b = dotOp.getB();
+    Value acc = dotOp.getOperand(2);
+    auto oldAType = a.getType().cast<RankedTensorType>();
+    auto oldBType = b.getType().cast<RankedTensorType>();
+    auto oldAccType = acc.getType().cast<RankedTensorType>();
+    auto ctx = oldAType.getContext();
+
+    auto mfmaEnc = oldRetType.cast<RankedTensorType>().getEncoding().cast<triton::gpu::MfmaEncodingAttr>();
+
+    auto warpsPerCTA = mfmaEnc.getWarpsPerCTA();
+    auto newMfmaEnc = triton::gpu::MfmaEncodingAttr::get(
+        oldRetType.getContext(), {warpsPerCTA[1], warpsPerCTA[0]} , /*order*/ {1, 0});
+
+    auto newRetType =
+        RankedTensorType::get({retShape[1], retShape[0]}, oldRetType.getElementType(), newMfmaEnc);
+
+    assert(mfmaEnc);
+    auto newDotA = triton::gpu::DotOperandEncodingAttr::get(ctx, 1, newMfmaEnc);
+    auto newDotB = triton::gpu::DotOperandEncodingAttr::get(ctx, 0, newMfmaEnc);
+
+    auto newAType = RankedTensorType::get(
+        {oldAType.getShape()[1], oldAType.getShape()[0]}, oldAType.getElementType(),
+        newDotA);
+    auto newBType = RankedTensorType::get(
+        {oldBType.getShape()[1], oldBType.getShape()[0]}, oldAType.getElementType(),
+        newDotB);
+
+    auto newAccType = RankedTensorType::get(
+        {oldAccType.getShape()[1], oldAccType.getShape()[0]}, oldAccType.getElementType(),
+        newMfmaEnc);
+
+
+    auto viewA = rewriter.create<mlir::triton::ViewOp>(a.getLoc(), newAType, a);
+    auto viewB = rewriter.create<mlir::triton::ViewOp>(b.getLoc(), newBType, b);
+    auto viewAcc = rewriter.create<mlir::triton::ViewOp>(acc.getLoc(), newAccType, acc);
+
+    auto newDot = rewriter.create<triton::DotOp>(
+        dotOp.getLoc(), newRetType, viewB, viewA, viewAcc, dotOp.getAllowTF32());
+
+
+    rewriter.replaceOpWithNewOp<mlir::triton::ViewOp>(op, oldRetType, newDot.getResult());
+    return success();
+  }
+};
+
+// class ChainDotAMD : public mlir::RewritePattern {
+
+// public:
+//   ChainDotAMD(mlir::MLIRContext *context)
+//       : mlir::RewritePattern(triton::DotOp::getOperationName(), 2, context) {}
+
+//   bool isChainDot(triton::DotOp &dotOp) const {
+//     static int i = 0;
+//     auto filter = [&dotOp](Operation *op) {
+//       return op->getParentRegion() == dotOp->getParentRegion();
+//     };
+
+//     SetVector<Operation *> forwardSlices;
+//     forwardSlices.clear();
+//     mlir::getForwardSlice(dotOp.getResult(), &forwardSlices, filter);
+
+//     SetVector<Operation *> bwdSlices;
+//     bwdSlices.clear();
+//     mlir::getBackwardSlice(dotOp.getResult(), &bwdSlices, filter);
+
+//     bool hasDot = false;
+//     bool hasView = false;
+
+//     for (Operation *op : forwardSlices){
+//       // op->dump();
+//       if (isa<triton::DotOp>(op) && (op != dotOp))
+//         hasDot = true;
+//     }
+//     for (Operation *op : bwdSlices){
+//       // op->dump();
+//       if (isa<mlir::triton::ViewOp>(op))
+//         hasView = true;
+//     }
+//     return hasDot && !hasView;
+//   }
+
+//   mlir::LogicalResult
+//   matchAndRewrite(mlir::Operation *op,
+//                   mlir::PatternRewriter &rewriter) const override {
+//     auto dotOp = cast<triton::DotOp>(op);
+
+//     auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
+//     if (!supportMFMA(dotOp))
+//       return failure();
+
+//     if (!isChainDot(dotOp)) {
+//       return failure();
+//     }
+
+//     // get MFMA encoding for the given number of warps
+//     auto retShape = oldRetType.getShape();
+//     auto mod = op->getParentOfType<mlir::ModuleOp>();
+//     int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+
+//     // operands
+//     Value a = dotOp.getA();
+//     Value b = dotOp.getB();
+//     auto oldAType = a.getType().cast<RankedTensorType>();
+//     auto oldBType = b.getType().cast<RankedTensorType>();
+//     auto ctx = oldAType.getContext();
+
+//     auto mfmaEnc = oldRetType.cast<RankedTensorType>().getEncoding().cast<triton::gpu::MfmaEncodingAttr>();
+//     assert(mfmaEnc);
+//     auto newDotA = triton::gpu::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc);
+//     auto newDotB = triton::gpu::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc);
+
+//     auto newAType = RankedTensorType::get(
+//         {oldAType.getShape()[1], oldAType.getShape()[0]}, oldAType.getElementType(),
+//         newDotA);
+//     auto newBType = RankedTensorType::get(
+//         {oldBType.getShape()[1], oldBType.getShape()[0]}, oldAType.getElementType(),
+//         newDotB);
+
+
+//     auto viewA = rewriter.create<mlir::triton::ViewOp>(a.getLoc(), newAType, a);
+//     auto viewB = rewriter.create<mlir::triton::ViewOp>(b.getLoc(), newBType, b);
+
+//     rewriter.replaceOpWithNewOp<triton::DotOp>(
+//         op, oldRetType, viewB, viewA, dotOp.getOperand(2), dotOp.getAllowTF32());
+
+//     return success();
+//   }
+// };
+
 
 #endif
 
@@ -329,6 +516,7 @@ public:
     mlir::RewritePatternSet patterns(context);
 #ifdef USE_ROCM
     patterns.add<::BlockedToMFMA>(context);
+    patterns.add<::ChainDotAMD>(context);
 #else
     patterns.add<::BlockedToMMA>(context, computeCapability);
 #endif

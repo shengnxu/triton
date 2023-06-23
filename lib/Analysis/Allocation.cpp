@@ -18,6 +18,7 @@ using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getSizePerThread;
 using ::mlir::triton::gpu::MmaEncodingAttr;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 
@@ -63,6 +64,11 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
     if (isMmaToDotShortcut(srcTy, dstTy))
       return {};
 
+  if (srcLayout.isa<MfmaEncodingAttr>() &&
+      dstLayout.isa<DotOperandEncodingAttr>())
+    if (isMfmaToDotShortcut(srcTy, dstTy))
+      return {};
+
   assert(srcLayout && dstLayout &&
          "Unexpected layout in getScratchConfigForCvtLayout()");
   auto [inOrd, outOrd] = getCvtOrder(srcLayout, dstLayout);
@@ -93,6 +99,7 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
     paddedDim = dstBlockedLayout.getOrder()[0];
   }
   paddedRepShape[paddedDim] += pad;
+  std::cout << paddedRepShape[0] << " " << paddedRepShape[1] << std::endl;
   return paddedRepShape;
 }
 
@@ -157,6 +164,8 @@ private:
         auto tensorType = result.getType().dyn_cast<RankedTensorType>();
         auto bytes = tensorType.getNumElements() *
                      tensorType.getElementTypeBitWidth() / 8;
+        result.dump();
+        std::cout << bytes << std::endl;
         allocation->addBuffer<BufferT::BufferKind::Explicit>(result, bytes);
       }
     }
@@ -167,6 +176,8 @@ private:
     if (auto reduceOp = dyn_cast<triton::ReduceOp>(op)) {
       ReduceOpHelper helper(reduceOp);
       unsigned bytes = helper.getScratchSizeInBytes();
+      reduceOp.dump();
+      std::cout << bytes << std::endl;
       allocation->addBuffer<BufferT::BufferKind::Scratch>(op, bytes);
     } else if (auto cvtLayout = dyn_cast<triton::gpu::ConvertLayoutOp>(op)) {
       auto srcTy = cvtLayout.getSrc().getType().cast<RankedTensorType>();
@@ -191,6 +202,8 @@ private:
           srcTy.getElementType().isa<triton::PointerType>()
               ? elems * kPtrBitWidth / 8
               : elems * std::max<int>(8, srcTy.getElementTypeBitWidth()) / 8;
+      cvtLayout.dump();
+      std::cout << bytes << std::endl;
       allocation->addBuffer<BufferT::BufferKind::Scratch>(op, bytes);
     } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
       auto value = op->getOperand(0);
@@ -504,6 +517,7 @@ private:
         adj = std::max(adj, bufferStart.lookup(y) + y->size);
       }
       x->offset = bufferStart.lookup(x) + colors.lookup(x) * adj;
+      std::cout <<"memory alloc: " << x->offset + x->size << std::endl;
       allocation->sharedMemorySize =
           std::max(allocation->sharedMemorySize, x->offset + x->size);
     }

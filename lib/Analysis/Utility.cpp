@@ -203,6 +203,19 @@ bool isMmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
          !srcTy.getElementType().isF32();
 }
 
+bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
+  // dot_op<opIdx=0, parent=#mma> = #mma
+  // when #mma = MmaEncoding<version=2, warpsPerCTA=[..., 1]>
+  auto srcLayout = srcTy.getEncoding();
+  auto dstLayout = dstTy.getEncoding();
+  auto mfmaLayout = srcLayout.cast<triton::gpu::MfmaEncodingAttr>();
+  auto dotOperandLayout = dstLayout.cast<triton::gpu::DotOperandEncodingAttr>();
+  return mfmaLayout.getWarpsPerCTA()[1] == 1 &&
+         dotOperandLayout.getOpIdx() == 0 &&
+         dotOperandLayout.getParent() == mfmaLayout &&
+         !srcTy.getElementType().isF32();
+}
+
 bool isSingleValue(Value value) {
   // Don't consider load as expensive if it is loading a scalar.
   if (auto tensorTy = value.getType().dyn_cast<RankedTensorType>())

@@ -114,6 +114,8 @@ bool isSingleValue(Value value);
 
 bool isMmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy);
 
+bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy);
+
 /// Multi-root DAG topological sort.
 /// Performs a topological sort of the Operation in the `toSort` SetVector.
 /// Returns a topologically sorted SetVector.

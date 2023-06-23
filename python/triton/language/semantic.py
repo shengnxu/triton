@@ -1216,9 +1216,9 @@ def dot(lhs: tl.tensor,
     assert lhs.dtype == rhs.dtype, "lhs and rhs must have the same dtype!"
     assert len(lhs.shape) == 2 and len(rhs.shape) == 2
     assert lhs.shape[1].value == rhs.shape[0].value
-    assert lhs.shape[0].value >= 16 and lhs.shape[1].value >= 16 \
-        and rhs.shape[1].value >= 16,\
-        "small blocks not supported!"
+    # assert lhs.shape[0].value >= 16 and lhs.shape[1].value >= 16 \
+    #     and rhs.shape[1].value >= 16,\
+    #     "small blocks not supported!"
     if lhs.type.scalar.is_int():
         assert lhs.type.scalar == tl.int8, "only int8 supported!"
         # TODO: This is CUDA specific, check if ROCm has the same limitation

@@ -193,7 +193,9 @@ public:
     if (!llvm::isa<triton::gpu::ConvertLayoutOp>(op))
       return mlir::failure();
     auto convert = llvm::cast<triton::gpu::ConvertLayoutOp>(op);
-    return ConvertLayoutOp::canonicalize(convert, rewriter);
+    auto mod = convert->getParentOfType<mlir::ModuleOp>();
+    auto ret = ConvertLayoutOp::canonicalize(convert, rewriter);
+    return ret;
   }
 };
 
@@ -431,6 +433,9 @@ public:
     if (isSharedEncoding(cvt->getResults()[0]) ||
         isSharedEncoding(cvt->getOperand(0)))
       return mlir::failure();
+
+    auto mod = cvt->getParentOfType<mlir::ModuleOp>();
+    
     // we don't handle conversions to DotOperandEncodingAttr
     // this is a heuristics to accommodate fused attention
     auto targetType = cvt->getResultTypes()[0].cast<RankedTensorType>();
@@ -448,6 +453,8 @@ public:
     rematerializeConversionChain(toConvert, rewriter, processed, mapping);
 
     rewriter.replaceOp(cvt, mapping.lookup(cvt->getOperand(0)));
+    // mod->dump();
+    // assert(false);
     return mlir::success();
   }
 };

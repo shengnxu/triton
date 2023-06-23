@@ -380,7 +380,8 @@ SmallVector<unsigned> getOrder(Attribute layout) {
   } else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return {1, 0};
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {1, 0};
+    return SmallVector<unsigned>(mfmaLayout.getOrder().begin(),
+                                 mfmaLayout.getOrder().end());
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return {1, 0};
   } else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
@@ -906,20 +907,26 @@ Attribute MfmaEncodingAttr::parse(AsmParser &parser, Type type) {
     return {};
 
   SmallVector<unsigned, 2> warpsPerCTA;
+  SmallVector<unsigned, 2> order;
 
   for (const NamedAttribute &attr : dict) {
     if (attr.getName() == "warpsPerCTA") {
       if (parseIntArrayAttr(parser, attr, warpsPerCTA, "warpsPerCTA").failed())
         return {};
+    } else if (attr.getName() == "order") {
+      if (parseIntArrayAttr(parser, attr, order, "order").failed())
+        return {};
     }
   }
 
-  return parser.getChecked<MfmaEncodingAttr>(parser.getContext(), warpsPerCTA);
+  return parser.getChecked<MfmaEncodingAttr>(parser.getContext(), warpsPerCTA,
+                                             order);
 }
 
 void MfmaEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
           << "warpsPerCTA = [" << getWarpsPerCTA() << "]"
+          << ", order = [" << getOrder() << "]"
           << "}>";
 }
 

@@ -48,6 +48,15 @@ public:
              dstDotOp.getParent() == srcMmaEncoding))
           return;
       }
+#ifdef USE_ROCM
+      if (auto srcMmaEncoding =
+              srcEncoding.dyn_cast<triton::gpu::MfmaEncodingAttr>()) {
+
+        if (srcMmaEncoding.getWarpsPerCTA()[1] == 1 &&
+            dstDotOp.getParent() == srcMmaEncoding)
+          return;
+      }
+#endif
       auto tmpType = RankedTensorType::get(
           dstType.getShape(), dstType.getElementType(),
           triton::gpu::SharedEncodingAttr::get(

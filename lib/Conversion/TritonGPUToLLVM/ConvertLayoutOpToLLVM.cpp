@@ -87,6 +87,12 @@ public:
         dstLayout.isa<DotOperandEncodingAttr>()) {
       return lowerMmaToDotOperand(op, adaptor, rewriter);
     }
+#ifdef USE_ROCM
+    if (srcLayout.isa<MfmaEncodingAttr>() &&
+        dstLayout.isa<DotOperandEncodingAttr>()) {
+      return lowerMfmaToDotOperand(op, adaptor, rewriter);
+    }
+#endif
     if (srcLayout.isa<SharedEncodingAttr>() &&
         isaDistributedLayout(dstLayout)) {
       return lowerSharedToDistributed(op, adaptor, rewriter);
@@ -675,6 +681,43 @@ private:
     rewriter.replaceOp(op, res);
     return success();
   }
+
+#ifdef USE_ROCM
+  LogicalResult
+  lowerMfmaToDotOperand(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
+                        ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    auto srcTy = op.getSrc().getType().cast<RankedTensorType>();
+    auto dstTy = op.getResult().getType().cast<RankedTensorType>();
+    if (isMfmaToDotShortcut(srcTy, dstTy)) {
+      // get source values
+      auto vals = getTypeConverter()->unpackLLElements(loc, adaptor.getSrc(),
+                                                       rewriter, srcTy);
+      unsigned elems = getTotalElemsPerThread(srcTy);
+      Type elemTy =
+          this->getTypeConverter()->convertType(srcTy.getElementType());
+      // for the destination type, we need to pack values together
+      // so they can be consumed by tensor core operations
+      SmallVector<Value> vecVals;
+      SmallVector<Type> types;
+      auto elemSize = elemTy.getIntOrFloatBitWidth();
+      unsigned vecSize = std::max<unsigned>(64 / elemSize, 1);
+      Type vecTy = vec_ty(elemTy, vecSize);
+      types = SmallVector<Type>(elems / vecSize, vecTy);
+      for (unsigned i = 0; i < elems; i += vecSize) {
+        Value packed = rewriter.create<LLVM::UndefOp>(loc, vecTy);
+        for (unsigned j = 0; j < vecSize; j++)
+          packed = insert_element(vecTy, packed, vals[i + j], i32_val(j));
+        vecVals.push_back(packed);
+      }
+      Value view =
+          getTypeConverter()->packLLElements(loc, vecVals, rewriter, dstTy);
+      rewriter.replaceOp(op, view);
+      return success();
+    }
+    return failure();
+  }
+#endif
 
   // mma -> dot_operand
   LogicalResult

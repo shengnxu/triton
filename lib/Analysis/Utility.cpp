@@ -195,6 +195,19 @@ bool isMmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
          !srcTy.getElementType().isF32();
 }
 
+#ifdef USE_ROCM
+bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
+  auto srcLayout = srcTy.getEncoding();
+  auto dstLayout = dstTy.getEncoding();
+  auto mfmaLayout = srcLayout.cast<triton::gpu::MfmaEncodingAttr>();
+  auto dotOperandLayout = dstLayout.cast<triton::gpu::DotOperandEncodingAttr>();
+  return mfmaLayout.getWarpsPerCTA()[1] == 1 &&
+         dotOperandLayout.getOpIdx() == 0 &&
+         dotOperandLayout.getParent() == mfmaLayout &&
+         !srcTy.getElementType().isF32();
+}
+#endif
+
 bool isSingleValue(Value value) {
   // Don't consider load as expensive if it is loading a scalar.
   if (auto tensorTy = value.getType().dyn_cast<RankedTensorType>())

@@ -562,7 +562,11 @@ The data will be distributed between threads as follows:
   let parameters = (
     ins
     "unsigned":$nonKDim,
-    ArrayRefParameter<"unsigned">:$warpsPerCTA
+    ArrayRefParameter<"unsigned">:$warpsPerCTA,
+    ArrayRefParameter<
+      "unsigned",
+      "order of axes by the rate of changing"
+    >:$order
   );
 
   let hasCustomAssemblyFormat = 1;

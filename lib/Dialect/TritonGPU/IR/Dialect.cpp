@@ -86,10 +86,19 @@ SmallVector<unsigned> getThreadsPerWarp(Attribute layout) {
       return {8, 4};
   }
   if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    if (mfmaLayout.getIsTransposed()) {
-      return {32, 2};
+    unsigned rows, cols;
+    if (mfmaLayout.getNonKDim() == 32) {
+      cols = 2;
+      rows = 32;
     } else {
-      return {2, 32};
+      cols = 4;
+      rows = 16;
+    }
+
+    if (mfmaLayout.getIsTransposed()) {
+      return {rows, cols};
+    } else {
+      return {cols, rows};
     }
   }
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
@@ -207,10 +216,20 @@ SmallVector<unsigned> getSizePerThread(Attribute layout) {
       llvm_unreachable("Unexpected mma version");
     }
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    unsigned rows, cols;
+    if (mfmaLayout.getNonKDim() == 32) {
+      rows = 16;
+      cols = 1;
+    } else if (mfmaLayout.getNonKDim() == 16) {
+      rows = 4;
+      cols = 1;
+    } else
+      llvm_unreachable("Unexpected mfma non-k dim");
+
     if (mfmaLayout.getIsTransposed()) {
-      return {1, 16};
+      return {cols, rows};
     } else {
-      return {16, 1};
+      return {rows, cols};
     }
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
@@ -301,8 +320,13 @@ SmallVector<unsigned> getThreadsPerCTA(Attribute layout) {
     } else
       assert(0 && "Unimplemented usage of MmaEncodingAttr");
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    threads = {32 * mfmaLayout.getWarpsPerCTA()[0],
-               2 * mfmaLayout.getWarpsPerCTA()[1]};
+    if (mfmaLayout.getNonKDim() == 32) {
+      threads = {32 * mfmaLayout.getWarpsPerCTA()[0],
+                 2 * mfmaLayout.getWarpsPerCTA()[1]};
+    } else {
+      threads = {16 * mfmaLayout.getWarpsPerCTA()[0],
+                 4 * mfmaLayout.getWarpsPerCTA()[1]};
+    }
   } else {
     assert(0 && "Unimplemented usage of getShapePerCTA");
   }
@@ -340,8 +364,9 @@ SmallVector<unsigned> getShapePerCTA(Attribute layout,
     }
     assert(0 && "Unexpected MMA layout version found");
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {32 * mfmaLayout.getWarpsPerCTA()[0],
-            32 * mfmaLayout.getWarpsPerCTA()[1]};
+    auto nonKDim = mfmaLayout.getNonKDim();
+    return {nonKDim * mfmaLayout.getWarpsPerCTA()[0],
+            nonKDim * mfmaLayout.getWarpsPerCTA()[1]};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     assert(parentLayout && "DotOperandEncodingAttr must have a parent");
@@ -585,14 +610,16 @@ MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   assert(rank == 2 && "Unexpected rank of mfma layout");
 
   SmallVector<unsigned> elemsPerThread(rank);
+  auto nonKDim = getNonKDim();
+  auto elemsPerThreadPerTile = (nonKDim == 16 ? 4 : 16);
   if (getIsTransposed()) {
-    unsigned elemsCol = ceil<unsigned>(shape[1], 32 * getWarpsPerCTA()[1]) * 16;
-    unsigned elemsRow = ceil<unsigned>(shape[0], 32 * getWarpsPerCTA()[0]);
+    unsigned elemsCol = ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]) * elemsPerThreadPerTile;
+    unsigned elemsRow = ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]);
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
   } else {
-    unsigned elemsCol = ceil<unsigned>(shape[1], 32 * getWarpsPerCTA()[1]);
-    unsigned elemsRow = ceil<unsigned>(shape[0], 32 * getWarpsPerCTA()[0]) * 16;
+    unsigned elemsCol = ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]);
+    unsigned elemsRow = ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]) * elemsPerThreadPerTile;
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
   }

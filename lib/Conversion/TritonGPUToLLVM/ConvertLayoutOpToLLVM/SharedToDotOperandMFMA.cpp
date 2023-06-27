@@ -35,10 +35,8 @@ Value getWaveN(ConversionPatternRewriter &rewriter, Location loc, Value wave,
 namespace SharedToDotOperandMFMA {
 
 /**
- * @brief swizzling tensor element indezes according pattern encoded in
+ * @brief swizzling tensor element indexes according pattern encoded in
  * SharedEncodingAttr
- *
- * Transposed tensors are processed
  *
  * @param rewriter
  * @param loc

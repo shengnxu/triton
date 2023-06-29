@@ -82,7 +82,7 @@ LogicalResult invertEncoding(Attribute targetEncoding, Operation *op,
       return failure();
     ret = sliceEncoding.getParent();
   }
-  if (isa<triton::ViewOp, triton::CatOp>(op)) {
+  if (isa<triton::CatOp>(op)) {
     return failure();
   }
   return success();

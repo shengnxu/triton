@@ -122,6 +122,19 @@ SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
   return ret;
 }
 
+bool isChainDot(triton::DotOp &dotOp) {
+  // TODO: Improve analysis to detect distiguish between simple chain dot and FA
+  // case.
+  auto filter = [&dotOp](Operation *op) {
+    return op->getParentRegion() == dotOp->getParentRegion();
+  };
+  auto slices = mlir::getSlice(dotOp, filter);
+  for (Operation *op : slices) {
+    if (isa<triton::DotOp>(op) && (op != dotOp))
+      return true;
+  }
+  return false;
+}
 class BlockedToMFMA : public mlir::RewritePattern {
 public:
   BlockedToMFMA(mlir::MLIRContext *context)
@@ -158,8 +171,9 @@ public:
 
     auto warpsPerTile = warpsPerTileMI200(dotOp, retShape, numWarps);
 
-    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(oldRetType.getContext(),
-                                                 nonKDim, warpsPerTile, {1, 0});
+    bool isTransposed = isChainDot(dotOp);
+    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(
+        oldRetType.getContext(), nonKDim, warpsPerTile, isTransposed);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);
@@ -201,23 +215,6 @@ class ChainDotAMD : public mlir::RewritePattern {
 public:
   ChainDotAMD(mlir::MLIRContext *context)
       : mlir::RewritePattern(triton::DotOp::getOperationName(), 2, context) {}
-
-  bool isChainDot(triton::DotOp &dotOp) const {
-    auto filter = [&dotOp](Operation *op) {
-      return op->getParentRegion() == dotOp->getParentRegion();
-    };
-
-    SetVector<Operation *> forwardSlices;
-    forwardSlices.clear();
-    mlir::getForwardSlice(dotOp.getResult(), &forwardSlices, filter);
-
-    bool chainDot = false;
-    for (Operation *op : forwardSlices) {
-      if (isa<triton::DotOp>(op) && (op != dotOp))
-        chainDot = true;
-    }
-    return chainDot;
-  }
 
   bool hasView(triton::DotOp &dotOp) const {
     // Check if we already optimized chain dot.
@@ -268,7 +265,7 @@ public:
     auto warpsPerCTA = mfmaEnc.getWarpsPerCTA();
     auto newMfmaEnc = triton::gpu::MfmaEncodingAttr::get(
         oldRetType.getContext(), {warpsPerCTA[1], warpsPerCTA[0]},
-        /*order*/ {1, 0});
+        /*isTransposed*/ true);
 
     auto newRetType = RankedTensorType::get(
         {retShape[1], retShape[0]}, oldRetType.getElementType(), newMfmaEnc);

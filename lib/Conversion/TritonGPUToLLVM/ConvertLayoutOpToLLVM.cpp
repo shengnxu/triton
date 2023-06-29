@@ -211,48 +211,13 @@ private:
     }
 #ifdef USE_ROCM
     if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-      SmallVector<Value> mfmaColIdx(4);
-      SmallVector<Value> mfmaRowIdx(16);
-      Value threadId = getThreadId(rewriter, loc);
-      unsigned iWaveSize = triton::gpu::getWarpSize(layout);
-      Value warpSize = i32_val(iWaveSize);
-      Value laneId = urem(threadId, warpSize);
-      Value warpId = udiv(threadId, warpSize);
-      // TODO: fix the bug in MMAEncodingAttr document
-      SmallVector<Value> multiDimWarpId(2);
-      multiDimWarpId[0] = urem(warpId, i32_val(mfmaLayout.getWarpsPerCTA()[0]));
-      multiDimWarpId[1] = udiv(warpId, i32_val(mfmaLayout.getWarpsPerCTA()[0]));
-      Value _0 = i32_val(0);
-      Value _1 = i32_val(1);
-      Value _4 = i32_val(4);
-      Value _8 = i32_val(8);
-      Value _32 = i32_val(32);
-      multiDimWarpId[0] = urem(multiDimWarpId[0], i32_val(shape[0] / 32));
-      multiDimWarpId[1] = urem(multiDimWarpId[1], i32_val(shape[1] / 32));
-      Value halfOffset = select(icmp_uge(laneId, _32), _4, _0);
-      Value mfmaGroup32 = urem(laneId, _32);
-      Value rowWarpOffset = mul(multiDimWarpId[0], _32);
-      for (unsigned block = 0; block < 4; ++block) {
-        mfmaRowIdx[4 * block] = block == 0
-                                    ? add(halfOffset, rowWarpOffset)
-                                    : add(mfmaRowIdx[4 * (block - 1)], _8);
-        for (int r = 1; r < 4; ++r) {
-          mfmaRowIdx[4 * block + r] = add(mfmaRowIdx[4 * block + r - 1], _1);
-        }
-      }
-      Value colWarpOffset = mul(multiDimWarpId[1], _32);
-      mfmaColIdx[0] = add(mfmaGroup32, colWarpOffset);
-
+      auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type);
+      SmallVector<SmallVector<unsigned>> offsets;
       assert(rank == 2);
       SmallVector<Value> multiDimOffset(rank);
-
-      multiDimOffset[0] = mfmaRowIdx[elemId % 16];
-
-      multiDimOffset[1] = mfmaColIdx[0];
-      multiDimOffset[0] = add(multiDimOffset[0],
-                              i32_val(multiDimCTAInRepId[0] * shapePerCTA[0]));
-      multiDimOffset[1] = add(multiDimOffset[1],
-                              i32_val(multiDimCTAInRepId[1] * shapePerCTA[1]));
+      emitMfmaOffsetForCTA(mfmaLayout, offsets, multiDimCTAInRepId[0], multiDimCTAInRepId[1]);
+      multiDimOffset[0] = add(multiDimBase[0], i32_val(offsets[elemId][0]));
+      multiDimOffset[1] = add(multiDimBase[1], i32_val(offsets[elemId][1]));
       return multiDimOffset;
     }
 #endif

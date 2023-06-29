@@ -508,10 +508,7 @@ The data will be distributed between threads as follows:
   let parameters = (
     ins
     ArrayRefParameter<"unsigned">:$warpsPerCTA,
-    ArrayRefParameter<
-      "unsigned",
-      "order of axes by the rate of changing"
-    >:$order
+    "bool":$isTransposed
   );
 
   let hasCustomAssemblyFormat = 1;

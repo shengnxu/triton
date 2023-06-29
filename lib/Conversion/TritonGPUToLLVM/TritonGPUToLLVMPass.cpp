@@ -311,7 +311,7 @@ public:
     // Preprocess
     decomposeMmaToDotOperand(mod, numWarps, threadsPerWarp);
 #ifdef USE_ROCM
-    decomposeMfmaToDotOperand(mod, numWarps);
+    decomposeMfmaToDotOperand(mod, numWarps, threadsPerWarp);
 #endif
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
@@ -468,7 +468,8 @@ private:
   }
 
 #ifdef USE_ROCM
-  void decomposeMfmaToDotOperand(ModuleOp mod, int numWarps) const {
+  void decomposeMfmaToDotOperand(ModuleOp mod, int numWarps,
+                                 int threadsPerWarp) const {
     // Replace `mfma -> dot_op` with `mma -> blocked -> dot_op`
     // unless certain conditions are met
     mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
@@ -484,7 +485,7 @@ private:
             dstType.getShape(), dstType.getElementType(),
             triton::gpu::BlockedEncodingAttr::get(
                 mod.getContext(), srcType.getShape(), getSizePerThread(srcMma),
-                getOrder(srcMma), numWarps));
+                getOrder(srcMma), numWarps, threadsPerWarp));
         auto tmp = builder.create<triton::gpu::ConvertLayoutOp>(
             cvtOp.getLoc(), tmpType, cvtOp.getOperand());
         auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(

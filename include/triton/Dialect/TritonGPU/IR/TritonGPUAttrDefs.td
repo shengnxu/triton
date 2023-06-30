@@ -89,6 +89,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
         unsigned inner = (opIdx == 0) ? 0 : 1;
 #ifdef USE_ROCM
         // ---- begin MI200 ----
+        // Assume that v_mfma_fp32_32X32X8_fp16 instruction will be issued.
         auto mfmaEnc = dotOpEnc.getParent().dyn_cast<MfmaEncodingAttr>();
         if (mfmaEnc) {
           std::vector<size_t> matShape = {32, 32,
@@ -97,9 +98,9 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           if (eltTy.isInteger(8) && order[0] == inner)
             return $_get(context, 1, 1, 1, order);
 
+          int vec = 4;
           // --- handle A operand ---
           if (opIdx == 0) { // compute swizzling for A operand
-              int vec = (order[0] == 1) ? matShape[2] : matShape[0]; // k : m
               int mmaStride = (order[0] == 1) ? matShape[0] : matShape[2];
               int maxPhase = mmaStride / perPhase;
               return $_get(context, vec, perPhase, maxPhase, order);
@@ -107,7 +108,6 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 
           // --- handle B operand ---
           if (opIdx == 1) {
-              int vec = (order[0] == 1) ? matShape[1] : matShape[2]; // n : k
               int mmaStride = (order[0] == 1) ? matShape[2] : matShape[1];
               int maxPhase = mmaStride / perPhase;
               return $_get(context, vec, perPhase, maxPhase, order);

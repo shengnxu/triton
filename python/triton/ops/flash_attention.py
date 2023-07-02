@@ -221,7 +221,7 @@ class _attention(torch.autograd.Function):
             q.shape[0], q.shape[1], q.shape[2],
             BLOCK_M=BLOCK, BLOCK_N=BLOCK,
             BLOCK_DMODEL=Lk, num_warps=num_warps,
-            num_stages=2,
+            num_stages=1,
         )
 
         ctx.save_for_backward(q, k, v, o, L, m)

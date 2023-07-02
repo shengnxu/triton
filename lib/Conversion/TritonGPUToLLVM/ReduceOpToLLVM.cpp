@@ -138,7 +138,8 @@ private:
                              udiv(urem(index[axis], _32), _4));
       } else {
         // Same as BlockedEncodingAttr case
-        writeIdx[axis] = udiv(index[axis], axisSizePerThread);
+        writeIdx[axis] = add(mul(udiv(index[axis], _32), _2),
+                             udiv(urem(index[axis], _32), _4));
       }
     } else {
       llvm::report_fatal_error("Unsupported layout");
@@ -425,7 +426,7 @@ private:
       for (unsigned N = sizeIntraWarps / 2; N > 0; N >>= 1) {
         SmallVector<Value> shfl(op.getNumOperands());
         for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-          shfl[i] = shflSync(loc, rewriter, acc[i], N);
+          shfl[i] = shflSync(loc, rewriter, acc[i], 32);
         }
         accumulate(rewriter, *combineOp, acc, shfl, false);
       }

@@ -30,8 +30,8 @@ set(TRITON_USE_ROCM ON)
 # used conditionally in this file and by lit tests
 
 # Customized release build type with assertions: TritonRelBuildWithAsserts
-set(CMAKE_C_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
-set(CMAKE_CXX_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
+set(CMAKE_C_FLAGS_TRITONRELBUILDWITHASSERTS "-O0 -g")
+set(CMAKE_CXX_FLAGS_TRITONRELBUILDWITHASSERTS "-O0 -g")
 
 # Default build type
 if(NOT CMAKE_BUILD_TYPE)

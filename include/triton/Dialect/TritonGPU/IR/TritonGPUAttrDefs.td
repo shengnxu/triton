@@ -80,7 +80,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
                      "Type":$eltTy), [{
 
 #ifdef USE_ROCM
-        // ---- begin GFX908/GFX90a ----
+        // ---- begin GFX908/GFX90A ----
         auto mfmaEnc = dotOpEnc.getParent().dyn_cast<MfmaEncodingAttr>();
 
         if (mfmaEnc) {

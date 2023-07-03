@@ -53,6 +53,7 @@ public:
               srcEncoding.dyn_cast<triton::gpu::MfmaEncodingAttr>()) {
 
         if (srcMmaEncoding.getWarpsPerCTA()[1] == 1 &&
+            srcMmaEncoding.getIsTransposed() &&
             dstDotOp.getParent() == srcMmaEncoding)
           return;
       }

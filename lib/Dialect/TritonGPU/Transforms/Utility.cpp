@@ -82,7 +82,7 @@ LogicalResult invertEncoding(Attribute targetEncoding, Operation *op,
       return failure();
     ret = sliceEncoding.getParent();
   }
-  if (isa<triton::CatOp>(op)) {
+  if (isa<triton::ViewOp, triton::CatOp>(op)) {
     return failure();
   }
   return success();
@@ -138,7 +138,8 @@ bool canFoldConversion(Operation *op, Attribute &targetEncoding) {
   if (isa<triton::CatOp>(op))
     return !isExpensiveCat(cast<triton::CatOp>(op), targetEncoding);
   return isa<triton::gpu::ConvertLayoutOp, arith::ConstantOp,
-             triton::MakeRangeOp, triton::SplatOp, triton::ViewOp>(op);
+             triton::MakeRangeOp, triton::SplatOp, triton::ViewOp,
+             triton::CatOp>(*op);
 }
 
 int simulateBackwardRematerialization(

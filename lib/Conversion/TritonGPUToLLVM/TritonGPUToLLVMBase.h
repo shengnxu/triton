@@ -655,31 +655,27 @@ public:
     llvm_unreachable("unsupported emitOffsetForLayout");
   }
 
+#ifdef USE_ROCM
   void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
-                        SmallVector<SmallVector<unsigned>> &offsets, unsigned i,
-                        unsigned j) const {
+                            SmallVector<SmallVector<unsigned>> &offsets,
+                            unsigned ctaOffsetX, unsigned ctaOffsetY) const {
     const unsigned iterationCount = 4;
     auto shapePerCta = getShapePerCTA(mfmaLayout);
-    if (mfmaLayout.getIsTransposed()) {
-      unsigned colOffset = 0;
-      for (unsigned k = 0; k < iterationCount; k++) {
-        for (unsigned l = 0; l < iterationCount; l++) {
-          offsets.push_back(
-              {i * shapePerCta[0], j * shapePerCta[1] + l + colOffset});
+    unsigned rowOrColOffset = 0;
+    for (unsigned k = 0; k < iterationCount; k++) {
+      for (unsigned l = 0; l < iterationCount; l++) {
+        if (mfmaLayout.getIsTransposed()) {
+          offsets.push_back({ctaOffsetX * shapePerCta[0],
+                             ctaOffsetY * shapePerCta[1] + l + rowOrColOffset});
+        } else {
+          offsets.push_back({ctaOffsetX * shapePerCta[0] + l + rowOrColOffset,
+                             ctaOffsetY * shapePerCta[1]});
         }
-        colOffset += iterationCount * 2;
       }
-    } else {
-      unsigned rowOffset = 0;
-      for (unsigned k = 0; k < iterationCount; k++) {
-        for (unsigned l = 0; l < iterationCount; l++) {
-          offsets.push_back(
-              {i * shapePerCta[0] + l + rowOffset, j * shapePerCta[1]});
-        }
-        rowOffset += iterationCount * 2;
-      }
+      rowOrColOffset += iterationCount * 2;
     }
   }
+#endif
 
   // -----------------------------------------------------------------------
   // Emit indices

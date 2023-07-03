@@ -1311,11 +1311,11 @@ LogicalResult ConvertLayoutOp::canonicalize(ConvertLayoutOp op,
   if (!arg)
     return mlir::failure();
   // cvt(view) -> view
-  // if (auto view = dyn_cast<triton::ViewOp>(arg)) {
-  //   rewriter.replaceOpWithNewOp<triton::ViewOp>(op, op->getResult(0).getType(),
-  //                                               view.getResult());
-  //   return mlir::success();
-  // }
+  if (auto view = dyn_cast<triton::ViewOp>(arg)) {
+    rewriter.replaceOpWithNewOp<triton::ViewOp>(op, op->getResult(0).getType(),
+                                                view.getResult());
+    return mlir::success();
+  }
   // cvt(cat) -> cat
   if (auto cat = dyn_cast<triton::CatOp>(arg)) {
     rewriter.replaceOpWithNewOp<triton::CatOp>(op, op->getResult(0).getType(),

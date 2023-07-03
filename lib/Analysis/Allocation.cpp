@@ -66,6 +66,7 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
 
 #ifdef USE_ROCM
   if (srcLayout.isa<MfmaEncodingAttr>() &&
+      srcLayout.dyn_cast<MfmaEncodingAttr>().getIsTransposed() &&
       dstLayout.isa<DotOperandEncodingAttr>())
     if (isMfmaToDotShortcut(srcTy, dstTy))
       return {};
@@ -193,8 +194,10 @@ private:
       unsigned inVec = 0;
       unsigned outVec = 0;
       auto smemShape = getScratchConfigForCvtLayout(cvtLayout, inVec, outVec);
-      unsigned elems = std::accumulate(smemShape.begin(), smemShape.end(), 1,
-                                       std::multiplies{});
+      unsigned elems = smemShape.empty()
+                           ? 0
+                           : std::accumulate(smemShape.begin(), smemShape.end(),
+                                             1, std::multiplies{});
       auto bytes =
           srcTy.getElementType().isa<triton::PointerType>()
               ? elems * kPtrBitWidth / 8

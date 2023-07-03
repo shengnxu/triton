@@ -292,10 +292,12 @@ def test_op(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     p = torch.softmax(p.float(), dim=-1).half()
     # p = torch.exp(p)
     ref_out = torch.matmul(p, v)
-    ref_out.backward(dout)
-    ref_dv, v.grad = v.grad.clone(), None
-    ref_dk, k.grad = k.grad.clone(), None
-    ref_dq, q.grad = q.grad.clone(), None
+
+    if torch.version.hip is None:
+        ref_out.backward(dout)
+        ref_dv, v.grad = v.grad.clone(), None
+        ref_dk, k.grad = k.grad.clone(), None
+        ref_dq, q.grad = q.grad.clone(), None
     # # triton implementation
     tri_out = attention(q, k, v, sm_scale)
     # print(ref_out)

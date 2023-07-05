@@ -103,6 +103,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           if (opIdx == 0) { // compute swizzling for A operand
               int mmaStride = (order[0] == 1) ? matShape[0] : matShape[2];
               int maxPhase = mmaStride / perPhase;
+              maxPhase = std::min(maxPhase, (int)shape[order[0]] / vec);
               return $_get(context, vec, perPhase, maxPhase, order);
           }
 
@@ -110,6 +111,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           if (opIdx == 1) {
               int mmaStride = (order[0] == 1) ? matShape[2] : matShape[1];
               int maxPhase = mmaStride / perPhase;
+              maxPhase = std::min(maxPhase, (int)shape[order[0]] / vec);
               return $_get(context, vec, perPhase, maxPhase, order);
           }
 

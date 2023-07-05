@@ -320,9 +320,40 @@ else:
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['M', 'N', 'K'],  # Argument names to use as an x-axis for the plot
-        x_vals=[
-            128 * i for i in range(2, 33)
-        ],  # Different possible values for `x_name`
+        # x_vals=[
+        #     128 * i for i in range(2, 33)
+        # ],  # Different possible values for `x_name`
+        x_vals = [
+            [1104, 1, 4608],
+            [1104, 2, 4608],
+            [1104, 4, 4608],
+            [1104, 8, 4608],
+            [1104, 16, 4608],
+            [1104, 1335, 4608],
+            [1104, 1408, 4608],
+            [4608, 1, 320],
+            [4608, 2, 320],
+            [4608, 4, 320],
+            [4608, 8, 320],
+            [4608, 16, 320],
+            [4608, 1335, 320],
+            [4608, 1408, 320],
+            [16, 1, 4608],
+            [16, 2, 4608],
+            [16, 4, 4608],
+            [16, 8, 4608],
+            [16, 16, 4608],
+            [16, 1335, 4608],
+            [16, 1408, 4608],
+            [768, 1, 4608],
+            [768, 16, 4608],
+            [768, 1335, 4608],
+            [768, 1408, 4608],
+            [4608, 1, 768],
+            [4608, 16, 768],
+            [4608, 1335, 768],
+            [4608, 1408, 768],
+        ],
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
         line_vals=['cublas', 'triton'],
@@ -338,6 +369,7 @@ else:
 def benchmark(M, N, K, provider):
     a = torch.randn((M, K), device='cuda', dtype=torch.float16)
     b = torch.randn((K, N), device='cuda', dtype=torch.float16)
+    print(f'M = {M}, N = {N}, K = {K}')
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'cublas':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)

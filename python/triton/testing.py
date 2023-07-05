@@ -209,7 +209,8 @@ class Mark:
         y_max = [f'{x}-max' for x in bench.line_names]
         df = pd.DataFrame(columns=[bench.x_names[0]] + y_mean + y_min + y_max)
         for x in bench.x_vals:
-            x_args = {x_name: x for x_name in bench.x_names}
+            x_args = dict(zip(bench.x_names, x))
+            # x_args = {x_name: x for x_name in bench.x_names}
             row_mean, row_min, row_max = [], [], []
             for y in bench.line_vals:
                 ret = self.fn(**x_args, **{bench.line_arg: y}, **bench.args)
@@ -220,7 +221,7 @@ class Mark:
                 row_mean += [y_mean]
                 row_min += [y_min]
                 row_max += [y_max]
-            df.loc[len(df)] = [x] + row_mean + row_min + row_max
+            df.loc[len(df)] = [x[0]] + row_mean + row_min + row_max
         if bench.plot_name:
             plt.figure()
             ax = plt.subplot()

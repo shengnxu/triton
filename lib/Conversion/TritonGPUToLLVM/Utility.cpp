@@ -107,37 +107,37 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
   }
 
 #ifdef USE_ROCM
+  // This map facilates the butterfly shuffle pattern for a stride less
+  // than 16. The pattern stride is the key of the map.
   GCNBuilder builder;
-  if (i > 16) {
-    Value threadId =
-        rewriter
-            .create<UnrealizedConversionCastOp>(
-                loc, TypeRange{i32_ty},
-                ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
-                    loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
-            .getResult(0);
-    Value stride = i32_val(32);
-    Value byteOffset = i32_val(2);
-    Value lineId = add(threadId, stride);
-    Value permuteAddr = shl(lineId, byteOffset);
+  // TODO: Investigate if it is possible to use dpp_ctrl field in the instruction
+  // ss << "dpp_ctrl:0x" << std::hex << dpp_ctrl << ' ';
+  if (i == 0){
     auto shfl = builder.create("ds_permute_b32");
-    auto dOpr = builder.newOperand("=v");
-    auto addrOpr = builder.newOperand(permuteAddr, "v");
-    auto aOpr = builder.newOperand(val, "v");
-    (*shfl)(dOpr, addrOpr, aOpr);
-  } else {
-    // This map facilates the butterfly shuffle pattern for a stride less
-    // than 16. The pattern stride is the key of the map.
-    DenseMap<short, unsigned int> masks{
-        {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
-    auto shfl = builder.create("ds_swizzle_b32");
-    auto dOpr = builder.newOperand("=v");
-    auto aOpr = builder.newOperand(val, "v");
-    auto maskOpr =
-        builder.newConstantOperand("offset:" + std::to_string(masks[i]));
-    (*shfl)(dOpr, aOpr, maskOpr);
+    auto dOpr = builder.newOperand(val, "v");
+    auto buffOpr = builder.newOperand(i32_val(0), "v");
+    auto offsetOpr = builder.newConstantOperand(std::string("offset:252\n"));
+    (*shfl)(dOpr, buffOpr, dOpr, offsetOpr);
+    auto swait = builder.create("s_waitcnt lgkmcnt(0)\n");
+    (*swait)();
+    return builder.launch(rewriter, loc, val.getType(), false);
   }
-  auto swait = builder.create("s_waitcnt lgkmcnt(0)");
+  DenseMap<short, std::string> dpp_ctrl{
+	            {32, "row_bcast:31"}, 
+		    {16, "row_bcast:15"}, 
+		    {8, "row_shr:8"}, 
+		    {4, "row_shr:4"}, 
+		    {2, "quad_perm:[2, 3, 0, 1]"}, 
+		    {1, "qual_perm:[1, 0, 3, 2]"}};
+  auto shfl = builder.create("v_move_b32");
+  auto dOpr = builder.newOperand("=v");
+  auto aOpr = builder.newOperand(val, "v");
+  auto ctrlOpr = builder.newConstantOperand(dpp_ctrl[i]);
+  auto rowMaskOpr = builder.newConstantOperand(std::string("row_mask:0xf "));
+  auto bankMaskOpr = builder.newConstantOperand(std::string("bank_mask:0xf "));
+  auto boundCtrlOpr = builder.newConstantOperand(std::string("bound_ctrl:0\n"));
+  (*shfl)(dOpr, aOpr, ctrlOpr, rowMaskOpr, bankMaskOpr, boundCtrlOpr);
+  auto swait = builder.create("s_waitcnt lgkmcnt(0)\n");
   (*swait)();
 #else
   PTXBuilder builder;

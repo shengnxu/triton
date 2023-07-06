@@ -429,6 +429,11 @@ private:
         }
         accumulate(rewriter, *combineOp, acc, shfl, false);
       }
+#ifdef USE_ROCM
+      for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+        acc[i] = shflSync(loc, rewriter, acc[i], 0);
+      }
+#endif 
 
       SmallVector<Value> writeIdx = indices[key];
       writeIdx[axis] = (sizeInterWarps == 1) ? zero : warpIdAxis;

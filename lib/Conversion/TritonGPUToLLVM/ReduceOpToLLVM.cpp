@@ -417,11 +417,10 @@ private:
 
     Value zero = i32_val(0);
     Value laneZero = icmp_eq(laneIdAxis, zero);
-
+    SmallVector<Value> res;
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
-      SmallVector<Value> acc = it.second;
-
+      auto &acc = it.second;
       // Reduce within warps
       for (unsigned N = sizeIntraWarps / 2; N > 0; N >>= 1) {
         SmallVector<Value> shfl(op.getNumOperands());
@@ -438,16 +437,17 @@ private:
           shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx);
         }
         accumulate(rewriter, *combineOp, acc, shfl, false);
+        res.push_back(acc[0]);
       }
 
       SmallVector<Value> writeIdx = indices[key];
       writeIdx[axis] = (sizeInterWarps == 1) ? zero : warpIdAxis;
       Value writeOffset =
           linearize(rewriter, loc, writeIdx, smemShapes[0], order);
-      for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-        Value writePtr = gep(elemPtrTys[i], smemBases[i], writeOffset);
-        storeShared(rewriter, loc, writePtr, acc[i], laneZero);
-      }
+      // for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+      //   Value writePtr = gep(elemPtrTys[i], smemBases[i], writeOffset);
+      //   storeShared(rewriter, loc, writePtr, acc[i], laneZero);
+      // }
     }
 
     barrier();
@@ -462,51 +462,51 @@ private:
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * wavefront_size;
     unsigned elemsPerThread = std::max<unsigned>(elems / numThreads, 1);
     Value readOffset = threadId;
-    for (unsigned round = 0; round < elemsPerThread; ++round) {
-      // FIXME(Qingyi): need predicate icmp_slt(threadId,
-      // i32_val(sizeInerWarps))
-      SmallVector<Value> acc(op.getNumOperands());
-      for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-        Value readPtr = gep(elemPtrTys[i], smemBases[i], readOffset);
-        acc[i] = load(readPtr);
-      }
+//     for (unsigned round = 0; round < elemsPerThread; ++round) {
+//       // FIXME(Qingyi): need predicate icmp_slt(threadId,
+//       // i32_val(sizeInerWarps))
+//       SmallVector<Value> acc(op.getNumOperands());
+//       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+//         Value readPtr = gep(elemPtrTys[i], smemBases[i], readOffset);
+//         acc[i] = load(readPtr);
+//       }
 
-      for (unsigned N = sizeInterWarps / 2; N > 0; N >>= 1) {
-        SmallVector<Value> shfl(op.getNumOperands());
-        for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-          shfl[i] = shflSync(loc, rewriter, acc[i], N);
-        }
-        accumulate(rewriter, *combineOp, acc, shfl, false);
-      }
+//       for (unsigned N = sizeInterWarps / 2; N > 0; N >>= 1) {
+//         SmallVector<Value> shfl(op.getNumOperands());
+//         for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+//           shfl[i] = shflSync(loc, rewriter, acc[i], N);
+//         }
+//         accumulate(rewriter, *combineOp, acc, shfl, false);
+//       }
 
-      // only the first thread in each sizeInterWarps is writing
-      Value writeOffset = readOffset;
-      SmallVector<Value> writePtrs(op.getNumOperands());
-      for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-        writePtrs[i] = gep(elemPtrTys[i], smemBases[i], writeOffset);
-      }
-      Value threadIsNeeded = icmp_slt(threadId, i32_val(elems));
-      Value laneIdModSizeInterWarps = urem(laneId, i32_val(sizeInterWarps));
-      Value laneIdModSizeInterWarpsIsZero =
-          icmp_eq(laneIdModSizeInterWarps, zero);
-      Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
+//       // only the first thread in each sizeInterWarps is writing
+//       Value writeOffset = readOffset;
+//       SmallVector<Value> writePtrs(op.getNumOperands());
+//       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+//         writePtrs[i] = gep(elemPtrTys[i], smemBases[i], writeOffset);
+//       }
+//       Value threadIsNeeded = icmp_slt(threadId, i32_val(elems));
+//       Value laneIdModSizeInterWarps = urem(laneId, i32_val(sizeInterWarps));
+//       Value laneIdModSizeInterWarpsIsZero =
+//           icmp_eq(laneIdModSizeInterWarps, zero);
+//       Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
 
-      for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-#if USE_ROCM
-        // This barrier is known to be critical for Navi 2x/3x
-        if (i > 0 && wavefront_size == 32) {
-            GCNBuilder BuilderMemfenceLDS;
-            BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
-            BuilderMemfenceLDS.launch(rewriter, loc, void_ty(rewriter.getContext()));
-        }
-#endif
-        storeShared(rewriter, loc, writePtrs[i], acc[i], pred);
-      }
+//       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
+// #if USE_ROCM
+//         // This barrier is known to be critical for Navi 2x/3x
+//         if (i > 0 && wavefront_size == 32) {
+//             GCNBuilder BuilderMemfenceLDS;
+//             BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
+//             BuilderMemfenceLDS.launch(rewriter, loc, void_ty(rewriter.getContext()));
+//         }
+// #endif
+//         storeShared(rewriter, loc, writePtrs[i], acc[i], pred);
+//       }
 
-      if (round != elemsPerThread - 1) {
-        readOffset = add(readOffset, i32_val(numThreads));
-      }
-    }
+//       if (round != elemsPerThread - 1) {
+//         readOffset = add(readOffset, i32_val(numThreads));
+//       }
+//     }
 
     // We could avoid this barrier in some of the layouts, however this is not
     // the general case.
@@ -523,15 +523,24 @@ private:
         unsigned resultElems = getTotalElemsPerThread(resultTy);
         auto resultIndices = emitIndices(loc, rewriter, resultLayout, resultTy);
         assert(resultIndices.size() == resultElems);
+        auto resultOffsets = emitOffsetForLayout(resultLayout, resultTy);
 
         SmallVector<Value> resultVals(resultElems);
         for (size_t j = 0; j < resultElems; ++j) {
-          SmallVector<Value> readIdx = resultIndices[j];
-          readIdx.insert(readIdx.begin() + axis, i32_val(0));
-          Value readOffset =
-              linearize(rewriter, loc, readIdx, smemShapes[0], order);
-          Value readPtr = gep(elemPtrTys[i], smemBases[i], readOffset);
-          resultVals[j] = load(readPtr);
+          // auto key = resultOffsets[j];
+          // assert(accs.find(key) != accs.end());
+          // std::cout << accs[key].size() << std::endl;
+          llvm::SmallVector<unsigned> keyVec;
+          keyVec.push_back(0);
+          keyVec.push_back(0);
+
+          // SmallVector<Value> readIdx = resultOffsets[j];
+          // readIdx.insert(readIdx.begin() + axis, i32_val(0));
+          // Value readOffset =
+          //     linearize(rewriter, loc, readIdx, smemShapes[0], order);
+          // Value readPtr = gep(elemPtrTys[i], smemBases[i], readOffset);
+          // resultVals[j] = load(readPtr);
+          resultVals[j] = res[0];//accs[keyVec][0];
         }
 
         results[i] = getTypeConverter()->packLLElements(loc, resultVals,

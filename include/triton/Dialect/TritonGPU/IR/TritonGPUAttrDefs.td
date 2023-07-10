@@ -91,30 +91,35 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           perPhase = std::max<int>(perPhase, 1);
 
           // index of the inner dimension in `order`
+          // This is the nonKDim of the tensor
           unsigned inner = (opIdx == 0) ? 0 : 1;
-          // for now, disable swizzle when using transposed int8 tensor cores
-          if (eltTy.isInteger(8) && order[0] == inner)
+
+          // For now, disable swizzling when k is not the leading dim
+          if (order[0] == inner)
             return $_get(context, 1, 1, 1, order);
 
-          // --- handle A operand ---
-          if (opIdx == 0) { // compute swizzling for A operand
-              // This is just an example of swizzle pattern, not a production ready
-              unsigned vec = 8;
-              unsigned maxPhase = 2;
-              unsigned perPhase = 1;
-              return $_get(context, vec, perPhase, maxPhase, order);
-          }
+          // Get k_base based on the element type
+          // For now, the k_base rules are as follows
+          // 1. All selected mfma instructions produce a single block
+          // 2. For f16 data type, 2 VGPRs are used for operand A --> k_base = 4
+          // 3. For non-f16 data types, 1 VGPR are used for operand A
+          //    k_base = 32 / elemTypeInBits
+          // 4. TODO: what about f64?
+          // TODO: For more general mfma instruction selection logic, it could
+          // be difficult to infer k_base based on eleTy only.
+          // Then it's better to embed k_base into MfmaEncodingAttr
+          unsigned k_base;
+          if (eltTy.isF16())
+            k_base = 2 * 32 / eltTy.getIntOrFloatBitWidth();
+          else
+            k_base = 32 / eltTy.getIntOrFloatBitWidth();
 
-          // --- handle B operand ---
-          if (opIdx == 1) {
-              // This is an example of swizzle pattern, not a production ready
-              unsigned vec = 2;
-              unsigned maxPhase = 2;
-              unsigned perPhase = 1;
-              return $_get(context, vec, perPhase, maxPhase, order);
-          }
+          // Get maxPhase based on mfma output block dim
+          // For now, the block dim is hard coded as 32
+          // TODO: This should be the nonKDim from the MfmaEncodingAttr
+          unsigned maxPhase = 32 / perPhase;
 
-          llvm_unreachable("invalid operand index");
+          return $_get(context, k_base, perPhase, maxPhase, order);
         }
 #endif
         auto mmaEnc = dotOpEnc.getParent().dyn_cast<MmaEncodingAttr>();

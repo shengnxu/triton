@@ -176,10 +176,10 @@ public:
 
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc));
+        triton::gpu::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc, oldAType.getElementType()));
     auto newBType = RankedTensorType::get(
         oldBType.getShape(), oldBType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc));
+        triton::gpu::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc, oldAType.getElementType()));
     a = rewriter.create<triton::gpu::ConvertLayoutOp>(a.getLoc(), newAType, a);
     b = rewriter.create<triton::gpu::ConvertLayoutOp>(b.getLoc(), newBType, b);
     auto newDot = rewriter.create<triton::DotOp>(

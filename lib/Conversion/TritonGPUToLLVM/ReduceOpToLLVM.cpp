@@ -18,7 +18,7 @@ public:
   matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (ReduceOpHelper(op).isFastReduction())
-      return matchAndRewriteFast(op, adaptor, rewriter);
+      return matchAndRewriteNoLDS(op, adaptor, rewriter);
     return matchAndRewriteBasic(op, adaptor, rewriter);
   }
 
@@ -320,6 +320,42 @@ private:
     return success();
   }
 
+  LogicalResult matchAndRewriteNoLDS(triton::ReduceOp op, OpAdaptor adaptor,
+                                    ConversionPatternRewriter &rewriter) const {
+    ReduceOpHelper helper(op);
+    Location loc = op->getLoc();
+    unsigned axis = adaptor.getAxis();
+    assert(axis == 1);
+    
+    auto srcTys = op.getInputTypes();
+    auto srcLayout = helper.getSrcLayout();
+
+    unsigned srcElems = getTotalElemsPerThread(srcTys[0]);
+    auto srcIndices = emitIndices(loc, rewriter, srcLayout, srcTys[0]);
+    auto srcValues = unpackInputs(loc, op, adaptor, rewriter);
+
+    SmallVector<Value> accs;
+    auto *combineOp = &op.getCombineOp();
+
+    // reduce within threads
+    for (unsigned i = 0; i < srcElems; ++i) {
+      bool isFirst = i == 0;
+      accumulate(rewriter, *combineOp, accs, srcValues[i], isFirst);
+    }
+
+    Value shfl = shflSync(loc, rewriter, accs[0], 32);
+    accumulate(rewriter, *combineOp, accs, shfl, false);
+
+    auto resultTy = op.getResult()[0].getType().dyn_cast<RankedTensorType>();
+    // set output values
+    SmallVector<Value> results(op.getNumOperands());
+    results[0] =
+        getTypeConverter()->packLLElements(loc, accs[0], rewriter, resultTy);
+    rewriter.replaceOp(op, results);
+
+    return success();
+
+}
   // Use warp shuffle for reduction within warps and shared memory for data
   // exchange across warps
   LogicalResult matchAndRewriteFast(triton::ReduceOp op, OpAdaptor adaptor,

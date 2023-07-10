@@ -201,7 +201,7 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, sm_scale):
         if torch.version.hip is not None:
-            BLOCK = 64
+            BLOCK = 128
         else:
             BLOCK = 128
         # shape constraints
@@ -369,4 +369,4 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, mode, provider, dtype=torch.f
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path='.', print_data=True)
+# bench_flash_attention.run(save_path='.', print_data=True)

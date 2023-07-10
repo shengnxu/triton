@@ -45,26 +45,26 @@ public:
     // Sink conversions into loops when they will increase
     // register pressure
     DenseMap<Operation *, Operation *> opToMove;
-    m.walk([&](triton::gpu::ConvertLayoutOp op) {
-      if (!willIncreaseRegisterPressure(op))
-        return;
-      auto user_begin = op->user_begin();
-      auto user_end = op->user_end();
-      if (std::distance(user_begin, user_end) != 1)
-        return;
-      if (user_begin->getParentOfType<scf::ForOp>() ==
-          op->getParentOfType<scf::ForOp>())
-        return;
-      opToMove.insert({op, *user_begin});
-    });
-    for (auto &kv : opToMove)
-      kv.first->moveBefore(kv.second);
+    // m.walk([&](triton::gpu::ConvertLayoutOp op) {
+    //   if (!willIncreaseRegisterPressure(op))
+    //     return;
+    //   auto user_begin = op->user_begin();
+    //   auto user_end = op->user_end();
+    //   if (std::distance(user_begin, user_end) != 1)
+    //     return;
+    //   if (user_begin->getParentOfType<scf::ForOp>() ==
+    //       op->getParentOfType<scf::ForOp>())
+    //     return;
+    //   opToMove.insert({op, *user_begin});
+    // });
+    // for (auto &kv : opToMove)
+    //   kv.first->moveBefore(kv.second);
     // Move convert(load) immediately after dependent load
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();
       auto dstEncoding = dstType.getEncoding();
-      if (!dstEncoding.isa<triton::gpu::SharedEncodingAttr>())
-        return;
+      // if (!dstEncoding.isa<triton::gpu::SharedEncodingAttr>())
+      //   return;
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
@@ -80,25 +80,25 @@ public:
     });
     // Move `dot` operand so that conversions to opIdx=0 happens before
     // conversions to opIdx=1
-    m.walk([&](triton::gpu::ConvertLayoutOp op) {
-      auto dstType = op.getResult().getType().cast<RankedTensorType>();
-      auto dstEncoding =
-          dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
-      if (!dstEncoding)
-        return;
-      int opIdx = dstEncoding.getOpIdx();
-      if (opIdx != 0)
-        return;
-      if (op->getUsers().empty())
-        return;
-      auto dotUser = dyn_cast<triton::DotOp>(*op->user_begin());
-      if (!dotUser)
-        return;
-      auto BOp = dotUser.getOperand(1).getDefiningOp();
-      if (!BOp)
-        return;
-      op->moveBefore(BOp);
-    });
+    // m.walk([&](triton::gpu::ConvertLayoutOp op) {
+    //   auto dstType = op.getResult().getType().cast<RankedTensorType>();
+    //   auto dstEncoding =
+    //       dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+    //   if (!dstEncoding)
+    //     return;
+    //   int opIdx = dstEncoding.getOpIdx();
+    //   if (opIdx != 0)
+    //     return;
+    //   if (op->getUsers().empty())
+    //     return;
+    //   auto dotUser = dyn_cast<triton::DotOp>(*op->user_begin());
+    //   if (!dotUser)
+    //     return;
+    //   auto BOp = dotUser.getOperand(1).getDefiningOp();
+    //   if (!BOp)
+    //     return;
+    //   op->moveBefore(BOp);
+    // });
     return;
   }
 };

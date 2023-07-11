@@ -119,15 +119,19 @@ def generate_launcher(constants, signature):
 
     #define HIP_CHECK(ans) {{ gpuAssert((ans), __FILE__, __LINE__); }}
 
+    static int getWarpSize(hipStream_t stream)
+    {{
+      int device_id = hipGetStreamDeviceId(stream);
+      gpuAssert(device_id >= 0 ? hipSuccess : hipErrorInvalidDevice, __FILE__, __LINE__);
+      hipDeviceProp_t prop;
+      HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
+      return prop.warpSize;
+    }}
+
     static void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, hipStream_t stream, hipFunction_t function, {arg_decls}) {{
       void *params[] = {{ {', '.join(f"&arg{i}" for i in signature.keys() if i not in constants)} }};
       if (gridX*gridY*gridZ > 0) {{
-          hipDevice_t device;
-          int warp_size;
-          hipDeviceProp_t prop;
-          HIP_CHECK(hipStreamGetDevice(stream, &device));
-          HIP_CHECK(hipGetDeviceProperties(&prop, device));
-          warp_size = prop.warpSize;
+          int warp_size = getWarpSize(stream);
           HIP_CHECK(hipModuleLaunchKernel(function, gridX, gridY, gridZ, num_warps * warp_size, 1, 1, shared_memory, stream, params, 0));
       }}
     }}

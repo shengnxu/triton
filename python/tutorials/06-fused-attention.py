@@ -201,7 +201,7 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, sm_scale):
         if torch.version.hip is not None:
-            BLOCK = 128
+            BLOCK = 64
         else:
             BLOCK = 128
         # shape constraints

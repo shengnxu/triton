@@ -138,8 +138,7 @@ bool canFoldConversion(Operation *op, Attribute &targetEncoding) {
   if (isa<triton::CatOp>(op))
     return !isExpensiveCat(cast<triton::CatOp>(op), targetEncoding);
   return isa<triton::gpu::ConvertLayoutOp, arith::ConstantOp,
-             triton::MakeRangeOp, triton::SplatOp, triton::ViewOp,
-             triton::CatOp>(*op);
+             triton::MakeRangeOp, triton::SplatOp, triton::ViewOp>(op);
 }
 
 int simulateBackwardRematerialization(

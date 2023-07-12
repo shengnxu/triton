@@ -2129,6 +2129,7 @@ class MmaLayout:
 
 class MfmaLayout:
     def __init__(self, non_k_dim, warps_per_cta, isTransposed):
+        self.non_k_dim = str(non_k_dim)
         self.warps_per_cta = str(warps_per_cta)
         self.isTransposed = str(isTransposed).lower()
 
@@ -2238,8 +2239,8 @@ module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-war
 
 if _get_warp_size() == 64:
     layouts = [
-        MfmaLayout(nonKDim=32, warps_per_cta=[4, 1], isTransposed=True),
-        MfmaLayout(nonKDim=32, warps_per_cta=[2, 2], isTransposed=False),
+        MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], isTransposed=True),
+        MfmaLayout(non_k_dim=32, warps_per_cta=[2, 2], isTransposed=False),
     ]
     shapes = [[128, 32], [128, 128], [32, 128], [64, 64]]
 else:

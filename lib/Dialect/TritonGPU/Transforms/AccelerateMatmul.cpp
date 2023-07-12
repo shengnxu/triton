@@ -1,4 +1,3 @@
-#include "Utility.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Analysis/Utility.h"

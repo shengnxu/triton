@@ -194,10 +194,8 @@ private:
       unsigned inVec = 0;
       unsigned outVec = 0;
       auto smemShape = getScratchConfigForCvtLayout(cvtLayout, inVec, outVec);
-      unsigned elems = smemShape.empty()
-                           ? 0
-                           : std::accumulate(smemShape.begin(), smemShape.end(),
-                                             1, std::multiplies{});
+      unsigned elems = std::accumulate(smemShape.begin(), smemShape.end(), 1,
+                                       std::multiplies{});
       auto bytes =
           srcTy.getElementType().isa<triton::PointerType>()
               ? elems * kPtrBitWidth / 8

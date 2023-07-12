@@ -14,7 +14,7 @@ def test_op(Z, H, N_CTX, D_HEAD, dtype):
     capability = torch.cuda.get_device_capability()
     if torch.version.hip is not None:
         if dtype != torch.float16:
-            pytest.skip("Currentlu flash attention on AMD gpu is only supported in fp16.")
+            pytest.skip("Currently flash attention on AMD gpu is only supported in fp16.")
         if D_HEAD < 32:
             pytest.skip("D_HEAD < 32 is not supported. It will be enabled once smaller tile size is supported in MFMA pipeline.")
         if D_HEAD > 64:

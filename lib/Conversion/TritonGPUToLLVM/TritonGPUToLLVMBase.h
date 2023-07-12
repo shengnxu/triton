@@ -659,16 +659,16 @@ public:
   void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
                             SmallVector<SmallVector<unsigned>> &offsets,
                             unsigned ctaOffsetX, unsigned ctaOffsetY) const {
-    // MFMA output tile consists of repeated "dot operand B" layout blocks along
-    // row axis. This variable defines number of these blocks
-    const unsigned numBlocks = 4;
-    const unsigned elemsPerThreadPerBlock = 4;
+    // MFMA output tile consists of repeated "dot operand B" layout groups along
+    // row axis. This variable defines number of these groups.
+    const unsigned numGroups = 4;
+    const unsigned elemsPerThreadPerGroup = 4;
     auto warpSize = getWarpSize(mfmaLayout);
     assert(warpSize == 64);
     auto shapePerCta = getShapePerCTA(mfmaLayout);
-    for (unsigned block = 0; block < numBlocks; block++) {
-      unsigned rowOrColOffset = block * elemsPerThreadPerBlock * warpSize / 32;
-      for (unsigned elem = 0; elem < elemsPerThreadPerBlock; elem++) {
+    for (unsigned block = 0; block < numGroups; block++) {
+      unsigned rowOrColOffset = block * elemsPerThreadPerGroup * warpSize / 32;
+      for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
         if (mfmaLayout.getIsTransposed()) {
           offsets.push_back(
               {ctaOffsetX * shapePerCta[0],

@@ -666,7 +666,9 @@ private:
       SmallVector<Value> vecVals;
       SmallVector<Type> types;
       auto elemSize = elemTy.getIntOrFloatBitWidth();
-      unsigned vecSize = std::max<unsigned>(64 / elemSize, 1);
+      // TODO: Support types other than float16.
+      assert(type::isFloat(elemTy) && elemSize == 16);
+      unsigned vecSize = 4;
       Type vecTy = vec_ty(elemTy, vecSize);
       types = SmallVector<Type>(elems / vecSize, vecTy);
       for (unsigned i = 0; i < elems; i += vecSize) {

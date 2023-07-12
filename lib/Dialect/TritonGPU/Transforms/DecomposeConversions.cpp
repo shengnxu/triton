@@ -49,12 +49,12 @@ public:
           return;
       }
 #ifdef USE_ROCM
-      if (auto srcMmaEncoding =
+      if (auto srcMfmaEncoding =
               srcEncoding.dyn_cast<triton::gpu::MfmaEncodingAttr>()) {
 
-        if (srcMmaEncoding.getWarpsPerCTA()[1] == 1 &&
-            srcMmaEncoding.getIsTransposed() &&
-            dstDotOp.getParent() == srcMmaEncoding)
+        if (srcMfmaEncoding.getWarpsPerCTA()[1] == 1 &&
+            srcMfmaEncoding.getIsTransposed() &&
+            dstDotOp.getParent() == srcMfmaEncoding)
           return;
       }
 #endif

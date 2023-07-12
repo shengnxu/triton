@@ -201,10 +201,13 @@ bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
   auto dstLayout = dstTy.getEncoding();
   auto mfmaLayout = srcLayout.cast<triton::gpu::MfmaEncodingAttr>();
   auto dotOperandLayout = dstLayout.cast<triton::gpu::DotOperandEncodingAttr>();
+  // TODO: Remove the restriction on the warpsPerCTA once chain dot testing is
+  // improved. In addition, we can enable this shortcut for regular MFMA
+  // layout when opIdx == 1.
   return mfmaLayout.getWarpsPerCTA()[1] == 1 &&
          dotOperandLayout.getOpIdx() == 0 &&
          dotOperandLayout.getParent() == mfmaLayout &&
-         mfmaLayout.getIsTransposed() && !srcTy.getElementType().isF32();
+         mfmaLayout.getIsTransposed() && srcTy.getElementType().isF16();
 }
 #endif
 

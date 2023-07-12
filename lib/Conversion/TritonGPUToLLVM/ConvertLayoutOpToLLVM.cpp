@@ -213,6 +213,7 @@ private:
     if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
       auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type);
       SmallVector<SmallVector<unsigned>> offsets;
+
       assert(rank == 2);
       SmallVector<Value> multiDimOffset(rank);
       emitMfmaOffsetForCTA(mfmaLayout, offsets, multiDimCTAInRepId[0], multiDimCTAInRepId[1]);

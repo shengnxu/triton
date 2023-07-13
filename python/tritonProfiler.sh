@@ -17,4 +17,6 @@ N=$3
 K=$4
 reduceSpace=$5
 
+DRIVER=$(echo $DRIVER | sed -e "s/matmul_grouped.py/matmul.py/g")
+
 python $DRIVER -m $M -n $N -k $K

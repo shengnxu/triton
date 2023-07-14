@@ -102,7 +102,7 @@ def tune_gemm(SIZE_M, SIZE_N, SIZE_K):
 
 
     # tune space
-    block_range = [32, 64, 128]
+    block_range = [32, 64]
     split_k_range = [1, 2, 4, 5, 8, 10]
     num_warps_range = [1, 2, 4, 8, 16]
 
@@ -156,7 +156,9 @@ def tune_gemm(SIZE_M, SIZE_N, SIZE_K):
                         print(f"{index}: m = {SIZE_M}, n = {SIZE_N}, k = {SIZE_K}, curr_config = {perf_config}, min_time = {min_time} ms", )
                         index += 1
     flops = 2 * SIZE_M * SIZE_N * SIZE_K / min_time / 1.0e9
-    strr = f'Best Result: {SIZE_M},{SIZE_N},{SIZE_K} best parameters: {best_config} --> {min_time} ms, {flops} TFLOPS'
+    # convert to ns to be collected by msft repository
+    min_time = min_time * 1.e6
+    strr = f'Best Result: {SIZE_M},{SIZE_N},{SIZE_K} best parameters: {best_config} -->{flops} TFLOPS, time(ns): {min_time}'
     print(strr)
 
 

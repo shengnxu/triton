@@ -175,7 +175,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
                           warpsPerGroupM, numOfElems, numReps, cSwizzleOffset);
   }
 
-  Value smemBase = smemObj.getBaseBeforeSwizzle(order[0], loc, rewriter);
+  Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
   Type smemPtrTy = getShemPtrTy(aElemTy);
 
@@ -233,8 +233,6 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   Value wave = udiv(thread, waveSize);
   Value lane = urem(thread, waveSize);
 
-  Value waveN =
-      getWaveN(rewriter, loc, wave, warpsPerCTA, mfmaInstrN, shape[1]);
   Value waveN = getWaveN(rewriter, loc, wave, warpsPerCTA,
                          mfmaInstrN, shape[1]);
   int numOfElems = std::max<int>(mfmaInstrK * mfmaInstrN / 64 /*wave size*/, 1);
@@ -263,7 +261,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
                           warpsPerGroupN, numOfElems, numReps, cSwizzleOffset);
   }
 
-  Value smemBase = smemObj.getBaseBeforeSwizzle(order[0], loc, rewriter);
+  Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
   Type smemPtrTy = getShemPtrTy(bElemTy);
 

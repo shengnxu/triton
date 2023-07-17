@@ -353,7 +353,7 @@ configs = [triton.testing.Benchmark(
     line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
     line_names=['Triton'] + (['Flash'] if HAS_FLASH else []),
     styles=[('red', '-'), ('blue', '-')],
-    ylabel='ms',
+    ylabel='tflops',
     plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}-{causal}',
     args={'H': N_HEADS, 'BATCH': BATCH, 'D_HEAD': D_HEAD, 'dtype': torch.float16, 'mode': mode, 'causal': causal}
 ) for mode in ['fwd'] for causal in [False, True]]
@@ -374,7 +374,9 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
             o = fn()
             do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        #ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        fa_time, fa_measurement = triton.testing.benchmark_forward(fn, warmup=warmup, repeats=rep, desc='Flash Attention Triton', verbose=False)
+        ms = fa_measurement.mean * 1e3
     if provider == "flash":
         lengths = torch.full((BATCH,), fill_value=N_CTX, device=device)
         cu_seqlens = torch.zeros((BATCH + 1,), device=device, dtype=torch.int32)

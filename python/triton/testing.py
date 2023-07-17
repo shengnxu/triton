@@ -6,6 +6,30 @@ from contextlib import contextmanager
 
 from ._C.libtriton.triton import runtime
 
+import torch
+import torch.utils.benchmark as benchmark
+
+
+def benchmark_forward(fn, *inputs, warmup=10, repeats=10, desc='', verbose=True, amp=False,
+                      amp_dtype=torch.float16, **kwinputs):
+    """ Use Pytorch Benchmark on the forward pass of an arbitrary function. """
+    if verbose:
+        print(desc, '- Forward pass')
+    def fn_amp(*inputs, **kwinputs):
+        with torch.autocast(device_type='cuda', dtype=amp_dtype, enabled=amp):
+            fn(*inputs, **kwinputs)
+    for _ in range(warmup):  # warmup
+        fn_amp(*inputs, **kwinputs)
+    t = benchmark.Timer(
+            stmt='fn_amp(*inputs, **kwinputs)',
+            globals={'fn_amp': fn_amp, 'inputs': inputs, 'kwinputs': kwinputs},
+            num_threads=torch.get_num_threads(),
+            )
+    m = t.timeit(repeats)
+    if verbose:
+        print(m)
+    return t, m
+
 
 def nvsmi(attrs):
     attrs = ','.join(attrs)

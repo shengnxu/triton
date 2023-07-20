@@ -201,7 +201,7 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, sm_scale):
         if torch.version.hip is not None:
-            BLOCK = 64
+            BLOCK = 128
         else:
             BLOCK = 128
         # shape constraints
@@ -223,7 +223,7 @@ class _attention(torch.autograd.Function):
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1], q.shape[2],
-            BLOCK_M=BLOCK, BLOCK_N=BLOCK,
+            BLOCK_M=BLOCK, BLOCK_N=32,
             BLOCK_DMODEL=Lk, num_warps=num_warps,
             num_stages=2,
         )
@@ -334,12 +334,12 @@ configs = [triton.testing.Benchmark(
     ylabel='ms',
     plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}',
     args={'H': N_HEADS, 'BATCH': BATCH, 'D_HEAD': D_HEAD, 'dtype': torch.float16, 'mode': mode}
-) for mode in ['fwd', 'bwd']]
+) for mode in ['fwd']]
 
 
 @triton.testing.perf_report(configs)
 def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"):
-    assert mode in ['fwd', 'bwd']
+    assert mode in ['fwd']
     warmup = 25
     rep = 100
     if provider == "triton":

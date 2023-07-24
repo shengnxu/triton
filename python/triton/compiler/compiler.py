@@ -85,7 +85,9 @@ def optimize_ttgir(mod, num_stages, arch):
         pm.add_tritongpu_accelerate_matmul_pass(80)
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
-    pm.add_tritongpu_pipeline_pass(num_stages)
+    # TODO enable this pass for AMD GPU when it is ready
+    if not is_hip():
+        pm.add_tritongpu_pipeline_pass(num_stages)
     pm.add_tritongpu_prefetch_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
@@ -222,9 +224,6 @@ def get_amdgpu_arch_fulldetails():
         arch_name = arch_name_features[0]
         arch_features = ""
 
-        if (len(arch_name_features) == 3):
-            arch_features = "+" + re.search('\\w+', arch_name_features[1]).group(0) + ","\
-                            "-" + re.search('\\w+', arch_name_features[2]).group(0)
         return [arch_triple, arch_name, arch_features, warp_size]
     except BaseException:
         return None

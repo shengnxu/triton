@@ -474,7 +474,7 @@ struct GetNumProgramsOpConversion
     Value threadsPerGrid =
         rewriter.create<::mlir::gpu::GridDimOp>(loc, dims[op.getAxis()]);
     Value threadsPerBlock =
-        rewriter.create<::mlir::gpu::BlockDimOp>(loc, bdims[op.getAxis()]);
+        rewriter.create<::mlir::gpu::BlockDimOp>(loc, dims[op.getAxis()]);
     Value threadNumPerGrid = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerGrid);
     Value threadNumPerBlock = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerBlock);    
     rewriter.replaceOpWithNewOp<LLVM::UDivOp>(op, threadNumPerGrid, threadNumPerBlock);
@@ -490,11 +490,6 @@ struct GetNumProgramsOpConversion
   static constexpr mlir::gpu::Dimension dims[] = {mlir::gpu::Dimension::x,
                                                   mlir::gpu::Dimension::y,
                                                   mlir::gpu::Dimension::z};
-#ifdef USE_ROCM
-  static constexpr mlir::gpu::Dimension bdims[] = {mlir::gpu::Dimension::x,
-                                                  mlir::gpu::Dimension::y,
-                                                  mlir::gpu::Dimension::z};
-#endif
 };
 
 struct AddPtrOpConversion

@@ -1,0 +1,14 @@
+#Best Result: M,N,K best parameters: BLOCK_M,BLOCK_N,BLOCK_K,SPLIT_K,mPerWave,kpack,num_warps
+#Tuning on MI200, config form Lixun
+Best Result: 4608,1,320 best parameters: 16,16,32,10,16,8,1
+Best Result: 4608,16,320  best parameters: 16,16,32,2,16,8,1 
+Best Result: 4608,1,768  best parameters: 32,16,64,12,16,8,2 
+Best Result: 4608,16,768  best parameters: 16,16,64,12,16,8,1 
+Best Result: 1104,1,4608  best parameters: 64,16,32,24,16,8,4 
+Best Result: 1104,16,4608  best parameters: 64,16,64,12,16,8,4 
+Best Result: 768,1,4608  best parameters: 16,16,64,18,16,8,1 
+Best Result: 768,16,4608  best parameters: 64,16,16,12,16,4,4
+Best Result: 16,1,4608  best parameters: 16,16,64,24,16,8,1 
+Best Result: 16,16,4608  best parameters: 16,16,64,24,16,8,1 
+Best Result: 16,1408,4608  best parameters: 16,32,32,12,16,8,2
+Best Result: 16,1335,4608  best parameters: 16,64,32,24,16,4,4

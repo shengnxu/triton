@@ -1,0 +1,38 @@
+# M = 16
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1,    'K': 4608, 'splitk': 128}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 2,    'K': 4608, 'splitk': 128}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 4,    'K': 4608, 'splitk': 128}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 8,    'K': 4608, 'splitk': 128}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 16,   'K': 4608, 'splitk': 64}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1335, 'K': 4608, 'splitk': 16}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1408, 'K': 4608, 'splitk': 16}
+
+# M = 768
+- {'transA': 'N', 'transB': 'N', 'M': 768, 'N': 1,    'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 768, 'N': 16,   'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 768, 'N': 1335, 'K': 4608, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 768, 'N': 1408, 'K': 4608, 'splitk': 4}
+
+# M = 1104
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 1,    'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 2,    'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 4,    'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 8,    'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 16,   'K': 4608, 'splitk': 32}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 1335, 'K': 4608, 'splitk': 2}
+- {'transA': 'N', 'transB': 'N', 'M': 1104, 'N': 1408, 'K': 4608, 'splitk': 2}
+
+# M = 4608, K=320
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1,    'K': 320, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 2,    'K': 320, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 4,    'K': 320, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 8,    'K': 320, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 16,   'K': 320, 'splitk': 4}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1335, 'K': 320, 'splitk': 1}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1408, 'K': 320, 'splitk': 1}
+
+# M = 4608, K=768
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1,    'K': 768, 'splitk': 8}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 16,   'K': 768, 'splitk': 8}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1335, 'K': 768, 'splitk': 1}
+- {'transA': 'N', 'transB': 'N', 'M': 4608, 'N': 1408, 'K': 768, 'splitk': 1}

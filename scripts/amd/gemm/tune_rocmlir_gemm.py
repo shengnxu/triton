@@ -81,10 +81,13 @@ def matmul_kernel(
     offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
     a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    a_mask = (offs_m[:, None] < M) and (offs_k[None, :] < K)
+    b_mask = (offs_k[:, None] < K) and (offs_n[None, :] < N)
+
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
-        a = tl.load(a_ptrs)
-        b = tl.load(b_ptrs)
+        a = tl.load(a_ptrs, mask=a_mask)
+        b = tl.load(b_ptrs, mask=b_mask)
         accumulator += tl.dot(a, b)
         a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
@@ -126,10 +129,12 @@ def matmul_kernel_large(
     offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
     a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    a_mask = (offs_m[:, None] < M) & (offs_k[None, :] < K)
+    b_mask = (offs_k[:, None] < K) & (offs_n[None, :] < N)
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
-        a = tl.load(a_ptrs)
-        b = tl.load(b_ptrs)
+        a = tl.load(a_ptrs, mask=a_mask)
+        b = tl.load(b_ptrs, mask=b_mask)
         accumulator += tl.dot(a, b)
         a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
@@ -326,7 +331,7 @@ def tune_gemm(SIZE_M, SIZE_N, SIZE_K, output_file):
         golden_diff = golden - golden_variant
         golden_abs_err = torch.max(torch.abs(golden_diff)).item()
         golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
-        # torch.set_printoptions(profile="full")
+        torch.set_printoptions(profile="full")
         # try:
         #     assert_close(c, golden, rtol=max(0.05, 1.5 * golden_rel_err), atol=max(0.05, 1.5 * golden_abs_err), check_dtype=False)
         # except AssertionError:

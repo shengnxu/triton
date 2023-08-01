@@ -1,3 +1,1 @@
-Best Result: 4608,1,320  best parameters: 64,32,32,10,16,8,2 --> 11720
-#Best Result: 4608,1,320  best parameters: 64,32,32,12,16,8,1 --> 15680
-#Best Result: 4608,1,320  best parameters: 64,32,64,5,32,4,2 --> 17200
+Best Result: 16,1408,4608  best parameters: 16,16,128,1,1,16,4,1 --> 17200

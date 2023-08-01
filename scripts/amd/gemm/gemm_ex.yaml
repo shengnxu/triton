@@ -4,8 +4,8 @@
 - {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 4,    'K': 4608, 'splitk': 128}
 - {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 8,    'K': 4608, 'splitk': 128}
 - {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 16,   'K': 4608, 'splitk': 64}
-- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1335, 'K': 4608, 'splitk': 16}
-- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1408, 'K': 4608, 'splitk': 16}
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1335, 'K': 4608, 'splitk': 16} # error
+- {'transA': 'N', 'transB': 'N', 'M': 16, 'N': 1408, 'K': 4608, 'splitk': 16} # error
 
 # M = 768
 - {'transA': 'N', 'transB': 'N', 'M': 768, 'N': 1,    'K': 4608, 'splitk': 32}

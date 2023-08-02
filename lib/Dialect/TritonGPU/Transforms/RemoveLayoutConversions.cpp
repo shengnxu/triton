@@ -42,7 +42,7 @@ struct PatternSharedInfo {
   // track of the conversions that were pushed forward and skip them in the
   // RematerializeBackward pattern. A similar kind of loop can occur with the
   // RematerializeForward and MoveConvertOutOfLoop patterns.
-  llvm::SetVector<Operation *> cvtsPushedForward;
+  llvm::DenseMap<Operation *, Operation *> cvtsPushedForwardMap;
 };
 
 // -----------------------------------------------------------------------------
@@ -256,7 +256,7 @@ void pushConversionForward(triton::gpu::ConvertLayoutOp cvt,
       newType.getShape(), newType.getElementType(), dstEncoding);
   auto newCvt = rewriter.create<triton::gpu::ConvertLayoutOp>(
       newOp->getLoc(), newCvtType, newOp->getResult(0));
-  sharedInfo.cvtsPushedForward.insert(newCvt);
+  sharedInfo.cvtsPushedForwardMap[newCvt] = newCvt->getOperand(0).getDefiningOp();
   rewriter.replaceOp(op, newCvt->getResults());
 }
 
@@ -447,9 +447,12 @@ public:
                   mlir::PatternRewriter &rewriter) const override {
     if (!llvm::isa<triton::gpu::ConvertLayoutOp>(cvt))
       return mlir::failure();
-    if (sharedInfo.cvtsPushedForward.count(cvt)) {
+
+    auto it = sharedInfo.cvtsPushedForwardMap.find(cvt);
+    if (it != sharedInfo.cvtsPushedForwardMap.end() &&
+        it->second == cvt->getOperand(0).getDefiningOp())
       return mlir::failure();
-    }
+
     // we don't touch block arguments
     Operation *op = cvt->getOperand(0).getDefiningOp();
     if (!op)
@@ -561,9 +564,9 @@ public:
       // check
       for (auto *op : cvts) {
         auto cvt = dyn_cast<triton::gpu::ConvertLayoutOp>(op);
-        if (sharedInfo.cvtsPushedForward.count(cvt)) {
+        auto it = sharedInfo.cvtsPushedForwardMap.find(cvt);
+        if (it != sharedInfo.cvtsPushedForwardMap.end())
           return mlir::failure();
-        }
         auto targetType = op->getResultTypes()[0].cast<RankedTensorType>();
         auto newFor = rematerializeForLoop(rewriter, forOp, iterArg.index(),
                                            targetType, cvt);

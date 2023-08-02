@@ -136,12 +136,26 @@ def get_variant_golden(a, b):
     c_padded = torch.matmul(a_padded, b_padded)
     return c_padded[:SIZE_M, :SIZE_N]
 
-def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type):
+def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
     print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type))
-    if ab_type == torch.int8:
+
+    if a_is_f8:
+        a_type = tl.float8e5
+        f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
+        # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
+        all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
+        f8_tensor[all_exp_ones] = 0
+        a_f8 = triton.reinterpret(f8_tensor, a_type)
+        a_f16 = triton.reiinterpret(f8_tensor, tl.float16)
+        b_f16 = torch.randn((SIZE_K, SIZE_N), device = 'cuda', dtype=torch.float16)
+
+        golden = torch.matmul(a_f16, b_f16)
+        c = matmul(a_f8, b_f16)
+    elif ab_type == torch.int8:
         a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float32).to(torch.int8)
         b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float32).to(torch.int8)
         golden = torch.matmul(a.to(torch.float64), b.to(torch.float64))
+        c = matmul(a, b, c_type)
     
         golden_abs_err = 0.5
         golden_rel_err = 0.0
@@ -149,14 +163,12 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type):
         a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=ab_type)
         b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=ab_type)
         golden = torch.matmul(a, b)
+        c = matmul(a, b, c_type)
     
         golden_variant = get_variant_golden(a, b)
         golden_diff = golden - golden_variant
         golden_abs_err = torch.max(torch.abs(golden_diff)).item()
         golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
-
-    # c = to.matmul(a, b, c_type)
-    c = matmul(a, b, c_type)
 
     torch.set_printoptions(profile="full")
     assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(1e-3, 10 * golden_rel_err), atol=max(1e-3, 10 * golden_abs_err), check_dtype=False)
@@ -183,7 +195,7 @@ def main():
     K = args.k
     try:
         # test_gemm(M, N, K, torch.int8, torch.int32)
-        test_gemm(M, N, K, torch.float16, torch.float32)
+        test_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = True)
     except:
         traceback.print_exc()
         print("FAILED!")

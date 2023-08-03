@@ -1250,7 +1250,7 @@ def dot(lhs: tl.tensor,
         out_dtype: tl.dtype,
         builder: ir.builder) -> tl.tensor:
     assert lhs.type.is_block() and rhs.type.is_block()
-    assert lhs.dtype == rhs.dtype, f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
+    assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
     assert len(lhs.shape) == 2, f"First input shape ({lhs.shape}) is not two dimensional!"
     assert len(rhs.shape) == 2, f"Second input shape ({rhs.shape}) is not two dimensional!"
     assert lhs.shape[1].value == rhs.shape[0].value, f"First input shape ({lhs.shape}) and second input shape {rhs.shape} are not compatible for matmul (second index of first shape ({lhs.shape[1].value}) must be equal to first index of second shape ({rhs.shape[0].value})"
@@ -1266,6 +1266,12 @@ def dot(lhs: tl.tensor,
     elif lhs.type.scalar.is_fp32() or lhs.type.scalar.is_bf16():
         _0 = builder.get_fp32(0)
         ret_scalar_ty = tl.float32
+    elif lhs.type.scalar.is_fp8():
+        lhs = cast(lhs, tl.float16, builder)
+        ret_scalar_ty = tl.float16
+    elif rhs.type.scalar.is_fp8():
+        rhs = cast(rhs, tl.float16, builder)
+        ret_scalar_ty = tl.float16
     else:
         _0 = builder.get_fp16(0) if out_dtype.is_fp16() else builder.get_fp32(0)
         ret_scalar_ty = out_dtype

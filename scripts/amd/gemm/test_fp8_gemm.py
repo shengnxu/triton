@@ -3,7 +3,9 @@ import torch
 from torch.testing import assert_close
 
 import triton
+import triton._C.libtriton.triton as _triton
 import triton.language as tl
+from triton.runtime.jit import JITFunction, TensorWrapper, reinterpret
 import triton.ops as to
 import traceback
 import argparse
@@ -90,14 +92,22 @@ def matmul_kernel(
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
 
-def matmul(a, b, c_type=torch.float32):
+def matmul(a, b, c_type=torch.float32, a_is_fp8 = False):
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
+
+    if a_is_fp8:
+        print("ConvertedTof8")
+        in_dtype = tl.float8e4
+        a_input = triton.reinterpret(a, in_dtype)
+    else:
+        a_input = a
+
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.empty((M, N), device=a.device, dtype=c_type)
     # 1D launch kernel where each block gets its own program.
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
@@ -108,17 +118,17 @@ def matmul(a, b, c_type=torch.float32):
     else:
         comp_type = tl.float32
 
+
     matmul_kernel[grid](
-        a, b, c,
+        a_input, b, c,
         M, N, K,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
-        comp_type,
+        compute_type = comp_type,
     )
 
     return c
-
 
 def get_variant_golden(a, b):
     SIZE_M = a.shape[0]
@@ -137,20 +147,26 @@ def get_variant_golden(a, b):
     return c_padded[:SIZE_M, :SIZE_N]
 
 def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
-    print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type))
+    print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}, a_is_f8: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8))
 
     if a_is_f8:
-        a_type = tl.float8e5
+        a_type = tl.float8e4
         f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
+        f8_tensor = f8_tensor.to(torch.int8)
         # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
         all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
         f8_tensor[all_exp_ones] = 0
-        a_f8 = triton.reinterpret(f8_tensor, a_type)
-        a_f16 = triton.reiinterpret(f8_tensor, tl.float16)
+        a_f16 = f8_tensor.to(torch.float16)
         b_f16 = torch.randn((SIZE_K, SIZE_N), device = 'cuda', dtype=torch.float16)
 
         golden = torch.matmul(a_f16, b_f16)
-        c = matmul(a_f8, b_f16)
+        c = matmul(f8_tensor, b_f16, c_type, True)
+
+        print(f'gold = {golden}')
+        print(f'c = {c}')
+
+        golden_abs_err = 0.5
+        golden_rel_err = 0.0
     elif ab_type == torch.int8:
         a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float32).to(torch.int8)
         b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float32).to(torch.int8)
@@ -180,9 +196,10 @@ def parse_arguments():
         allow_abbrev=False,
     )
 
-    parser.add_argument("-m", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("-n", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("-k", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("-m", type=int, required=True, default=argparse.SUPPRESS)
+    parser.add_argument("-n", type=int, required=True, default=argparse.SUPPRESS)
+    parser.add_argument("-k", type=int, required=True, default=argparse.SUPPRESS)
+    parser.add_argument("--fp8", action='store_true', default=False)
 
     args = parser.parse_args()
     return args
@@ -193,9 +210,12 @@ def main():
     M = args.m
     N = args.n
     K = args.k
+    a_is_fp8 = False
+    if args.fp8:
+        a_is_fp8 = True
+
     try:
-        # test_gemm(M, N, K, torch.int8, torch.int32)
-        test_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = True)
+        test_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = a_is_fp8)
     except:
         traceback.print_exc()
         print("FAILED!")

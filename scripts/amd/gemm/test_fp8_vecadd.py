@@ -42,8 +42,6 @@ def vecadd(a: torch.tensor, b: torch.tensor, a_is_fp8 = False):
     assert a.shape[0] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
-    M, K = a.shape
-    K, N = b.shape
 
     if a_is_fp8:
         print("ConvertedTof8")
@@ -78,6 +76,9 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
         a_f16 = f8_tensor.to(torch.float16)
         b_f16 = torch.randn((SIZE,), device = 'cuda', dtype=torch.float16)
 
+        print(f'a = {a_f16}')
+        print(f'b = {b_f16}')
+        print(f'f8_a = {f8_tensor}')
         golden = torch.add(a_f16, b_f16)
         c = vecadd(f8_tensor, b_f16, a_is_f8)
 
@@ -87,11 +88,10 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
     else:
         a = torch.randn((SIZE,), device='cuda', dtype=ab_type)
         b = torch.randn((SIZE,), device='cuda', dtype=ab_type)
-        golden = torch.matmul(a, b)
+        golden = torch.add(a, b)
         c = vecadd(a, b)
         print(f'gold = {golden}')
         print(f'c = {c}')
-
     
     golden_abs_err = 0.5
     golden_rel_err = 0.0

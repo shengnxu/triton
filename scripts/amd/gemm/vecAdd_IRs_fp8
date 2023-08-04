@@ -1,0 +1,2214 @@
+// -----// IR Dump After Canonicalizer (canonicalize) //----- //
+tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+  %c1024_i32 = arith.constant 1024 : i32
+  %0 = tt.get_program_id x : i32
+  %1 = arith.muli %0, %c1024_i32 : i32
+  %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32>
+  %3 = tt.splat %1 : (i32) -> tensor<1024xi32>
+  %4 = arith.addi %3, %2 : tensor<1024xi32>
+  %5 = tt.splat %arg3 : (i32) -> tensor<1024xi32>
+  %6 = arith.cmpi slt, %4, %5 : tensor<1024xi32>
+  %7 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>>
+  %8 = tt.addptr %7, %4 : tensor<1024x!tt.ptr<f8E4M3FN>>, tensor<1024xi32>
+  %9 = tt.load %8, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN>
+  %10 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>>
+  %11 = tt.addptr %10, %4 : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+  %12 = tt.load %11, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16>
+  %13 = tt.fp_to_fp %9 : tensor<1024xf8E4M3FN> -> tensor<1024xf16>
+  %14 = arith.addf %13, %12 : tensor<1024xf16>
+  %15 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>>
+  %16 = tt.addptr %15, %4 : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+  tt.store %16, %14, %6 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16>
+  tt.return
+}
+
+// -----// IR Dump After Inliner (inline) //----- //
+module {
+  tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %c1024_i32 = arith.constant 1024 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32>
+    %3 = tt.splat %1 : (i32) -> tensor<1024xi32>
+    %4 = arith.addi %3, %2 : tensor<1024xi32>
+    %5 = tt.splat %arg3 : (i32) -> tensor<1024xi32>
+    %6 = arith.cmpi slt, %4, %5 : tensor<1024xi32>
+    %7 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>>
+    %8 = tt.addptr %7, %4 : tensor<1024x!tt.ptr<f8E4M3FN>>, tensor<1024xi32>
+    %9 = tt.load %8, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN>
+    %10 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>>
+    %11 = tt.addptr %10, %4 : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+    %12 = tt.load %11, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16>
+    %13 = tt.fp_to_fp %9 : tensor<1024xf8E4M3FN> -> tensor<1024xf16>
+    %14 = arith.addf %13, %12 : tensor<1024xf16>
+    %15 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>>
+    %16 = tt.addptr %15, %4 : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+    tt.store %16, %14, %6 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16>
+    tt.return
+  }
+}
+
+
+// -----// IR Dump After ConvertTritonToTritonGPU (convert-triton-to-tritongpu) //----- //
+#blocked = #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [64], warpsPerCTA = [4], order = [0]}>
+module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %c1024_i32 = arith.constant 1024 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %3 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %4 = arith.addi %3, %2 : tensor<1024xi32, #blocked>
+    %5 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %6 = "triton_gpu.cmpi"(%4, %5) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %7 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>
+    %8 = tt.addptr %7, %4 : tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>, tensor<1024xi32, #blocked>
+    %9 = tt.load %8, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN, #blocked>
+    %10 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %11 = tt.addptr %10, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    %12 = tt.load %11, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16, #blocked>
+    %13 = tt.fp_to_fp %9 : tensor<1024xf8E4M3FN, #blocked> -> tensor<1024xf16, #blocked>
+    %14 = arith.addf %13, %12 : tensor<1024xf16, #blocked>
+    %15 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %16 = tt.addptr %15, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    tt.store %16, %14, %6 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16, #blocked>
+    tt.return
+  }
+}
+
+
+// -----// IR Dump After TritonGPUCoalesce (tritongpu-coalesce) //----- //
+#blocked = #triton_gpu.blocked<{sizePerThread = [1], threadsPerWarp = [64], warpsPerCTA = [4], order = [0]}>
+#blocked1 = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [64], warpsPerCTA = [4], order = [0]}>
+module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %c1024_i32 = arith.constant 1024 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %3 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %4 = arith.addi %3, %2 : tensor<1024xi32, #blocked>
+    %5 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %6 = "triton_gpu.cmpi"(%4, %5) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %7 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>
+    %8 = tt.addptr %7, %4 : tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>, tensor<1024xi32, #blocked>
+    %9 = triton_gpu.convert_layout %8 : (tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>) -> tensor<1024x!tt.ptr<f8E4M3FN>, #blocked1>
+    %10 = triton_gpu.convert_layout %6 : (tensor<1024xi1, #blocked>) -> tensor<1024xi1, #blocked1>
+    %11 = tt.load %9, %10 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN, #blocked1>
+    %12 = triton_gpu.convert_layout %11 : (tensor<1024xf8E4M3FN, #blocked1>) -> tensor<1024xf8E4M3FN, #blocked>
+    %13 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %14 = tt.addptr %13, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    %15 = triton_gpu.convert_layout %14 : (tensor<1024x!tt.ptr<f16>, #blocked>) -> tensor<1024x!tt.ptr<f16>, #blocked1>
+    %16 = triton_gpu.convert_layout %6 : (tensor<1024xi1, #blocked>) -> tensor<1024xi1, #blocked1>
+    %17 = tt.load %15, %16 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16, #blocked1>
+    %18 = triton_gpu.convert_layout %17 : (tensor<1024xf16, #blocked1>) -> tensor<1024xf16, #blocked>
+    %19 = tt.fp_to_fp %12 : tensor<1024xf8E4M3FN, #blocked> -> tensor<1024xf16, #blocked>
+    %20 = arith.addf %19, %18 : tensor<1024xf16, #blocked>
+    %21 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %22 = tt.addptr %21, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    %23 = triton_gpu.convert_layout %22 : (tensor<1024x!tt.ptr<f16>, #blocked>) -> tensor<1024x!tt.ptr<f16>, #blocked1>
+    %24 = triton_gpu.convert_layout %20 : (tensor<1024xf16, #blocked>) -> tensor<1024xf16, #blocked1>
+    %25 = triton_gpu.convert_layout %6 : (tensor<1024xi1, #blocked>) -> tensor<1024xi1, #blocked1>
+    tt.store %23, %24, %25 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16, #blocked1>
+    tt.return
+  }
+}
+
+
+// -----// IR Dump After TritonGPURemoveLayoutConversions (tritongpu-remove-layout-conversions) //----- //
+#blocked = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [64], warpsPerCTA = [4], order = [0]}>
+module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %c1024_i32 = arith.constant 1024 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %3 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %4 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %5 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %6 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %7 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %8 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %9 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %10 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %11 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %12 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %13 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %14 = arith.addi %8, %2 : tensor<1024xi32, #blocked>
+    %15 = arith.addi %9, %3 : tensor<1024xi32, #blocked>
+    %16 = arith.addi %10, %4 : tensor<1024xi32, #blocked>
+    %17 = arith.addi %11, %5 : tensor<1024xi32, #blocked>
+    %18 = arith.addi %12, %6 : tensor<1024xi32, #blocked>
+    %19 = arith.addi %13, %7 : tensor<1024xi32, #blocked>
+    %20 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %21 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %22 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %23 = "triton_gpu.cmpi"(%15, %20) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %24 = "triton_gpu.cmpi"(%17, %21) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %25 = "triton_gpu.cmpi"(%19, %22) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %26 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>
+    %27 = tt.addptr %26, %14 : tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>, tensor<1024xi32, #blocked>
+    %28 = tt.load %27, %23 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN, #blocked>
+    %29 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %30 = tt.addptr %29, %16 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    %31 = tt.load %30, %24 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16, #blocked>
+    %32 = tt.fp_to_fp %28 : tensor<1024xf8E4M3FN, #blocked> -> tensor<1024xf16, #blocked>
+    %33 = arith.addf %32, %31 : tensor<1024xf16, #blocked>
+    %34 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %35 = tt.addptr %34, %18 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    tt.store %35, %33, %25 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16, #blocked>
+    tt.return
+  }
+}
+
+
+// -----// IR Dump After CSE (cse) //----- //
+#blocked = #triton_gpu.blocked<{sizePerThread = [4], threadsPerWarp = [64], warpsPerCTA = [4], order = [0]}>
+module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  tt.func public @add_kernel_0d1d2d3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+    %c1024_i32 = arith.constant 1024 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32, #blocked>
+    %3 = tt.splat %1 : (i32) -> tensor<1024xi32, #blocked>
+    %4 = arith.addi %3, %2 : tensor<1024xi32, #blocked>
+    %5 = tt.splat %arg3 : (i32) -> tensor<1024xi32, #blocked>
+    %6 = "triton_gpu.cmpi"(%4, %5) <{predicate = 2 : i64}> : (tensor<1024xi32, #blocked>, tensor<1024xi32, #blocked>) -> tensor<1024xi1, #blocked>
+    %7 = tt.splat %arg0 : (!tt.ptr<f8E4M3FN>) -> tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>
+    %8 = tt.addptr %7, %4 : tensor<1024x!tt.ptr<f8E4M3FN>, #blocked>, tensor<1024xi32, #blocked>
+    %9 = tt.load %8, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf8E4M3FN, #blocked>
+    %10 = tt.splat %arg1 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %11 = tt.addptr %10, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    %12 = tt.load %11, %6 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<1024xf16, #blocked>
+    %13 = tt.fp_to_fp %9 : tensor<1024xf8E4M3FN, #blocked> -> tensor<1024xf16, #blocked>
+    %14 = arith.addf %13, %12 : tensor<1024xf16, #blocked>
+    %15 = tt.splat %arg2 : (!tt.ptr<f16>) -> tensor<1024x!tt.ptr<f16>, #blocked>
+    %16 = tt.addptr %15, %4 : tensor<1024x!tt.ptr<f16>, #blocked>, tensor<1024xi32, #blocked>
+    tt.store %16, %14, %6 {cache = 1 : i32, evict = 1 : i32} : tensor<1024xf16, #blocked>
+    tt.return
+  }
+}
+
+
+// -----// IR Dump After ConvertTritonGPUToLLVM (convert-triton-gpu-to-llvm) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = rocdl.workitem.id.x : i32
+    %1 = llvm.trunc %0 : i32 to i32
+    %2 = llvm.mlir.constant(64 : i32) : i32
+    %3 = llvm.urem %1, %2  : i32
+    %4 = llvm.udiv %1, %2  : i32
+    %5 = llvm.mlir.constant(4 : i32) : i32
+    %6 = llvm.urem %4, %5  : i32
+    %7 = llvm.mlir.constant(256 : i32) : i32
+    %8 = llvm.urem %3, %7  : i32
+    %9 = llvm.mlir.constant(64 : i32) : i32
+    %10 = llvm.mlir.constant(4 : i32) : i32
+    %11 = llvm.mul %6, %9  : i32
+    %12 = llvm.add %8, %11  : i32
+    %13 = llvm.mul %10, %12  : i32
+    %14 = llvm.mlir.constant(0 : i32) : i32
+    %15 = llvm.add %13, %14  : i32
+    %16 = llvm.mlir.constant(1 : i32) : i32
+    %17 = llvm.add %13, %16  : i32
+    %18 = llvm.mlir.constant(2 : i32) : i32
+    %19 = llvm.add %13, %18  : i32
+    %20 = llvm.mlir.constant(3 : i32) : i32
+    %21 = llvm.add %13, %20  : i32
+    %22 = llvm.mlir.addressof @global_smem : !llvm.ptr<array<0 x i8>, 3>
+    %23 = llvm.bitcast %22 : !llvm.ptr<array<0 x i8>, 3> to !llvm.ptr<i8, 3>
+    %24 = builtin.unrealized_conversion_cast %arg2 : !llvm.ptr<f16, 1> to !tt.ptr<f16>
+    %25 = builtin.unrealized_conversion_cast %arg1 : !llvm.ptr<f16, 1> to !tt.ptr<f16>
+    %26 = builtin.unrealized_conversion_cast %arg0 : !llvm.ptr<i8, 1> to !tt.ptr<f8E4M3FN>
+    %c1024_i32 = arith.constant 1024 : i32
+    %27 = rocdl.workgroup.id.x : i32
+    %28 = llvm.trunc %27 : i32 to i32
+    %29 = llvm.mul %28, %c1024_i32  : i32
+    %30 = llvm.mlir.constant(0 : index) : i32
+    %31 = llvm.add %15, %30  : i32
+    %32 = llvm.add %17, %30  : i32
+    %33 = llvm.add %19, %30  : i32
+    %34 = llvm.add %21, %30  : i32
+    %35 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %36 = llvm.insertvalue %31, %35[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %37 = llvm.insertvalue %32, %36[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %38 = llvm.insertvalue %33, %37[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %39 = llvm.insertvalue %34, %38[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %40 = llvm.bitcast %29 : i32 to i32
+    %41 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %42 = llvm.insertvalue %40, %41[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %43 = llvm.insertvalue %40, %42[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %44 = llvm.insertvalue %40, %43[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %45 = llvm.insertvalue %40, %44[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %46 = llvm.extractvalue %45[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %47 = llvm.extractvalue %45[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %48 = llvm.extractvalue %45[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %49 = llvm.extractvalue %45[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %50 = llvm.extractvalue %39[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %51 = llvm.extractvalue %39[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %52 = llvm.extractvalue %39[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %53 = llvm.extractvalue %39[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %54 = llvm.add %46, %50  : i32
+    %55 = llvm.add %47, %51  : i32
+    %56 = llvm.add %48, %52  : i32
+    %57 = llvm.add %49, %53  : i32
+    %58 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %59 = llvm.insertvalue %54, %58[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %60 = llvm.insertvalue %55, %59[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %61 = llvm.insertvalue %56, %60[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %62 = llvm.insertvalue %57, %61[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %63 = llvm.bitcast %arg3 : i32 to i32
+    %64 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %65 = llvm.insertvalue %63, %64[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %66 = llvm.insertvalue %63, %65[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %67 = llvm.insertvalue %63, %66[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %68 = llvm.insertvalue %63, %67[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %69 = llvm.extractvalue %62[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %70 = llvm.extractvalue %62[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %71 = llvm.extractvalue %62[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %72 = llvm.extractvalue %62[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %73 = llvm.extractvalue %68[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %74 = llvm.extractvalue %68[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %75 = llvm.extractvalue %68[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %76 = llvm.extractvalue %68[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %77 = llvm.icmp "slt" %69, %73 : i32
+    %78 = llvm.icmp "slt" %70, %74 : i32
+    %79 = llvm.icmp "slt" %71, %75 : i32
+    %80 = llvm.icmp "slt" %72, %76 : i32
+    %81 = llvm.mlir.undef : !llvm.struct<(i1, i1, i1, i1)>
+    %82 = llvm.insertvalue %77, %81[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %83 = llvm.insertvalue %78, %82[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %84 = llvm.insertvalue %79, %83[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %85 = llvm.insertvalue %80, %84[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %86 = llvm.bitcast %arg0 : !llvm.ptr<i8, 1> to !llvm.ptr<i8, 1>
+    %87 = llvm.mlir.undef : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)>
+    %88 = llvm.insertvalue %86, %87[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %89 = llvm.insertvalue %86, %88[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %90 = llvm.insertvalue %86, %89[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %91 = llvm.insertvalue %86, %90[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %92 = llvm.extractvalue %91[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %93 = llvm.extractvalue %91[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %94 = llvm.extractvalue %91[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %95 = llvm.extractvalue %91[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %96 = llvm.extractvalue %62[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %97 = llvm.extractvalue %62[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %98 = llvm.extractvalue %62[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %99 = llvm.extractvalue %62[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %100 = llvm.getelementptr %92[%96] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %101 = llvm.getelementptr %93[%97] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %102 = llvm.getelementptr %94[%98] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %103 = llvm.getelementptr %95[%99] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %104 = llvm.mlir.undef : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)>
+    %105 = llvm.insertvalue %100, %104[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %106 = llvm.insertvalue %101, %105[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %107 = llvm.insertvalue %102, %106[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %108 = llvm.insertvalue %103, %107[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %109 = llvm.extractvalue %108[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %110 = llvm.extractvalue %108[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %111 = llvm.extractvalue %108[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %112 = llvm.extractvalue %108[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %113 = llvm.extractvalue %85[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %114 = llvm.extractvalue %85[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %115 = llvm.extractvalue %85[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %116 = llvm.extractvalue %85[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %117 = llvm.addrspacecast %109 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    %118 = scf.if %113 -> (i32) {
+      %316 = llvm.load %117 : !llvm.ptr<i32>
+      scf.yield %316 : i32
+    } else {
+      %316 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %316 : i32
+    }
+    %119 = llvm.bitcast %118 : i32 to vector<4xi8>
+    %120 = llvm.mlir.constant(0 : index) : i32
+    %121 = llvm.extractelement %119[%120 : i32] : vector<4xi8>
+    %122 = llvm.mlir.constant(1 : index) : i32
+    %123 = llvm.extractelement %119[%122 : i32] : vector<4xi8>
+    %124 = llvm.mlir.constant(2 : index) : i32
+    %125 = llvm.extractelement %119[%124 : i32] : vector<4xi8>
+    %126 = llvm.mlir.constant(3 : index) : i32
+    %127 = llvm.extractelement %119[%126 : i32] : vector<4xi8>
+    %128 = llvm.mlir.undef : !llvm.struct<(i8, i8, i8, i8)>
+    %129 = llvm.insertvalue %121, %128[0] : !llvm.struct<(i8, i8, i8, i8)> 
+    %130 = llvm.insertvalue %123, %129[1] : !llvm.struct<(i8, i8, i8, i8)> 
+    %131 = llvm.insertvalue %125, %130[2] : !llvm.struct<(i8, i8, i8, i8)> 
+    %132 = llvm.insertvalue %127, %131[3] : !llvm.struct<(i8, i8, i8, i8)> 
+    %133 = llvm.bitcast %arg1 : !llvm.ptr<f16, 1> to !llvm.ptr<f16, 1>
+    %134 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %135 = llvm.insertvalue %133, %134[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %136 = llvm.insertvalue %133, %135[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %137 = llvm.insertvalue %133, %136[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %138 = llvm.insertvalue %133, %137[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %139 = llvm.extractvalue %138[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %140 = llvm.extractvalue %138[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %141 = llvm.extractvalue %138[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %142 = llvm.extractvalue %138[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %143 = llvm.extractvalue %62[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %144 = llvm.extractvalue %62[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %145 = llvm.extractvalue %62[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %146 = llvm.extractvalue %62[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %147 = llvm.getelementptr %139[%143] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %148 = llvm.getelementptr %140[%144] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %149 = llvm.getelementptr %141[%145] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %150 = llvm.getelementptr %142[%146] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %151 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %152 = llvm.insertvalue %147, %151[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %153 = llvm.insertvalue %148, %152[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %154 = llvm.insertvalue %149, %153[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %155 = llvm.insertvalue %150, %154[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %156 = llvm.extractvalue %155[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %157 = llvm.extractvalue %155[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %158 = llvm.extractvalue %155[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %159 = llvm.extractvalue %155[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %160 = llvm.extractvalue %85[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %161 = llvm.extractvalue %85[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %162 = llvm.extractvalue %85[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %163 = llvm.extractvalue %85[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %164 = llvm.addrspacecast %156 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %165 = scf.if %160 -> (i32) {
+      %316 = llvm.load %164 : !llvm.ptr<i32>
+      scf.yield %316 : i32
+    } else {
+      %316 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %316 : i32
+    }
+    %166 = llvm.bitcast %165 : i32 to vector<2xf16>
+    %167 = llvm.mlir.constant(0 : index) : i32
+    %168 = llvm.extractelement %166[%167 : i32] : vector<2xf16>
+    %169 = llvm.mlir.constant(1 : index) : i32
+    %170 = llvm.extractelement %166[%169 : i32] : vector<2xf16>
+    %171 = llvm.addrspacecast %158 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %172 = scf.if %160 -> (i32) {
+      %316 = llvm.load %171 : !llvm.ptr<i32>
+      scf.yield %316 : i32
+    } else {
+      %316 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %316 : i32
+    }
+    %173 = llvm.bitcast %172 : i32 to vector<2xf16>
+    %174 = llvm.mlir.constant(0 : index) : i32
+    %175 = llvm.extractelement %173[%174 : i32] : vector<2xf16>
+    %176 = llvm.mlir.constant(1 : index) : i32
+    %177 = llvm.extractelement %173[%176 : i32] : vector<2xf16>
+    %178 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %179 = llvm.insertvalue %168, %178[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %180 = llvm.insertvalue %170, %179[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %181 = llvm.insertvalue %175, %180[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %182 = llvm.insertvalue %177, %181[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %183 = llvm.extractvalue %132[0] : !llvm.struct<(i8, i8, i8, i8)> 
+    %184 = llvm.extractvalue %132[1] : !llvm.struct<(i8, i8, i8, i8)> 
+    %185 = llvm.extractvalue %132[2] : !llvm.struct<(i8, i8, i8, i8)> 
+    %186 = llvm.extractvalue %132[3] : !llvm.struct<(i8, i8, i8, i8)> 
+    %187 = llvm.mlir.undef : vector<4xi8>
+    %188 = llvm.mlir.constant(0 : i32) : i32
+    %189 = llvm.mlir.constant(0 : i8) : i8
+    %190 = llvm.insertelement %189, %187[%188 : i32] : vector<4xi8>
+    %191 = llvm.mlir.constant(1 : i32) : i32
+    %192 = llvm.insertelement %183, %190[%191 : i32] : vector<4xi8>
+    %193 = llvm.mlir.constant(2 : i32) : i32
+    %194 = llvm.mlir.constant(0 : i8) : i8
+    %195 = llvm.insertelement %194, %192[%193 : i32] : vector<4xi8>
+    %196 = llvm.mlir.constant(3 : i32) : i32
+    %197 = llvm.insertelement %184, %195[%196 : i32] : vector<4xi8>
+    %198 = llvm.bitcast %197 : vector<4xi8> to i32
+    %199 = llvm.mlir.undef : vector<4xi8>
+    %200 = llvm.mlir.constant(0 : i32) : i32
+    %201 = llvm.mlir.constant(0 : i8) : i8
+    %202 = llvm.insertelement %201, %199[%200 : i32] : vector<4xi8>
+    %203 = llvm.mlir.constant(1 : i32) : i32
+    %204 = llvm.insertelement %185, %202[%203 : i32] : vector<4xi8>
+    %205 = llvm.mlir.constant(2 : i32) : i32
+    %206 = llvm.mlir.constant(0 : i8) : i8
+    %207 = llvm.insertelement %206, %204[%205 : i32] : vector<4xi8>
+    %208 = llvm.mlir.constant(3 : i32) : i32
+    %209 = llvm.insertelement %186, %207[%208 : i32] : vector<4xi8>
+    %210 = llvm.bitcast %209 : vector<4xi8> to i32
+    %211 = llvm.mlir.constant(2147450879 : i32) : i32
+    %212 = llvm.and %198, %211  : i32
+    %213 = llvm.mlir.constant(2147450879 : i32) : i32
+    %214 = llvm.and %210, %213  : i32
+    %215 = llvm.mlir.constant(1 : i32) : i32
+    %216 = llvm.lshr %212, %215  : i32
+    %217 = llvm.mlir.constant(1 : i32) : i32
+    %218 = llvm.lshr %214, %217  : i32
+    %219 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %220 = llvm.and %198, %219  : i32
+    %221 = llvm.or %216, %220  : i32
+    %222 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %223 = llvm.and %210, %222  : i32
+    %224 = llvm.or %218, %223  : i32
+    %225 = llvm.bitcast %221 : i32 to vector<2xf16>
+    %226 = llvm.bitcast %224 : i32 to vector<2xf16>
+    %227 = llvm.mlir.constant(0 : i32) : i32
+    %228 = llvm.extractelement %225[%227 : i32] : vector<2xf16>
+    %229 = llvm.mlir.constant(1 : i32) : i32
+    %230 = llvm.extractelement %225[%229 : i32] : vector<2xf16>
+    %231 = llvm.mlir.constant(0 : i32) : i32
+    %232 = llvm.extractelement %226[%231 : i32] : vector<2xf16>
+    %233 = llvm.mlir.constant(1 : i32) : i32
+    %234 = llvm.extractelement %226[%233 : i32] : vector<2xf16>
+    %235 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %236 = llvm.insertvalue %228, %235[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %237 = llvm.insertvalue %230, %236[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %238 = llvm.insertvalue %232, %237[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %239 = llvm.insertvalue %234, %238[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %240 = llvm.extractvalue %239[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %241 = llvm.extractvalue %239[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %242 = llvm.extractvalue %239[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %243 = llvm.extractvalue %239[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %244 = llvm.extractvalue %182[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %245 = llvm.extractvalue %182[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %246 = llvm.extractvalue %182[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %247 = llvm.extractvalue %182[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %248 = llvm.fadd %240, %244  : f16
+    %249 = llvm.fadd %241, %245  : f16
+    %250 = llvm.fadd %242, %246  : f16
+    %251 = llvm.fadd %243, %247  : f16
+    %252 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %253 = llvm.insertvalue %248, %252[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %254 = llvm.insertvalue %249, %253[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %255 = llvm.insertvalue %250, %254[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %256 = llvm.insertvalue %251, %255[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %257 = llvm.bitcast %arg2 : !llvm.ptr<f16, 1> to !llvm.ptr<f16, 1>
+    %258 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %259 = llvm.insertvalue %257, %258[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %260 = llvm.insertvalue %257, %259[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %261 = llvm.insertvalue %257, %260[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %262 = llvm.insertvalue %257, %261[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %263 = llvm.extractvalue %262[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %264 = llvm.extractvalue %262[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %265 = llvm.extractvalue %262[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %266 = llvm.extractvalue %262[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %267 = llvm.extractvalue %62[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %268 = llvm.extractvalue %62[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %269 = llvm.extractvalue %62[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %270 = llvm.extractvalue %62[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %271 = llvm.getelementptr %263[%267] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %272 = llvm.getelementptr %264[%268] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %273 = llvm.getelementptr %265[%269] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %274 = llvm.getelementptr %266[%270] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %275 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %276 = llvm.insertvalue %271, %275[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %277 = llvm.insertvalue %272, %276[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %278 = llvm.insertvalue %273, %277[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %279 = llvm.insertvalue %274, %278[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %280 = llvm.extractvalue %279[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %281 = llvm.extractvalue %279[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %282 = llvm.extractvalue %279[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %283 = llvm.extractvalue %279[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %284 = llvm.extractvalue %256[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %285 = llvm.extractvalue %256[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %286 = llvm.extractvalue %256[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %287 = llvm.extractvalue %256[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %288 = llvm.extractvalue %85[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %289 = llvm.extractvalue %85[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %290 = llvm.extractvalue %85[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %291 = llvm.extractvalue %85[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %292 = llvm.mlir.constant(true) : i1
+    %293 = rocdl.workitem.id.x : i32
+    %294 = llvm.trunc %293 : i32 to i32
+    %295 = llvm.mlir.constant(64 : i32) : i32
+    %296 = llvm.urem %294, %295  : i32
+    %297 = llvm.udiv %294, %295  : i32
+    %298 = llvm.mlir.undef : vector<2xf16>
+    %299 = llvm.bitcast %284 : f16 to f16
+    %300 = llvm.mlir.constant(0 : i32) : i32
+    %301 = llvm.insertelement %299, %298[%300 : i32] : vector<2xf16>
+    %302 = llvm.bitcast %285 : f16 to f16
+    %303 = llvm.mlir.constant(1 : i32) : i32
+    %304 = llvm.insertelement %302, %301[%303 : i32] : vector<2xf16>
+    %305 = llvm.bitcast %304 : vector<2xf16> to i32
+    %306 = llvm.and %292, %288  : i1
+    scf.if %306 {
+      llvm.store %305, %280 : !llvm.ptr<f16, 1>
+    }
+    %307 = llvm.mlir.undef : vector<2xf16>
+    %308 = llvm.bitcast %286 : f16 to f16
+    %309 = llvm.mlir.constant(0 : i32) : i32
+    %310 = llvm.insertelement %308, %307[%309 : i32] : vector<2xf16>
+    %311 = llvm.bitcast %287 : f16 to f16
+    %312 = llvm.mlir.constant(1 : i32) : i32
+    %313 = llvm.insertelement %311, %310[%312 : i32] : vector<2xf16>
+    %314 = llvm.bitcast %313 : vector<2xf16> to i32
+    %315 = llvm.and %292, %288  : i1
+    scf.if %315 {
+      llvm.store %314, %282 : !llvm.ptr<f16, 1>
+    }
+    llvm.return
+  }
+}
+
+
+// -----// IR Dump After ArithToLLVMConversionPass (convert-arith-to-llvm) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = rocdl.workitem.id.x : i32
+    %1 = llvm.trunc %0 : i32 to i32
+    %2 = llvm.mlir.constant(64 : i32) : i32
+    %3 = llvm.urem %1, %2  : i32
+    %4 = llvm.udiv %1, %2  : i32
+    %5 = llvm.mlir.constant(4 : i32) : i32
+    %6 = llvm.urem %4, %5  : i32
+    %7 = llvm.mlir.constant(256 : i32) : i32
+    %8 = llvm.urem %3, %7  : i32
+    %9 = llvm.mlir.constant(64 : i32) : i32
+    %10 = llvm.mlir.constant(4 : i32) : i32
+    %11 = llvm.mul %6, %9  : i32
+    %12 = llvm.add %8, %11  : i32
+    %13 = llvm.mul %10, %12  : i32
+    %14 = llvm.mlir.constant(0 : i32) : i32
+    %15 = llvm.add %13, %14  : i32
+    %16 = llvm.mlir.constant(1 : i32) : i32
+    %17 = llvm.add %13, %16  : i32
+    %18 = llvm.mlir.constant(2 : i32) : i32
+    %19 = llvm.add %13, %18  : i32
+    %20 = llvm.mlir.constant(3 : i32) : i32
+    %21 = llvm.add %13, %20  : i32
+    %22 = llvm.mlir.addressof @global_smem : !llvm.ptr<array<0 x i8>, 3>
+    %23 = llvm.bitcast %22 : !llvm.ptr<array<0 x i8>, 3> to !llvm.ptr<i8, 3>
+    %24 = builtin.unrealized_conversion_cast %arg2 : !llvm.ptr<f16, 1> to !tt.ptr<f16>
+    %25 = builtin.unrealized_conversion_cast %arg1 : !llvm.ptr<f16, 1> to !tt.ptr<f16>
+    %26 = builtin.unrealized_conversion_cast %arg0 : !llvm.ptr<i8, 1> to !tt.ptr<f8E4M3FN>
+    %27 = llvm.mlir.constant(1024 : i32) : i32
+    %28 = rocdl.workgroup.id.x : i32
+    %29 = llvm.trunc %28 : i32 to i32
+    %30 = llvm.mul %29, %27  : i32
+    %31 = llvm.mlir.constant(0 : index) : i32
+    %32 = llvm.add %15, %31  : i32
+    %33 = llvm.add %17, %31  : i32
+    %34 = llvm.add %19, %31  : i32
+    %35 = llvm.add %21, %31  : i32
+    %36 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %37 = llvm.insertvalue %32, %36[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %38 = llvm.insertvalue %33, %37[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %39 = llvm.insertvalue %34, %38[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %40 = llvm.insertvalue %35, %39[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %41 = llvm.bitcast %30 : i32 to i32
+    %42 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %43 = llvm.insertvalue %41, %42[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %44 = llvm.insertvalue %41, %43[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %45 = llvm.insertvalue %41, %44[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %46 = llvm.insertvalue %41, %45[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %47 = llvm.extractvalue %46[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %48 = llvm.extractvalue %46[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %49 = llvm.extractvalue %46[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %50 = llvm.extractvalue %46[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %51 = llvm.extractvalue %40[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %52 = llvm.extractvalue %40[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %53 = llvm.extractvalue %40[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %54 = llvm.extractvalue %40[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %55 = llvm.add %47, %51  : i32
+    %56 = llvm.add %48, %52  : i32
+    %57 = llvm.add %49, %53  : i32
+    %58 = llvm.add %50, %54  : i32
+    %59 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %60 = llvm.insertvalue %55, %59[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %61 = llvm.insertvalue %56, %60[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %62 = llvm.insertvalue %57, %61[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %63 = llvm.insertvalue %58, %62[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %64 = llvm.bitcast %arg3 : i32 to i32
+    %65 = llvm.mlir.undef : !llvm.struct<(i32, i32, i32, i32)>
+    %66 = llvm.insertvalue %64, %65[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %67 = llvm.insertvalue %64, %66[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %68 = llvm.insertvalue %64, %67[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %69 = llvm.insertvalue %64, %68[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %70 = llvm.extractvalue %63[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %71 = llvm.extractvalue %63[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %72 = llvm.extractvalue %63[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %73 = llvm.extractvalue %63[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %74 = llvm.extractvalue %69[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %75 = llvm.extractvalue %69[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %76 = llvm.extractvalue %69[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %77 = llvm.extractvalue %69[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %78 = llvm.icmp "slt" %70, %74 : i32
+    %79 = llvm.icmp "slt" %71, %75 : i32
+    %80 = llvm.icmp "slt" %72, %76 : i32
+    %81 = llvm.icmp "slt" %73, %77 : i32
+    %82 = llvm.mlir.undef : !llvm.struct<(i1, i1, i1, i1)>
+    %83 = llvm.insertvalue %78, %82[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %84 = llvm.insertvalue %79, %83[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %85 = llvm.insertvalue %80, %84[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %86 = llvm.insertvalue %81, %85[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %87 = llvm.bitcast %arg0 : !llvm.ptr<i8, 1> to !llvm.ptr<i8, 1>
+    %88 = llvm.mlir.undef : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)>
+    %89 = llvm.insertvalue %87, %88[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %90 = llvm.insertvalue %87, %89[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %91 = llvm.insertvalue %87, %90[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %92 = llvm.insertvalue %87, %91[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %93 = llvm.extractvalue %92[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %94 = llvm.extractvalue %92[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %95 = llvm.extractvalue %92[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %96 = llvm.extractvalue %92[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %97 = llvm.extractvalue %63[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %98 = llvm.extractvalue %63[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %99 = llvm.extractvalue %63[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %100 = llvm.extractvalue %63[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %101 = llvm.getelementptr %93[%97] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %102 = llvm.getelementptr %94[%98] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %103 = llvm.getelementptr %95[%99] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %104 = llvm.getelementptr %96[%100] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %105 = llvm.mlir.undef : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)>
+    %106 = llvm.insertvalue %101, %105[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %107 = llvm.insertvalue %102, %106[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %108 = llvm.insertvalue %103, %107[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %109 = llvm.insertvalue %104, %108[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %110 = llvm.extractvalue %109[0] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %111 = llvm.extractvalue %109[1] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %112 = llvm.extractvalue %109[2] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %113 = llvm.extractvalue %109[3] : !llvm.struct<(ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>, ptr<i8, 1>)> 
+    %114 = llvm.extractvalue %86[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %115 = llvm.extractvalue %86[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %116 = llvm.extractvalue %86[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %117 = llvm.extractvalue %86[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %118 = llvm.addrspacecast %110 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    %119 = scf.if %114 -> (i32) {
+      %317 = llvm.load %118 : !llvm.ptr<i32>
+      scf.yield %317 : i32
+    } else {
+      %317 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %317 : i32
+    }
+    %120 = llvm.bitcast %119 : i32 to vector<4xi8>
+    %121 = llvm.mlir.constant(0 : index) : i32
+    %122 = llvm.extractelement %120[%121 : i32] : vector<4xi8>
+    %123 = llvm.mlir.constant(1 : index) : i32
+    %124 = llvm.extractelement %120[%123 : i32] : vector<4xi8>
+    %125 = llvm.mlir.constant(2 : index) : i32
+    %126 = llvm.extractelement %120[%125 : i32] : vector<4xi8>
+    %127 = llvm.mlir.constant(3 : index) : i32
+    %128 = llvm.extractelement %120[%127 : i32] : vector<4xi8>
+    %129 = llvm.mlir.undef : !llvm.struct<(i8, i8, i8, i8)>
+    %130 = llvm.insertvalue %122, %129[0] : !llvm.struct<(i8, i8, i8, i8)> 
+    %131 = llvm.insertvalue %124, %130[1] : !llvm.struct<(i8, i8, i8, i8)> 
+    %132 = llvm.insertvalue %126, %131[2] : !llvm.struct<(i8, i8, i8, i8)> 
+    %133 = llvm.insertvalue %128, %132[3] : !llvm.struct<(i8, i8, i8, i8)> 
+    %134 = llvm.bitcast %arg1 : !llvm.ptr<f16, 1> to !llvm.ptr<f16, 1>
+    %135 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %136 = llvm.insertvalue %134, %135[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %137 = llvm.insertvalue %134, %136[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %138 = llvm.insertvalue %134, %137[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %139 = llvm.insertvalue %134, %138[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %140 = llvm.extractvalue %139[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %141 = llvm.extractvalue %139[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %142 = llvm.extractvalue %139[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %143 = llvm.extractvalue %139[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %144 = llvm.extractvalue %63[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %145 = llvm.extractvalue %63[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %146 = llvm.extractvalue %63[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %147 = llvm.extractvalue %63[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %148 = llvm.getelementptr %140[%144] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %149 = llvm.getelementptr %141[%145] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %150 = llvm.getelementptr %142[%146] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %151 = llvm.getelementptr %143[%147] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %152 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %153 = llvm.insertvalue %148, %152[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %154 = llvm.insertvalue %149, %153[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %155 = llvm.insertvalue %150, %154[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %156 = llvm.insertvalue %151, %155[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %157 = llvm.extractvalue %156[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %158 = llvm.extractvalue %156[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %159 = llvm.extractvalue %156[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %160 = llvm.extractvalue %156[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %161 = llvm.extractvalue %86[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %162 = llvm.extractvalue %86[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %163 = llvm.extractvalue %86[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %164 = llvm.extractvalue %86[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %165 = llvm.addrspacecast %157 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %166 = scf.if %161 -> (i32) {
+      %317 = llvm.load %165 : !llvm.ptr<i32>
+      scf.yield %317 : i32
+    } else {
+      %317 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %317 : i32
+    }
+    %167 = llvm.bitcast %166 : i32 to vector<2xf16>
+    %168 = llvm.mlir.constant(0 : index) : i32
+    %169 = llvm.extractelement %167[%168 : i32] : vector<2xf16>
+    %170 = llvm.mlir.constant(1 : index) : i32
+    %171 = llvm.extractelement %167[%170 : i32] : vector<2xf16>
+    %172 = llvm.addrspacecast %159 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %173 = scf.if %161 -> (i32) {
+      %317 = llvm.load %172 : !llvm.ptr<i32>
+      scf.yield %317 : i32
+    } else {
+      %317 = llvm.mlir.constant(0 : i32) : i32
+      scf.yield %317 : i32
+    }
+    %174 = llvm.bitcast %173 : i32 to vector<2xf16>
+    %175 = llvm.mlir.constant(0 : index) : i32
+    %176 = llvm.extractelement %174[%175 : i32] : vector<2xf16>
+    %177 = llvm.mlir.constant(1 : index) : i32
+    %178 = llvm.extractelement %174[%177 : i32] : vector<2xf16>
+    %179 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %180 = llvm.insertvalue %169, %179[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %181 = llvm.insertvalue %171, %180[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %182 = llvm.insertvalue %176, %181[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %183 = llvm.insertvalue %178, %182[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %184 = llvm.extractvalue %133[0] : !llvm.struct<(i8, i8, i8, i8)> 
+    %185 = llvm.extractvalue %133[1] : !llvm.struct<(i8, i8, i8, i8)> 
+    %186 = llvm.extractvalue %133[2] : !llvm.struct<(i8, i8, i8, i8)> 
+    %187 = llvm.extractvalue %133[3] : !llvm.struct<(i8, i8, i8, i8)> 
+    %188 = llvm.mlir.undef : vector<4xi8>
+    %189 = llvm.mlir.constant(0 : i32) : i32
+    %190 = llvm.mlir.constant(0 : i8) : i8
+    %191 = llvm.insertelement %190, %188[%189 : i32] : vector<4xi8>
+    %192 = llvm.mlir.constant(1 : i32) : i32
+    %193 = llvm.insertelement %184, %191[%192 : i32] : vector<4xi8>
+    %194 = llvm.mlir.constant(2 : i32) : i32
+    %195 = llvm.mlir.constant(0 : i8) : i8
+    %196 = llvm.insertelement %195, %193[%194 : i32] : vector<4xi8>
+    %197 = llvm.mlir.constant(3 : i32) : i32
+    %198 = llvm.insertelement %185, %196[%197 : i32] : vector<4xi8>
+    %199 = llvm.bitcast %198 : vector<4xi8> to i32
+    %200 = llvm.mlir.undef : vector<4xi8>
+    %201 = llvm.mlir.constant(0 : i32) : i32
+    %202 = llvm.mlir.constant(0 : i8) : i8
+    %203 = llvm.insertelement %202, %200[%201 : i32] : vector<4xi8>
+    %204 = llvm.mlir.constant(1 : i32) : i32
+    %205 = llvm.insertelement %186, %203[%204 : i32] : vector<4xi8>
+    %206 = llvm.mlir.constant(2 : i32) : i32
+    %207 = llvm.mlir.constant(0 : i8) : i8
+    %208 = llvm.insertelement %207, %205[%206 : i32] : vector<4xi8>
+    %209 = llvm.mlir.constant(3 : i32) : i32
+    %210 = llvm.insertelement %187, %208[%209 : i32] : vector<4xi8>
+    %211 = llvm.bitcast %210 : vector<4xi8> to i32
+    %212 = llvm.mlir.constant(2147450879 : i32) : i32
+    %213 = llvm.and %199, %212  : i32
+    %214 = llvm.mlir.constant(2147450879 : i32) : i32
+    %215 = llvm.and %211, %214  : i32
+    %216 = llvm.mlir.constant(1 : i32) : i32
+    %217 = llvm.lshr %213, %216  : i32
+    %218 = llvm.mlir.constant(1 : i32) : i32
+    %219 = llvm.lshr %215, %218  : i32
+    %220 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %221 = llvm.and %199, %220  : i32
+    %222 = llvm.or %217, %221  : i32
+    %223 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %224 = llvm.and %211, %223  : i32
+    %225 = llvm.or %219, %224  : i32
+    %226 = llvm.bitcast %222 : i32 to vector<2xf16>
+    %227 = llvm.bitcast %225 : i32 to vector<2xf16>
+    %228 = llvm.mlir.constant(0 : i32) : i32
+    %229 = llvm.extractelement %226[%228 : i32] : vector<2xf16>
+    %230 = llvm.mlir.constant(1 : i32) : i32
+    %231 = llvm.extractelement %226[%230 : i32] : vector<2xf16>
+    %232 = llvm.mlir.constant(0 : i32) : i32
+    %233 = llvm.extractelement %227[%232 : i32] : vector<2xf16>
+    %234 = llvm.mlir.constant(1 : i32) : i32
+    %235 = llvm.extractelement %227[%234 : i32] : vector<2xf16>
+    %236 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %237 = llvm.insertvalue %229, %236[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %238 = llvm.insertvalue %231, %237[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %239 = llvm.insertvalue %233, %238[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %240 = llvm.insertvalue %235, %239[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %241 = llvm.extractvalue %240[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %242 = llvm.extractvalue %240[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %243 = llvm.extractvalue %240[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %244 = llvm.extractvalue %240[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %245 = llvm.extractvalue %183[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %246 = llvm.extractvalue %183[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %247 = llvm.extractvalue %183[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %248 = llvm.extractvalue %183[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %249 = llvm.fadd %241, %245  : f16
+    %250 = llvm.fadd %242, %246  : f16
+    %251 = llvm.fadd %243, %247  : f16
+    %252 = llvm.fadd %244, %248  : f16
+    %253 = llvm.mlir.undef : !llvm.struct<(f16, f16, f16, f16)>
+    %254 = llvm.insertvalue %249, %253[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %255 = llvm.insertvalue %250, %254[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %256 = llvm.insertvalue %251, %255[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %257 = llvm.insertvalue %252, %256[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %258 = llvm.bitcast %arg2 : !llvm.ptr<f16, 1> to !llvm.ptr<f16, 1>
+    %259 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %260 = llvm.insertvalue %258, %259[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %261 = llvm.insertvalue %258, %260[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %262 = llvm.insertvalue %258, %261[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %263 = llvm.insertvalue %258, %262[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %264 = llvm.extractvalue %263[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %265 = llvm.extractvalue %263[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %266 = llvm.extractvalue %263[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %267 = llvm.extractvalue %263[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %268 = llvm.extractvalue %63[0] : !llvm.struct<(i32, i32, i32, i32)> 
+    %269 = llvm.extractvalue %63[1] : !llvm.struct<(i32, i32, i32, i32)> 
+    %270 = llvm.extractvalue %63[2] : !llvm.struct<(i32, i32, i32, i32)> 
+    %271 = llvm.extractvalue %63[3] : !llvm.struct<(i32, i32, i32, i32)> 
+    %272 = llvm.getelementptr %264[%268] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %273 = llvm.getelementptr %265[%269] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %274 = llvm.getelementptr %266[%270] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %275 = llvm.getelementptr %267[%271] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %276 = llvm.mlir.undef : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)>
+    %277 = llvm.insertvalue %272, %276[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %278 = llvm.insertvalue %273, %277[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %279 = llvm.insertvalue %274, %278[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %280 = llvm.insertvalue %275, %279[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %281 = llvm.extractvalue %280[0] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %282 = llvm.extractvalue %280[1] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %283 = llvm.extractvalue %280[2] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %284 = llvm.extractvalue %280[3] : !llvm.struct<(ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>, ptr<f16, 1>)> 
+    %285 = llvm.extractvalue %257[0] : !llvm.struct<(f16, f16, f16, f16)> 
+    %286 = llvm.extractvalue %257[1] : !llvm.struct<(f16, f16, f16, f16)> 
+    %287 = llvm.extractvalue %257[2] : !llvm.struct<(f16, f16, f16, f16)> 
+    %288 = llvm.extractvalue %257[3] : !llvm.struct<(f16, f16, f16, f16)> 
+    %289 = llvm.extractvalue %86[0] : !llvm.struct<(i1, i1, i1, i1)> 
+    %290 = llvm.extractvalue %86[1] : !llvm.struct<(i1, i1, i1, i1)> 
+    %291 = llvm.extractvalue %86[2] : !llvm.struct<(i1, i1, i1, i1)> 
+    %292 = llvm.extractvalue %86[3] : !llvm.struct<(i1, i1, i1, i1)> 
+    %293 = llvm.mlir.constant(true) : i1
+    %294 = rocdl.workitem.id.x : i32
+    %295 = llvm.trunc %294 : i32 to i32
+    %296 = llvm.mlir.constant(64 : i32) : i32
+    %297 = llvm.urem %295, %296  : i32
+    %298 = llvm.udiv %295, %296  : i32
+    %299 = llvm.mlir.undef : vector<2xf16>
+    %300 = llvm.bitcast %285 : f16 to f16
+    %301 = llvm.mlir.constant(0 : i32) : i32
+    %302 = llvm.insertelement %300, %299[%301 : i32] : vector<2xf16>
+    %303 = llvm.bitcast %286 : f16 to f16
+    %304 = llvm.mlir.constant(1 : i32) : i32
+    %305 = llvm.insertelement %303, %302[%304 : i32] : vector<2xf16>
+    %306 = llvm.bitcast %305 : vector<2xf16> to i32
+    %307 = llvm.and %293, %289  : i1
+    scf.if %307 {
+      llvm.store %306, %281 : !llvm.ptr<f16, 1>
+    }
+    %308 = llvm.mlir.undef : vector<2xf16>
+    %309 = llvm.bitcast %287 : f16 to f16
+    %310 = llvm.mlir.constant(0 : i32) : i32
+    %311 = llvm.insertelement %309, %308[%310 : i32] : vector<2xf16>
+    %312 = llvm.bitcast %288 : f16 to f16
+    %313 = llvm.mlir.constant(1 : i32) : i32
+    %314 = llvm.insertelement %312, %311[%313 : i32] : vector<2xf16>
+    %315 = llvm.bitcast %314 : vector<2xf16> to i32
+    %316 = llvm.and %293, %289  : i1
+    scf.if %316 {
+      llvm.store %315, %283 : !llvm.ptr<f16, 1>
+    }
+    llvm.return
+  }
+}
+
+
+// -----// IR Dump After Canonicalizer (canonicalize) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = llvm.mlir.constant(true) : i1
+    %1 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %2 = llvm.mlir.constant(2147450879 : i32) : i32
+    %3 = llvm.mlir.constant(0 : i8) : i8
+    %4 = llvm.mlir.constant(3 : index) : i32
+    %5 = llvm.mlir.constant(2 : index) : i32
+    %6 = llvm.mlir.constant(1 : index) : i32
+    %7 = llvm.mlir.constant(0 : index) : i32
+    %8 = llvm.mlir.constant(1024 : i32) : i32
+    %9 = llvm.mlir.constant(3 : i32) : i32
+    %10 = llvm.mlir.constant(2 : i32) : i32
+    %11 = llvm.mlir.constant(1 : i32) : i32
+    %12 = llvm.mlir.constant(0 : i32) : i32
+    %13 = llvm.mlir.constant(256 : i32) : i32
+    %14 = llvm.mlir.constant(4 : i32) : i32
+    %15 = llvm.mlir.constant(64 : i32) : i32
+    %16 = rocdl.workitem.id.x : i32
+    %17 = llvm.trunc %16 : i32 to i32
+    %18 = llvm.urem %17, %15  : i32
+    %19 = llvm.udiv %17, %15  : i32
+    %20 = llvm.urem %19, %14  : i32
+    %21 = llvm.urem %18, %13  : i32
+    %22 = llvm.mul %20, %15  : i32
+    %23 = llvm.add %21, %22  : i32
+    %24 = llvm.mul %23, %14  : i32
+    %25 = llvm.add %24, %12  : i32
+    %26 = llvm.add %24, %10  : i32
+    %27 = rocdl.workgroup.id.x : i32
+    %28 = llvm.trunc %27 : i32 to i32
+    %29 = llvm.mul %28, %8  : i32
+    %30 = llvm.add %25, %7  : i32
+    %31 = llvm.add %26, %7  : i32
+    %32 = llvm.add %29, %30  : i32
+    %33 = llvm.add %29, %31  : i32
+    %34 = llvm.icmp "slt" %32, %arg3 : i32
+    %35 = llvm.getelementptr %arg0[%32] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %36 = llvm.addrspacecast %35 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    %37 = scf.if %34 -> (i32) {
+      %97 = llvm.load %36 : !llvm.ptr<i32>
+      scf.yield %97 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %38 = llvm.bitcast %37 : i32 to vector<4xi8>
+    %39 = llvm.extractelement %38[%7 : i32] : vector<4xi8>
+    %40 = llvm.extractelement %38[%6 : i32] : vector<4xi8>
+    %41 = llvm.extractelement %38[%5 : i32] : vector<4xi8>
+    %42 = llvm.extractelement %38[%4 : i32] : vector<4xi8>
+    %43 = llvm.getelementptr %arg1[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %44 = llvm.getelementptr %arg1[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %45 = llvm.addrspacecast %43 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %46 = scf.if %34 -> (i32) {
+      %97 = llvm.load %45 : !llvm.ptr<i32>
+      scf.yield %97 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %47 = llvm.bitcast %46 : i32 to vector<2xf16>
+    %48 = llvm.extractelement %47[%7 : i32] : vector<2xf16>
+    %49 = llvm.extractelement %47[%6 : i32] : vector<2xf16>
+    %50 = llvm.addrspacecast %44 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %51 = scf.if %34 -> (i32) {
+      %97 = llvm.load %50 : !llvm.ptr<i32>
+      scf.yield %97 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %52 = llvm.bitcast %51 : i32 to vector<2xf16>
+    %53 = llvm.extractelement %52[%7 : i32] : vector<2xf16>
+    %54 = llvm.extractelement %52[%6 : i32] : vector<2xf16>
+    %55 = llvm.mlir.undef : vector<4xi8>
+    %56 = llvm.insertelement %3, %55[%12 : i32] : vector<4xi8>
+    %57 = llvm.insertelement %39, %56[%11 : i32] : vector<4xi8>
+    %58 = llvm.insertelement %3, %57[%10 : i32] : vector<4xi8>
+    %59 = llvm.insertelement %40, %58[%9 : i32] : vector<4xi8>
+    %60 = llvm.bitcast %59 : vector<4xi8> to i32
+    %61 = llvm.mlir.undef : vector<4xi8>
+    %62 = llvm.insertelement %3, %61[%12 : i32] : vector<4xi8>
+    %63 = llvm.insertelement %41, %62[%11 : i32] : vector<4xi8>
+    %64 = llvm.insertelement %3, %63[%10 : i32] : vector<4xi8>
+    %65 = llvm.insertelement %42, %64[%9 : i32] : vector<4xi8>
+    %66 = llvm.bitcast %65 : vector<4xi8> to i32
+    %67 = llvm.and %60, %2  : i32
+    %68 = llvm.and %66, %2  : i32
+    %69 = llvm.lshr %67, %11  : i32
+    %70 = llvm.lshr %68, %11  : i32
+    %71 = llvm.and %60, %1  : i32
+    %72 = llvm.or %69, %71  : i32
+    %73 = llvm.and %66, %1  : i32
+    %74 = llvm.or %70, %73  : i32
+    %75 = llvm.bitcast %72 : i32 to vector<2xf16>
+    %76 = llvm.bitcast %74 : i32 to vector<2xf16>
+    %77 = llvm.extractelement %75[%12 : i32] : vector<2xf16>
+    %78 = llvm.extractelement %75[%11 : i32] : vector<2xf16>
+    %79 = llvm.extractelement %76[%12 : i32] : vector<2xf16>
+    %80 = llvm.extractelement %76[%11 : i32] : vector<2xf16>
+    %81 = llvm.fadd %77, %48  : f16
+    %82 = llvm.fadd %78, %49  : f16
+    %83 = llvm.fadd %79, %53  : f16
+    %84 = llvm.fadd %80, %54  : f16
+    %85 = llvm.getelementptr %arg2[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %86 = llvm.getelementptr %arg2[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %87 = llvm.mlir.undef : vector<2xf16>
+    %88 = llvm.insertelement %81, %87[%12 : i32] : vector<2xf16>
+    %89 = llvm.insertelement %82, %88[%11 : i32] : vector<2xf16>
+    %90 = llvm.bitcast %89 : vector<2xf16> to i32
+    %91 = llvm.and %0, %34  : i1
+    scf.if %91 {
+      llvm.store %90, %85 : !llvm.ptr<f16, 1>
+    }
+    %92 = llvm.mlir.undef : vector<2xf16>
+    %93 = llvm.insertelement %83, %92[%12 : i32] : vector<2xf16>
+    %94 = llvm.insertelement %84, %93[%11 : i32] : vector<2xf16>
+    %95 = llvm.bitcast %94 : vector<2xf16> to i32
+    %96 = llvm.and %0, %34  : i1
+    scf.if %96 {
+      llvm.store %95, %86 : !llvm.ptr<f16, 1>
+    }
+    llvm.return
+  }
+}
+
+
+// -----// IR Dump After CSE (cse) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = llvm.mlir.constant(true) : i1
+    %1 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %2 = llvm.mlir.constant(2147450879 : i32) : i32
+    %3 = llvm.mlir.constant(0 : i8) : i8
+    %4 = llvm.mlir.constant(3 : index) : i32
+    %5 = llvm.mlir.constant(2 : index) : i32
+    %6 = llvm.mlir.constant(1 : index) : i32
+    %7 = llvm.mlir.constant(0 : index) : i32
+    %8 = llvm.mlir.constant(1024 : i32) : i32
+    %9 = llvm.mlir.constant(3 : i32) : i32
+    %10 = llvm.mlir.constant(2 : i32) : i32
+    %11 = llvm.mlir.constant(1 : i32) : i32
+    %12 = llvm.mlir.constant(0 : i32) : i32
+    %13 = llvm.mlir.constant(256 : i32) : i32
+    %14 = llvm.mlir.constant(4 : i32) : i32
+    %15 = llvm.mlir.constant(64 : i32) : i32
+    %16 = rocdl.workitem.id.x : i32
+    %17 = llvm.trunc %16 : i32 to i32
+    %18 = llvm.urem %17, %15  : i32
+    %19 = llvm.udiv %17, %15  : i32
+    %20 = llvm.urem %19, %14  : i32
+    %21 = llvm.urem %18, %13  : i32
+    %22 = llvm.mul %20, %15  : i32
+    %23 = llvm.add %21, %22  : i32
+    %24 = llvm.mul %23, %14  : i32
+    %25 = llvm.add %24, %12  : i32
+    %26 = llvm.add %24, %10  : i32
+    %27 = rocdl.workgroup.id.x : i32
+    %28 = llvm.trunc %27 : i32 to i32
+    %29 = llvm.mul %28, %8  : i32
+    %30 = llvm.add %25, %7  : i32
+    %31 = llvm.add %26, %7  : i32
+    %32 = llvm.add %29, %30  : i32
+    %33 = llvm.add %29, %31  : i32
+    %34 = llvm.icmp "slt" %32, %arg3 : i32
+    %35 = llvm.getelementptr %arg0[%32] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %36 = llvm.addrspacecast %35 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    %37 = scf.if %34 -> (i32) {
+      %93 = llvm.load %36 : !llvm.ptr<i32>
+      scf.yield %93 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %38 = llvm.bitcast %37 : i32 to vector<4xi8>
+    %39 = llvm.extractelement %38[%7 : i32] : vector<4xi8>
+    %40 = llvm.extractelement %38[%6 : i32] : vector<4xi8>
+    %41 = llvm.extractelement %38[%5 : i32] : vector<4xi8>
+    %42 = llvm.extractelement %38[%4 : i32] : vector<4xi8>
+    %43 = llvm.getelementptr %arg1[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %44 = llvm.getelementptr %arg1[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %45 = llvm.addrspacecast %43 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %46 = scf.if %34 -> (i32) {
+      %93 = llvm.load %45 : !llvm.ptr<i32>
+      scf.yield %93 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %47 = llvm.bitcast %46 : i32 to vector<2xf16>
+    %48 = llvm.extractelement %47[%7 : i32] : vector<2xf16>
+    %49 = llvm.extractelement %47[%6 : i32] : vector<2xf16>
+    %50 = llvm.addrspacecast %44 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    %51 = scf.if %34 -> (i32) {
+      %93 = llvm.load %50 : !llvm.ptr<i32>
+      scf.yield %93 : i32
+    } else {
+      scf.yield %12 : i32
+    }
+    %52 = llvm.bitcast %51 : i32 to vector<2xf16>
+    %53 = llvm.extractelement %52[%7 : i32] : vector<2xf16>
+    %54 = llvm.extractelement %52[%6 : i32] : vector<2xf16>
+    %55 = llvm.mlir.undef : vector<4xi8>
+    %56 = llvm.insertelement %3, %55[%12 : i32] : vector<4xi8>
+    %57 = llvm.insertelement %39, %56[%11 : i32] : vector<4xi8>
+    %58 = llvm.insertelement %3, %57[%10 : i32] : vector<4xi8>
+    %59 = llvm.insertelement %40, %58[%9 : i32] : vector<4xi8>
+    %60 = llvm.bitcast %59 : vector<4xi8> to i32
+    %61 = llvm.insertelement %41, %56[%11 : i32] : vector<4xi8>
+    %62 = llvm.insertelement %3, %61[%10 : i32] : vector<4xi8>
+    %63 = llvm.insertelement %42, %62[%9 : i32] : vector<4xi8>
+    %64 = llvm.bitcast %63 : vector<4xi8> to i32
+    %65 = llvm.and %60, %2  : i32
+    %66 = llvm.and %64, %2  : i32
+    %67 = llvm.lshr %65, %11  : i32
+    %68 = llvm.lshr %66, %11  : i32
+    %69 = llvm.and %60, %1  : i32
+    %70 = llvm.or %67, %69  : i32
+    %71 = llvm.and %64, %1  : i32
+    %72 = llvm.or %68, %71  : i32
+    %73 = llvm.bitcast %70 : i32 to vector<2xf16>
+    %74 = llvm.bitcast %72 : i32 to vector<2xf16>
+    %75 = llvm.extractelement %73[%12 : i32] : vector<2xf16>
+    %76 = llvm.extractelement %73[%11 : i32] : vector<2xf16>
+    %77 = llvm.extractelement %74[%12 : i32] : vector<2xf16>
+    %78 = llvm.extractelement %74[%11 : i32] : vector<2xf16>
+    %79 = llvm.fadd %75, %48  : f16
+    %80 = llvm.fadd %76, %49  : f16
+    %81 = llvm.fadd %77, %53  : f16
+    %82 = llvm.fadd %78, %54  : f16
+    %83 = llvm.getelementptr %arg2[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %84 = llvm.getelementptr %arg2[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %85 = llvm.mlir.undef : vector<2xf16>
+    %86 = llvm.insertelement %79, %85[%12 : i32] : vector<2xf16>
+    %87 = llvm.insertelement %80, %86[%11 : i32] : vector<2xf16>
+    %88 = llvm.bitcast %87 : vector<2xf16> to i32
+    %89 = llvm.and %0, %34  : i1
+    scf.if %89 {
+      llvm.store %88, %83 : !llvm.ptr<f16, 1>
+    }
+    %90 = llvm.insertelement %81, %85[%12 : i32] : vector<2xf16>
+    %91 = llvm.insertelement %82, %90[%11 : i32] : vector<2xf16>
+    %92 = llvm.bitcast %91 : vector<2xf16> to i32
+    scf.if %89 {
+      llvm.store %92, %84 : !llvm.ptr<f16, 1>
+    }
+    llvm.return
+  }
+}
+
+
+// -----// IR Dump After SCFToControlFlow (convert-scf-to-cf) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = llvm.mlir.constant(true) : i1
+    %1 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %2 = llvm.mlir.constant(2147450879 : i32) : i32
+    %3 = llvm.mlir.constant(0 : i8) : i8
+    %4 = llvm.mlir.constant(3 : index) : i32
+    %5 = llvm.mlir.constant(2 : index) : i32
+    %6 = llvm.mlir.constant(1 : index) : i32
+    %7 = llvm.mlir.constant(0 : index) : i32
+    %8 = llvm.mlir.constant(1024 : i32) : i32
+    %9 = llvm.mlir.constant(3 : i32) : i32
+    %10 = llvm.mlir.constant(2 : i32) : i32
+    %11 = llvm.mlir.constant(1 : i32) : i32
+    %12 = llvm.mlir.constant(0 : i32) : i32
+    %13 = llvm.mlir.constant(256 : i32) : i32
+    %14 = llvm.mlir.constant(4 : i32) : i32
+    %15 = llvm.mlir.constant(64 : i32) : i32
+    %16 = rocdl.workitem.id.x : i32
+    %17 = llvm.trunc %16 : i32 to i32
+    %18 = llvm.urem %17, %15  : i32
+    %19 = llvm.udiv %17, %15  : i32
+    %20 = llvm.urem %19, %14  : i32
+    %21 = llvm.urem %18, %13  : i32
+    %22 = llvm.mul %20, %15  : i32
+    %23 = llvm.add %21, %22  : i32
+    %24 = llvm.mul %23, %14  : i32
+    %25 = llvm.add %24, %12  : i32
+    %26 = llvm.add %24, %10  : i32
+    %27 = rocdl.workgroup.id.x : i32
+    %28 = llvm.trunc %27 : i32 to i32
+    %29 = llvm.mul %28, %8  : i32
+    %30 = llvm.add %25, %7  : i32
+    %31 = llvm.add %26, %7  : i32
+    %32 = llvm.add %29, %30  : i32
+    %33 = llvm.add %29, %31  : i32
+    %34 = llvm.icmp "slt" %32, %arg3 : i32
+    %35 = llvm.getelementptr %arg0[%32] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %36 = llvm.addrspacecast %35 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    cf.cond_br %34, ^bb1, ^bb2
+  ^bb1:  // pred: ^bb0
+    %37 = llvm.load %36 : !llvm.ptr<i32>
+    cf.br ^bb3(%37 : i32)
+  ^bb2:  // pred: ^bb0
+    cf.br ^bb3(%12 : i32)
+  ^bb3(%38: i32):  // 2 preds: ^bb1, ^bb2
+    cf.br ^bb4
+  ^bb4:  // pred: ^bb3
+    %39 = llvm.bitcast %38 : i32 to vector<4xi8>
+    %40 = llvm.extractelement %39[%7 : i32] : vector<4xi8>
+    %41 = llvm.extractelement %39[%6 : i32] : vector<4xi8>
+    %42 = llvm.extractelement %39[%5 : i32] : vector<4xi8>
+    %43 = llvm.extractelement %39[%4 : i32] : vector<4xi8>
+    %44 = llvm.getelementptr %arg1[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %45 = llvm.getelementptr %arg1[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %46 = llvm.addrspacecast %44 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    cf.cond_br %34, ^bb5, ^bb6
+  ^bb5:  // pred: ^bb4
+    %47 = llvm.load %46 : !llvm.ptr<i32>
+    cf.br ^bb7(%47 : i32)
+  ^bb6:  // pred: ^bb4
+    cf.br ^bb7(%12 : i32)
+  ^bb7(%48: i32):  // 2 preds: ^bb5, ^bb6
+    cf.br ^bb8
+  ^bb8:  // pred: ^bb7
+    %49 = llvm.bitcast %48 : i32 to vector<2xf16>
+    %50 = llvm.extractelement %49[%7 : i32] : vector<2xf16>
+    %51 = llvm.extractelement %49[%6 : i32] : vector<2xf16>
+    %52 = llvm.addrspacecast %45 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    cf.cond_br %34, ^bb9, ^bb10
+  ^bb9:  // pred: ^bb8
+    %53 = llvm.load %52 : !llvm.ptr<i32>
+    cf.br ^bb11(%53 : i32)
+  ^bb10:  // pred: ^bb8
+    cf.br ^bb11(%12 : i32)
+  ^bb11(%54: i32):  // 2 preds: ^bb9, ^bb10
+    cf.br ^bb12
+  ^bb12:  // pred: ^bb11
+    %55 = llvm.bitcast %54 : i32 to vector<2xf16>
+    %56 = llvm.extractelement %55[%7 : i32] : vector<2xf16>
+    %57 = llvm.extractelement %55[%6 : i32] : vector<2xf16>
+    %58 = llvm.mlir.undef : vector<4xi8>
+    %59 = llvm.insertelement %3, %58[%12 : i32] : vector<4xi8>
+    %60 = llvm.insertelement %40, %59[%11 : i32] : vector<4xi8>
+    %61 = llvm.insertelement %3, %60[%10 : i32] : vector<4xi8>
+    %62 = llvm.insertelement %41, %61[%9 : i32] : vector<4xi8>
+    %63 = llvm.bitcast %62 : vector<4xi8> to i32
+    %64 = llvm.insertelement %42, %59[%11 : i32] : vector<4xi8>
+    %65 = llvm.insertelement %3, %64[%10 : i32] : vector<4xi8>
+    %66 = llvm.insertelement %43, %65[%9 : i32] : vector<4xi8>
+    %67 = llvm.bitcast %66 : vector<4xi8> to i32
+    %68 = llvm.and %63, %2  : i32
+    %69 = llvm.and %67, %2  : i32
+    %70 = llvm.lshr %68, %11  : i32
+    %71 = llvm.lshr %69, %11  : i32
+    %72 = llvm.and %63, %1  : i32
+    %73 = llvm.or %70, %72  : i32
+    %74 = llvm.and %67, %1  : i32
+    %75 = llvm.or %71, %74  : i32
+    %76 = llvm.bitcast %73 : i32 to vector<2xf16>
+    %77 = llvm.bitcast %75 : i32 to vector<2xf16>
+    %78 = llvm.extractelement %76[%12 : i32] : vector<2xf16>
+    %79 = llvm.extractelement %76[%11 : i32] : vector<2xf16>
+    %80 = llvm.extractelement %77[%12 : i32] : vector<2xf16>
+    %81 = llvm.extractelement %77[%11 : i32] : vector<2xf16>
+    %82 = llvm.fadd %78, %50  : f16
+    %83 = llvm.fadd %79, %51  : f16
+    %84 = llvm.fadd %80, %56  : f16
+    %85 = llvm.fadd %81, %57  : f16
+    %86 = llvm.getelementptr %arg2[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %87 = llvm.getelementptr %arg2[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %88 = llvm.mlir.undef : vector<2xf16>
+    %89 = llvm.insertelement %82, %88[%12 : i32] : vector<2xf16>
+    %90 = llvm.insertelement %83, %89[%11 : i32] : vector<2xf16>
+    %91 = llvm.bitcast %90 : vector<2xf16> to i32
+    %92 = llvm.and %0, %34  : i1
+    cf.cond_br %92, ^bb13, ^bb14
+  ^bb13:  // pred: ^bb12
+    llvm.store %91, %86 : !llvm.ptr<f16, 1>
+    cf.br ^bb14
+  ^bb14:  // 2 preds: ^bb12, ^bb13
+    %93 = llvm.insertelement %84, %88[%12 : i32] : vector<2xf16>
+    %94 = llvm.insertelement %85, %93[%11 : i32] : vector<2xf16>
+    %95 = llvm.bitcast %94 : vector<2xf16> to i32
+    cf.cond_br %92, ^bb15, ^bb16
+  ^bb15:  // pred: ^bb14
+    llvm.store %95, %87 : !llvm.ptr<f16, 1>
+    cf.br ^bb16
+  ^bb16:  // 2 preds: ^bb14, ^bb15
+    llvm.return
+  }
+}
+
+
+// -----// IR Dump After ConvertControlFlowToLLVMPass (convert-cf-to-llvm) //----- //
+module attributes {triton_gpu.externs = {library_0 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/opencl.bc", library_1 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ocml.bc", library_2 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/ockl.bc", library_3 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_finite_only_off.bc", library_4 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_daz_opt_off.bc", library_5 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_correctly_rounded_sqrt_on.bc", library_6 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_unsafe_math_off.bc", library_7 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_wavefrontsize64_on.bc", library_8 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_abi_version_400.bc", library_9 = "/workspace/projects/triton/python/triton/third_party/rocm/lib/bitcode/oclc_isa_version_90a.bc"}, "triton_gpu.num-warps" = 4 : i32, triton_gpu.shared = 0 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
+  llvm.mlir.global external @global_smem() {addr_space = 3 : i32} : !llvm.array<0 x i8>
+  llvm.func @add_kernel_0d1d2d3d(%arg0: !llvm.ptr<i8, 1> {tt.divisibility = 16 : i32}, %arg1: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg2: !llvm.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false, nvvm.kernel = 1 : ui1, sym_visibility = "public"} {
+    %0 = llvm.mlir.constant(true) : i1
+    %1 = llvm.mlir.constant(-2147450880 : i32) : i32
+    %2 = llvm.mlir.constant(2147450879 : i32) : i32
+    %3 = llvm.mlir.constant(0 : i8) : i8
+    %4 = llvm.mlir.constant(3 : index) : i32
+    %5 = llvm.mlir.constant(2 : index) : i32
+    %6 = llvm.mlir.constant(1 : index) : i32
+    %7 = llvm.mlir.constant(0 : index) : i32
+    %8 = llvm.mlir.constant(1024 : i32) : i32
+    %9 = llvm.mlir.constant(3 : i32) : i32
+    %10 = llvm.mlir.constant(2 : i32) : i32
+    %11 = llvm.mlir.constant(1 : i32) : i32
+    %12 = llvm.mlir.constant(0 : i32) : i32
+    %13 = llvm.mlir.constant(256 : i32) : i32
+    %14 = llvm.mlir.constant(4 : i32) : i32
+    %15 = llvm.mlir.constant(64 : i32) : i32
+    %16 = rocdl.workitem.id.x : i32
+    %17 = llvm.trunc %16 : i32 to i32
+    %18 = llvm.urem %17, %15  : i32
+    %19 = llvm.udiv %17, %15  : i32
+    %20 = llvm.urem %19, %14  : i32
+    %21 = llvm.urem %18, %13  : i32
+    %22 = llvm.mul %20, %15  : i32
+    %23 = llvm.add %21, %22  : i32
+    %24 = llvm.mul %23, %14  : i32
+    %25 = llvm.add %24, %12  : i32
+    %26 = llvm.add %24, %10  : i32
+    %27 = rocdl.workgroup.id.x : i32
+    %28 = llvm.trunc %27 : i32 to i32
+    %29 = llvm.mul %28, %8  : i32
+    %30 = llvm.add %25, %7  : i32
+    %31 = llvm.add %26, %7  : i32
+    %32 = llvm.add %29, %30  : i32
+    %33 = llvm.add %29, %31  : i32
+    %34 = llvm.icmp "slt" %32, %arg3 : i32
+    %35 = llvm.getelementptr %arg0[%32] : (!llvm.ptr<i8, 1>, i32) -> !llvm.ptr<i8, 1>
+    %36 = llvm.addrspacecast %35 : !llvm.ptr<i8, 1> to !llvm.ptr<i32>
+    llvm.cond_br %34, ^bb1, ^bb2
+  ^bb1:  // pred: ^bb0
+    %37 = llvm.load %36 : !llvm.ptr<i32>
+    llvm.br ^bb3(%37 : i32)
+  ^bb2:  // pred: ^bb0
+    llvm.br ^bb3(%12 : i32)
+  ^bb3(%38: i32):  // 2 preds: ^bb1, ^bb2
+    llvm.br ^bb4
+  ^bb4:  // pred: ^bb3
+    %39 = llvm.bitcast %38 : i32 to vector<4xi8>
+    %40 = llvm.extractelement %39[%7 : i32] : vector<4xi8>
+    %41 = llvm.extractelement %39[%6 : i32] : vector<4xi8>
+    %42 = llvm.extractelement %39[%5 : i32] : vector<4xi8>
+    %43 = llvm.extractelement %39[%4 : i32] : vector<4xi8>
+    %44 = llvm.getelementptr %arg1[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %45 = llvm.getelementptr %arg1[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %46 = llvm.addrspacecast %44 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    llvm.cond_br %34, ^bb5, ^bb6
+  ^bb5:  // pred: ^bb4
+    %47 = llvm.load %46 : !llvm.ptr<i32>
+    llvm.br ^bb7(%47 : i32)
+  ^bb6:  // pred: ^bb4
+    llvm.br ^bb7(%12 : i32)
+  ^bb7(%48: i32):  // 2 preds: ^bb5, ^bb6
+    llvm.br ^bb8
+  ^bb8:  // pred: ^bb7
+    %49 = llvm.bitcast %48 : i32 to vector<2xf16>
+    %50 = llvm.extractelement %49[%7 : i32] : vector<2xf16>
+    %51 = llvm.extractelement %49[%6 : i32] : vector<2xf16>
+    %52 = llvm.addrspacecast %45 : !llvm.ptr<f16, 1> to !llvm.ptr<i32>
+    llvm.cond_br %34, ^bb9, ^bb10
+  ^bb9:  // pred: ^bb8
+    %53 = llvm.load %52 : !llvm.ptr<i32>
+    llvm.br ^bb11(%53 : i32)
+  ^bb10:  // pred: ^bb8
+    llvm.br ^bb11(%12 : i32)
+  ^bb11(%54: i32):  // 2 preds: ^bb9, ^bb10
+    llvm.br ^bb12
+  ^bb12:  // pred: ^bb11
+    %55 = llvm.bitcast %54 : i32 to vector<2xf16>
+    %56 = llvm.extractelement %55[%7 : i32] : vector<2xf16>
+    %57 = llvm.extractelement %55[%6 : i32] : vector<2xf16>
+    %58 = llvm.mlir.undef : vector<4xi8>
+    %59 = llvm.insertelement %3, %58[%12 : i32] : vector<4xi8>
+    %60 = llvm.insertelement %40, %59[%11 : i32] : vector<4xi8>
+    %61 = llvm.insertelement %3, %60[%10 : i32] : vector<4xi8>
+    %62 = llvm.insertelement %41, %61[%9 : i32] : vector<4xi8>
+    %63 = llvm.bitcast %62 : vector<4xi8> to i32
+    %64 = llvm.insertelement %42, %59[%11 : i32] : vector<4xi8>
+    %65 = llvm.insertelement %3, %64[%10 : i32] : vector<4xi8>
+    %66 = llvm.insertelement %43, %65[%9 : i32] : vector<4xi8>
+    %67 = llvm.bitcast %66 : vector<4xi8> to i32
+    %68 = llvm.and %63, %2  : i32
+    %69 = llvm.and %67, %2  : i32
+    %70 = llvm.lshr %68, %11  : i32
+    %71 = llvm.lshr %69, %11  : i32
+    %72 = llvm.and %63, %1  : i32
+    %73 = llvm.or %70, %72  : i32
+    %74 = llvm.and %67, %1  : i32
+    %75 = llvm.or %71, %74  : i32
+    %76 = llvm.bitcast %73 : i32 to vector<2xf16>
+    %77 = llvm.bitcast %75 : i32 to vector<2xf16>
+    %78 = llvm.extractelement %76[%12 : i32] : vector<2xf16>
+    %79 = llvm.extractelement %76[%11 : i32] : vector<2xf16>
+    %80 = llvm.extractelement %77[%12 : i32] : vector<2xf16>
+    %81 = llvm.extractelement %77[%11 : i32] : vector<2xf16>
+    %82 = llvm.fadd %78, %50  : f16
+    %83 = llvm.fadd %79, %51  : f16
+    %84 = llvm.fadd %80, %56  : f16
+    %85 = llvm.fadd %81, %57  : f16
+    %86 = llvm.getelementptr %arg2[%32] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %87 = llvm.getelementptr %arg2[%33] : (!llvm.ptr<f16, 1>, i32) -> !llvm.ptr<f16, 1>
+    %88 = llvm.mlir.undef : vector<2xf16>
+    %89 = llvm.insertelement %82, %88[%12 : i32] : vector<2xf16>
+    %90 = llvm.insertelement %83, %89[%11 : i32] : vector<2xf16>
+    %91 = llvm.bitcast %90 : vector<2xf16> to i32
+    %92 = llvm.and %0, %34  : i1
+    llvm.cond_br %92, ^bb13, ^bb14
+  ^bb13:  // pred: ^bb12
+    llvm.store %91, %86 : !llvm.ptr<f16, 1>
+    llvm.br ^bb14
+  ^bb14:  // 2 preds: ^bb12, ^bb13
+    %93 = llvm.insertelement %84, %88[%12 : i32] : vector<2xf16>
+    %94 = llvm.insertelement %85, %93[%11 : i32] : vector<2xf16>
+    %95 = llvm.bitcast %94 : vector<2xf16> to i32
+    llvm.cond_br %92, ^bb15, ^bb16
+  ^bb15:  // pred: ^bb14
+    llvm.store %95, %87 : !llvm.ptr<f16, 1>
+    llvm.br ^bb16
+  ^bb16:  // 2 preds: ^bb14, ^bb15
+    llvm.return
+  }
+}
+
+
+// -----// LLVM IR Dump //----- //
+; ModuleID = 'LLVMDialectModule'
+source_filename = "LLVMDialectModule"
+
+; Function Attrs: mustprogress nofree nosync nounwind willreturn memory(argmem: readwrite)
+define amdgpu_kernel void @add_kernel_0d1d2d3d(ptr addrspace(1) nocapture readonly %0, ptr addrspace(1) nocapture readonly %1, ptr addrspace(1) nocapture writeonly %2, i32 %3) local_unnamed_addr #0 {
+  %5 = tail call i32 @llvm.amdgcn.workitem.id.x()
+  %6 = shl i32 %5, 2
+  %7 = and i32 %6, 1020
+  %8 = tail call i32 @llvm.amdgcn.workgroup.id.x()
+  %9 = shl i32 %8, 10
+  %10 = or i32 %7, %9
+  %11 = icmp slt i32 %10, %3
+  br i1 %11, label %12, label %.critedge
+
+12:                                               ; preds = %4
+  %13 = or i32 %10, 2
+  %14 = sext i32 %10 to i64
+  %15 = getelementptr i8, ptr addrspace(1) %0, i64 %14
+  %16 = addrspacecast ptr addrspace(1) %15 to ptr
+  %17 = load <4 x i8>, ptr %16, align 4
+  %18 = sext i32 %13 to i64
+  %19 = getelementptr half, ptr addrspace(1) %1, i64 %18
+  %20 = getelementptr half, ptr addrspace(1) %1, i64 %14
+  %21 = addrspacecast ptr addrspace(1) %20 to ptr
+  %22 = addrspacecast ptr addrspace(1) %19 to ptr
+  %23 = load <2 x half>, ptr %22, align 4
+  %24 = getelementptr half, ptr addrspace(1) %2, i64 %18
+  %25 = shufflevector <4 x i8> <i8 0, i8 poison, i8 0, i8 poison>, <4 x i8> %17, <4 x i32> <i32 0, i32 6, i32 2, i32 7>
+  %26 = bitcast <4 x i8> %25 to i32
+  %27 = lshr exact i32 %26, 1
+  %28 = and i32 %27, 1065369472
+  %29 = and i32 %26, -2147450880
+  %30 = or i32 %28, %29
+  %extelt.offset1 = lshr i32 %30, 16
+  %31 = insertelement <2 x i32> poison, i32 %30, i64 0
+  %32 = insertelement <2 x i32> %31, i32 %extelt.offset1, i64 1
+  %33 = trunc <2 x i32> %32 to <2 x i16>
+  %34 = bitcast <2 x i16> %33 to <2 x half>
+  %35 = fadd <2 x half> %23, %34
+  %36 = shufflevector <4 x i8> <i8 0, i8 poison, i8 0, i8 poison>, <4 x i8> %17, <4 x i32> <i32 0, i32 4, i32 2, i32 5>
+  %37 = bitcast <4 x i8> %36 to i32
+  %38 = lshr exact i32 %37, 1
+  %39 = and i32 %38, 1065369472
+  %40 = and i32 %37, -2147450880
+  %41 = load <2 x half>, ptr %21, align 4
+  %42 = or i32 %39, %40
+  %extelt.offset = lshr i32 %42, 16
+  %43 = insertelement <2 x i32> poison, i32 %42, i64 0
+  %44 = insertelement <2 x i32> %43, i32 %extelt.offset, i64 1
+  %45 = trunc <2 x i32> %44 to <2 x i16>
+  %46 = bitcast <2 x i16> %45 to <2 x half>
+  %47 = fadd <2 x half> %41, %46
+  %48 = sext i32 %10 to i64
+  %49 = getelementptr half, ptr addrspace(1) %2, i64 %48
+  store <2 x half> %47, ptr addrspace(1) %49, align 4
+  store <2 x half> %35, ptr addrspace(1) %24, align 4
+  br label %.critedge
+
+.critedge:                                        ; preds = %4, %12
+  ret void
+}
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare i32 @llvm.amdgcn.workitem.id.x() #1
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare i32 @llvm.amdgcn.workgroup.id.x() #1
+
+attributes #0 = { mustprogress nofree nosync nounwind willreturn memory(argmem: readwrite) "amdgpu-flat-work-group-size"="1, 1024" "amdgpu-unsafe-fp-atomics"="true" "denormal-fp-math-f32"="preserve-sign" }
+attributes #1 = { mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none) }
+
+!nvvm.annotations = !{!0}
+!opencl.ocl.version = !{!1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1}
+!llvm.ident = !{!2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2}
+!llvm.module.flags = !{!3, !4}
+
+!0 = !{ptr @add_kernel_0d1d2d3d, !"kernel", i32 1}
+!1 = !{i32 2, i32 0}
+!2 = !{!"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"}
+!3 = !{i32 1, !"wchar_size", i32 4}
+!4 = !{i32 8, !"PIC Level", i32 1}
+
+// -----// AMDGCN Dump //----- //
+	.text
+	.amdgcn_target "amdgcn-amd-amdhsa--gfx90a"
+	.globl	add_kernel_0d1d2d3d
+	.p2align	8
+	.type	add_kernel_0d1d2d3d,@function
+add_kernel_0d1d2d3d:
+	s_load_dword s0, s[4:5], 0x18
+	v_lshlrev_b32_e32 v0, 2, v0
+	v_and_b32_e32 v0, 0x3fc, v0
+	v_lshl_or_b32 v0, s6, 10, v0
+	s_waitcnt lgkmcnt(0)
+	v_cmp_gt_i32_e32 vcc, s0, v0
+	s_and_saveexec_b64 s[0:1], vcc
+	s_cbranch_execz .LBB0_2
+	s_load_dwordx4 s[0:3], s[4:5], 0x0
+	s_load_dwordx2 s[6:7], s[4:5], 0x10
+	v_ashrrev_i32_e32 v1, 31, v0
+	s_waitcnt lgkmcnt(0)
+	v_mov_b32_e32 v3, s1
+	v_add_co_u32_e32 v2, vcc, s0, v0
+	v_addc_co_u32_e32 v3, vcc, v3, v1, vcc
+	global_load_dword v4, v[2:3], off
+	v_lshlrev_b64 v[0:1], 1, v[0:1]
+	v_mov_b32_e32 v3, s3
+	v_add_co_u32_e32 v2, vcc, s2, v0
+	v_addc_co_u32_e32 v3, vcc, v3, v1, vcc
+	global_load_dwordx2 v[2:3], v[2:3], off
+	v_mov_b32_e32 v5, s7
+	v_add_co_u32_e32 v0, vcc, s6, v0
+	v_addc_co_u32_e32 v1, vcc, v5, v1, vcc
+	s_mov_b32 s0, 0xff000000
+	s_mov_b32 s1, 0x3f803f80
+	s_waitcnt vmcnt(1)
+	v_lshrrev_b32_e32 v5, 16, v4
+	v_and_b32_e32 v6, 0xff00, v4
+	v_lshlrev_b16_e32 v7, 8, v4
+	v_lshlrev_b16_e32 v5, 8, v5
+	v_lshl_or_b32 v6, v6, 16, v7
+	v_and_or_b32 v4, v4, s0, v5
+	v_lshrrev_b32_e32 v5, 1, v6
+	v_and_b32_e32 v6, 0x80008000, v6
+	v_lshrrev_b32_e32 v7, 1, v4
+	v_and_b32_e32 v4, 0x80008000, v4
+	v_and_or_b32 v5, v5, s1, v6
+	v_and_or_b32 v4, v7, s1, v4
+	s_waitcnt vmcnt(0)
+	v_pk_add_f16 v3, v3, v4
+	v_pk_add_f16 v2, v2, v5
+	global_store_dwordx2 v[0:1], v[2:3], off
+.LBB0_2:
+	s_endpgm
+	.section	.rodata,#alloc
+	.p2align	6, 0x0
+	.amdhsa_kernel add_kernel_0d1d2d3d
+		.amdhsa_group_segment_fixed_size 0
+		.amdhsa_private_segment_fixed_size 0
+		.amdhsa_kernarg_size 28
+		.amdhsa_user_sgpr_count 6
+		.amdhsa_user_sgpr_private_segment_buffer 1
+		.amdhsa_user_sgpr_dispatch_ptr 0
+		.amdhsa_user_sgpr_queue_ptr 0
+		.amdhsa_user_sgpr_kernarg_segment_ptr 1
+		.amdhsa_user_sgpr_dispatch_id 0
+		.amdhsa_user_sgpr_flat_scratch_init 0
+		.amdhsa_user_sgpr_private_segment_size 0
+		.amdhsa_system_sgpr_private_segment_wavefront_offset 0
+		.amdhsa_system_sgpr_workgroup_id_x 1
+		.amdhsa_system_sgpr_workgroup_id_y 0
+		.amdhsa_system_sgpr_workgroup_id_z 0
+		.amdhsa_system_sgpr_workgroup_info 0
+		.amdhsa_system_vgpr_workitem_id 0
+		.amdhsa_next_free_vgpr 8
+		.amdhsa_next_free_sgpr 8
+		.amdhsa_accum_offset 8
+		.amdhsa_reserve_flat_scratch 0
+		.amdhsa_reserve_xnack_mask 1
+		.amdhsa_float_round_mode_32 0
+		.amdhsa_float_round_mode_16_64 0
+		.amdhsa_float_denorm_mode_32 0
+		.amdhsa_float_denorm_mode_16_64 3
+		.amdhsa_dx10_clamp 1
+		.amdhsa_ieee_mode 1
+		.amdhsa_fp16_overflow 0
+		.amdhsa_tg_split 0
+		.amdhsa_exception_fp_ieee_invalid_op 0
+		.amdhsa_exception_fp_denorm_src 0
+		.amdhsa_exception_fp_ieee_div_zero 0
+		.amdhsa_exception_fp_ieee_overflow 0
+		.amdhsa_exception_fp_ieee_underflow 0
+		.amdhsa_exception_fp_ieee_inexact 0
+		.amdhsa_exception_int_div_zero 0
+	.end_amdhsa_kernel
+	.text
+.Lfunc_end0:
+	.size	add_kernel_0d1d2d3d, .Lfunc_end0-add_kernel_0d1d2d3d
+
+	.p2alignl 6, 3212836864
+	.fill 256, 4, 3212836864
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.section	".note.GNU-stack"
+	.amdgpu_metadata
+---
+amdhsa.kernels:
+  - .agpr_count:     0
+    .args:
+      - .address_space:  global
+        .offset:         0
+        .size:           8
+        .value_kind:     global_buffer
+      - .address_space:  global
+        .offset:         8
+        .size:           8
+        .value_kind:     global_buffer
+      - .address_space:  global
+        .offset:         16
+        .size:           8
+        .value_kind:     global_buffer
+      - .offset:         24
+        .size:           4
+        .value_kind:     by_value
+    .group_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .kernarg_segment_size: 28
+    .language:       OpenCL C
+    .language_version:
+      - 2
+      - 0
+    .max_flat_workgroup_size: 1024
+    .name:           add_kernel_0d1d2d3d
+    .private_segment_fixed_size: 0
+    .sgpr_count:     12
+    .sgpr_spill_count: 0
+    .symbol:         add_kernel_0d1d2d3d.kd
+    .vgpr_count:     8
+    .vgpr_spill_count: 0
+    .wavefront_size: 64
+amdhsa.target:   amdgcn-amd-amdhsa--gfx90a
+amdhsa.version:
+  - 1
+  - 1
+...
+
+	.end_amdgpu_metadata
+
+Traceback (most recent call last):
+  File "test_fp8_vecadd.py", line 126, in main
+    test_vec_add(SIZE, torch.float16, a_is_f8 = a_is_fp8)
+  File "test_fp8_vecadd.py", line 99, in test_vec_add
+    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(1e-3, 10 * golden_rel_err), atol=max(1e-3, 10 * golden_abs_err), check_dtype=False)
+  File "/opt/conda/lib/python3.8/site-packages/torch/testing/_comparison.py", line 1493, in assert_close
+    assert_equal(
+  File "/opt/conda/lib/python3.8/site-packages/torch/testing/_comparison.py", line 1244, in assert_equal
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 8 / 16 (50.0%)
+Greatest absolute difference: 21.9951171875 at index (11,) (up to 5.0 allowed)
+Greatest relative difference: 1.1972277889111556 at index (2,) (up to 0.001 allowed)
+element_num = 16
+testing sizes: SIZE: 16, ab type: torch.float16, a_is_f8: True
+a = tensor([12., 15.,  7.,  4.,  6.,  0.,  0.,  0.,  0.,  5., 10., 22.,  5., 19.,
+         3., 17.], device='cuda:0', dtype=torch.float16)
+b = tensor([ 1.5059, -0.1538, -1.1533, -0.4678, -0.3455, -0.0891, -0.8076,  0.1816,
+         0.5684, -0.2253, -0.1225,  0.9580,  0.7163,  0.9580, -1.3936, -0.4421],
+       device='cuda:0', dtype=torch.float16)
+f8_a = tensor([12, 15,  7,  4,  6,  0,  0,  0,  0,  5, 10, 22,  5, 19,  3, 17],
+       device='cuda:0', dtype=torch.int8)
+ConvertedTof8
+gold = tensor([13.5078, 14.8438,  5.8477,  3.5312,  5.6562, -0.0891, -0.8076,  0.1816,
+         0.5684,  4.7734,  9.8750, 22.9531,  5.7148, 19.9531,  1.6064, 16.5625],
+       device='cuda:0', dtype=torch.float16)
+c = tensor([ 1.5059, -0.1537, -1.1533, -0.4678, -0.3455, -0.0891, -0.8076,  0.1816,
+         0.5684, -0.2253, -0.1224,  0.9580,  0.7163,  0.9580, -1.3936, -0.4419],
+       device='cuda:0', dtype=torch.float16)
+FAILED!

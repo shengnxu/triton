@@ -64,6 +64,15 @@ def vecadd(a: torch.tensor, b: torch.tensor, a_is_fp8 = False):
     return c
 
 def test_vec_add(SIZE, ab_type, a_is_f8 = False):
+
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
     print("testing sizes: SIZE: {}, ab type: {}, a_is_f8: {}".format(SIZE, ab_type, a_is_f8))
 
     if a_is_f8:
@@ -73,7 +82,11 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
         # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
         all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
         f8_tensor[all_exp_ones] = 0
-        a_f16 = f8_tensor.to(torch.float16)
+
+        n_elements = f8_tensor.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        a_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        copy_kernel[grid](triton.reinterpret(f8_tensor, a_type), a_f16, n_elements, BLOCK_SIZE=1024)
         b_f16 = torch.randn((SIZE,), device = 'cuda', dtype=torch.float16)
 
         print(f'a = {a_f16}')

@@ -149,6 +149,14 @@ def get_variant_golden(a, b):
 def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
     print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}, a_is_f8: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8))
 
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
     if a_is_f8:
         a_type = tl.float8e4
         f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
@@ -156,7 +164,10 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
         # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
         all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
         f8_tensor[all_exp_ones] = 0
-        a_f16 = f8_tensor.to(torch.float16)
+        n_elements = f8_tensor.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        a_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        copy_kernel[grid](triton.reinterpret(f8_tensor, a_type), a_f16, n_elements, BLOCK_SIZE=1024)
         b_f16 = torch.randn((SIZE_K, SIZE_N), device = 'cuda', dtype=torch.float16)
 
         golden = torch.matmul(a_f16, b_f16)

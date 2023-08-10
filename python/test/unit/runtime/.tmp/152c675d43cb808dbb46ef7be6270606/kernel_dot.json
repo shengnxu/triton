@@ -1,0 +1,1 @@
+{"num_warps": 4, "warp_size": 64, "num_stages": 1, "constants": {}, "debug": false, "arch": ["amdgcn-amd-amdhsa", "gfx90a", "", 64], "device_type": "hip", "shared": 1024, "name": "kernel_dot_0d"}

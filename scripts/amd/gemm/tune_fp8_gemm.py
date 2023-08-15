@@ -92,7 +92,7 @@ def matmul_kernel(
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
 
-def matmul(a, b, c_type=torch.float32, a_is_fp8 = False):
+def matmul(a, b, block_m, block_n, block_k, c_type=torch.float32, a_is_fp8 = False):
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
@@ -100,7 +100,6 @@ def matmul(a, b, c_type=torch.float32, a_is_fp8 = False):
     K, N = b.shape
 
     if a_is_fp8:
-        print("ConvertedTof8")
         in_dtype = tl.float8e4
         a_input = triton.reinterpret(a, in_dtype)
     else:
@@ -200,6 +199,103 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
     torch.set_printoptions(profile="full")
     assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(1e-3, 10 * golden_rel_err), atol=max(1e-3, 10 * golden_abs_err), check_dtype=False)
 
+def tune_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8=False):
+    print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}, a_is_f8: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8))
+
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
+    if a_is_f8:
+        a_type = tl.float8e4
+        f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
+        f8_tensor = f8_tensor.to(torch.int8)
+        # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
+        all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
+        f8_tensor[all_exp_ones] = 0
+        n_elements = f8_tensor.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        a = f8_tensor
+        a_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        copy_kernel[grid](triton.reinterpret(f8_tensor, a_type), a_f16, n_elements, BLOCK_SIZE=1024)
+        b = torch.randn((SIZE_K, SIZE_N), device = 'cuda', dtype=torch.float16)
+
+        golden = torch.matmul(a_f16, b)
+        #c = matmul(f8_tensor, b_f16, c_type, True)
+
+        #print(f'gold = {golden}')
+        #print(f'c = {c}')
+
+        golden_abs_err = 0.5
+        golden_rel_err = 0.0
+    elif ab_type == torch.int8:
+        a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float32).to(torch.int8)
+        b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float32).to(torch.int8)
+        golden = torch.matmul(a.to(torch.float64), b.to(torch.float64))
+    
+        golden_abs_err = 0.5
+        golden_rel_err = 0.0
+    else:
+        a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=ab_type)
+        b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=ab_type)
+        golden = torch.matmul(a, b)
+    
+        golden_variant = get_variant_golden(a, b)
+        golden_diff = golden - golden_variant
+        golden_abs_err = torch.max(torch.abs(golden_diff)).item()
+        golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
+
+
+    # tune space
+    block_range = [32, 64, 128]
+    split_k_range = [1, 2, 4, 5, 8, 10]
+    num_warps_range = [1, 2, 4, 8, 16]
+
+    min_time = 1024 * 1024 * 1024
+    best_config = ''
+    index = 0
+    for block_m in block_range:
+        if SIZE_M <= 32 and block_m != 32:
+            continue
+
+        for block_n in block_range:
+            if SIZE_N <=32 and block_n != 32:
+                continue
+
+            for block_k in block_range:
+                if SIZE_K <=32 and block_k != 32:
+                    continue
+
+                try:
+                    perf_config = f'{block_m},{block_n},{block_k}'
+                    exec_time = triton.testing.do_bench(lambda: matmul(a, b, block_m, block_n, block_k, c_type, a_is_f8))
+                except Exception as e:
+                    print(e)
+                    print("Exception happened in matmul, skip")
+                    continue
+
+                # torch.set_printoptions(profile="full")
+                # try:
+                #     assert_close(c, golden, rtol=max(0.05, 1.5 * golden_rel_err), atol=max(0.05, 1.5 * golden_abs_err), check_dtype=False)
+                # except AssertionError:
+                #     print(f"abs_error = {golden_abs_err}")
+                #     print(f"rel_error = {golden_rel_err}")
+                #     print('result mismatch, skip')
+                #     continue
+
+                if exec_time < min_time:
+                    min_time = exec_time
+                    best_config = perf_config
+                print(f"{index}: m = {SIZE_M}, n = {SIZE_N}, k = {SIZE_K}, curr_config = {perf_config}, min_time = {min_time} ms", )
+                index += 1
+    flops = 2 * SIZE_M * SIZE_N * SIZE_K / min_time / 1.0e9
+    strr = f'Best Result: {SIZE_M},{SIZE_N},{SIZE_K} best parameters: {best_config} --> {min_time} ms, {flops} TFLOPS'
+    print(strr)
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         prog = "test gemm tuning",
@@ -226,7 +322,7 @@ def main():
         a_is_fp8 = True
 
     try:
-        test_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = a_is_fp8)
+        tune_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = a_is_fp8)
     except:
         traceback.print_exc()
         print("FAILED!")

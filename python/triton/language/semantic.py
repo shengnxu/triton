@@ -1261,7 +1261,7 @@ def dot(lhs: tl.tensor,
         out_dtype: tl.dtype,
         builder: ir.builder) -> tl.tensor:
     assert lhs.type.is_block() and rhs.type.is_block()
-    assert lhs.dtype == rhs.dtype, f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
+    assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
     assert len(lhs.shape) == 2, f"First input shape ({lhs.shape}) is not two dimensional!"
     assert len(rhs.shape) == 2, f"Second input shape ({rhs.shape}) is not two dimensional!"
     assert lhs.shape[1].value == rhs.shape[0].value, f"First input shape ({lhs.shape}) and second input shape {rhs.shape} are not compatible for matmul (second index of first shape ({lhs.shape[1].value}) must be equal to first index of second shape ({rhs.shape[0].value})"
@@ -1277,6 +1277,12 @@ def dot(lhs: tl.tensor,
     elif lhs.type.scalar.is_fp32() or lhs.type.scalar.is_bf16():
         _0 = builder.get_fp32(0)
         ret_scalar_ty = tl.float32
+    elif lhs.type.scalar.is_fp8():
+        lhs = cast(lhs, tl.float16, builder)
+        ret_scalar_ty = tl.float16
+    elif rhs.type.scalar.is_fp8():
+        rhs = cast(rhs, tl.float16, builder)
+        ret_scalar_ty = tl.float16
     else:
         _0 = builder.get_fp16(0) if out_dtype.is_fp16() else builder.get_fp32(0)
         ret_scalar_ty = out_dtype
@@ -1289,10 +1295,12 @@ def dot(lhs: tl.tensor,
         ret_cast_scalar_ty = tl.float32 if lhs.type.scalar.is_int() else ret_scalar_ty
         lhs = cast(lhs, ret_cast_scalar_ty, builder)
         rhs = cast(rhs, ret_cast_scalar_ty, builder)
+        # _0 = builder.create_splat(builder.get_fp32(0), [M, N])
         if ret_cast_scalar_ty == tl.float16:
             _0 = builder.create_splat(builder.get_fp16(0), [M, N])
         else:
             _0 = builder.create_splat(builder.get_fp32(0), [M, N])
+
         ret_ty = tl.block_type(ret_cast_scalar_ty, [M, N])
         ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
                         ret_ty)
@@ -1309,6 +1317,18 @@ def dot(lhs: tl.tensor,
                         ret_ty)
         return cast(ret, ret_scalar_ty, builder)
 
+    if is_hip() and mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty) and ret_scalar_ty.primitive_bitwidth < 32:
+        if lhs.type.scalar.is_int():
+            ret_dot_scalar_ty = tl.int32
+            _0 = builder.create_splat(builder.get_int32(0), [M, N])
+        else:
+            ret_dot_scalar_ty = tl.float32
+            _0 = builder.create_splat(builder.get_fp32(0), [M, N])
+        ret_ty = tl.block_type(ret_dot_scalar_ty, [M, N])
+        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
+                        ret_ty)
+        return cast(ret, ret_scalar_ty, builder)
+    
     _0 = builder.create_splat(_0, [M, N])
     ret_ty = tl.block_type(ret_scalar_ty, [M, N])
     return tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),

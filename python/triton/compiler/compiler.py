@@ -45,7 +45,12 @@ def ttir_compute_capability_rewrite(mod, arch):
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
     if _is_cuda(arch):
-        pm.add_rewrite_tensor_pointer_pass(arch)
+        pm.add_rewrite_tensor_pointer_pass(arch, False)
+    else:
+        device = get_current_device()
+        capabilityTuple = get_device_capability(device)
+        capability = capabilityTuple[0] * 10 + capabilityTuple[1]
+        pm.add_rewrite_tensor_pointer_pass(capability, True)
     pm.run(mod)
     return mod
 

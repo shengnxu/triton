@@ -2,7 +2,10 @@
 
 set -ex
 
-export ROCM_HOME=/opt/rocm
+# Set ROCM_HOME if not set
+if [[ -z "${ROCM_HOME}" ]]; then
+    export ROCM_HOME=/opt/rocm
+fi
 
 # Check TRITON_ROCM_DIR is set
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
@@ -12,15 +15,13 @@ fi
 # Create triton lib directory
 mkdir -p $TRITON_ROCM_DIR/lib
 
-# Shared objects required from centos 7 OS 
-# NOTE: Prior to rocm5.3 requires libtinfo.so.6
 LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
 
 OS_SO_PATHS=(
     $LIBELF_PATH
-    $LIBNUMA_PATH\
+    $LIBNUMA_PATH
     $LIBTINFO_PATH
 )
 

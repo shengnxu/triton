@@ -107,6 +107,8 @@ std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
     ;
   while (findAndReplace(result, "\t// end inline asm", "\n", ""))
     ;
+  llvm::outs() << "ptx = \n";
+  llvm::outs() << result << "\n";
   return result;
 }
 

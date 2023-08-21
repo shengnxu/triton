@@ -15,7 +15,6 @@
 #include "mlir/Target/LLVMIR/LLVMTranslationInterface.h"
 #include "mlir/Transforms/Passes.h"
 #include "triton/Conversion/TritonGPUToLLVM/TritonGPUToLLVMPass.h"
-#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/ADT/APInt.h"
@@ -52,7 +51,7 @@ struct NVVMMetadata {
 
 // Add the nvvm related metadata to LLVM IR.
 static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
-                          bool isROCM, const int threadsPerCTA) {
+                          bool isROCM) {
   auto *module = func->getParent();
   auto &ctx = func->getContext();
 
@@ -84,8 +83,7 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
   if (metadata.isKernel) {
     if (isROCM) {
       func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-      func->addFnAttr("amdgpu-flat-work-group-size",
-                      "1, " + std::to_string(threadsPerCTA));
+      func->addFnAttr("amdgpu-flat-work-group-size", "1, 1024");
       func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
       func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
     } else {
@@ -314,14 +312,10 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module,
     return nullptr;
   }
 
-  const int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(module);
-  const int warpSize = triton::gpu::TritonGPUDialect::getThreadsPerWarp(module);
-  const int threadsPerCTA = numWarps * warpSize;
-
   for (auto &func : llvmModule->functions()) {
     auto it = nvvmMetadata.find(func.getName());
     if (it != nvvmMetadata.end())
-      amendLLVMFunc(&func, it->second, isROCM, threadsPerCTA);
+      amendLLVMFunc(&func, it->second, isROCM);
   }
 
   return llvmModule;

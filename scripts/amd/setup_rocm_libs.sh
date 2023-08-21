@@ -32,9 +32,11 @@ done
 
 # Required ROCm libraries - dynamically find so numbers
 ROCM_SO=(
-    "libhsa-runtime64.so"
-    "libamdhip64.so"
-    "libamd_comgr.so"
+    "libhsa-runtime64.so.1"
+    "libamdhip64.so.5"
+    "libamd_comgr.so.2"
+    "libdrm.so.2"
+    "libdrm_amdgpu.so.1"
 )
 
 # Find the SO libs dynamically
@@ -48,6 +50,9 @@ do
     fi
     if [[ -z $file_path ]]; then
         file_path=($(find $ROCM_HOME/ -name "$lib")) # Then search in ROCM_HOME
+    fi
+    if [[ -z $file_path ]]; then
+        file_path=($(find /opt/ -name "$lib")) # Then search in ROCM_HOME
     fi
     if [[ -z $file_path ]]; then
             echo "Error: Library file $lib is not found." >&2

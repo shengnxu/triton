@@ -32,11 +32,11 @@ done
 
 # Required ROCm libraries - dynamically find so numbers
 ROCM_SO=(
-    "libhsa-runtime64.so.1"
-    "libamdhip64.so.5"
-    "libamd_comgr.so.2"
-    "libdrm.so.2"
-    "libdrm_amdgpu.so.1"
+    "libhsa-runtime64.so"
+    "libamdhip64.so"
+    "libamd_comgr.so"
+    "libdrm.so"
+    "libdrm_amdgpu.so"
 )
 
 # Find the SO libs dynamically
@@ -60,6 +60,9 @@ do
     fi
 
     cp $file_path $TRITON_ROCM_DIR/lib
+    # When running locally, and not building a wheel, we need to satisfy shared objects requests that don't look for versions
+    LINKNAME=$(echo $lib | sed -e 's/\.so.*/.so/g')
+    ln -sf $lib $TRITON_ROCM_DIR/lib/$LINKNAME
 done
 
 # Copy Include Files

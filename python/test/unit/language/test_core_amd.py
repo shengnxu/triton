@@ -1,4 +1,5 @@
 # flake8: noqa: F821,F841
+import triton.language.semantic
 import itertools
 import os
 import re
@@ -1204,35 +1205,44 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 # test dot
 # ---------------
 
-# @pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, dtype",
-#                          [(*shape, 4, False, False, epilogue, allow_tf32, dtype)
-#                           for shape in [(64, 64, 64), (16, 16, 16)]
-#                           for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
-#                           for allow_tf32 in [True, False]
-#                           for dtype in ['float16', 'float32']
-#                           if not (allow_tf32 and (dtype in ['float16']))] +
-#                          [(*shape_nw, col_a, col_b, 'none', allow_tf32, dtype)
-#                           for shape_nw in [[128, 256, 32, 8],
-#                                            [128, 16, 32, 4],
-#                                            [32, 128, 64, 4],
-#                                            [128, 128, 64, 4],
-#                                            [64, 128, 128, 4],
-#                                            [32, 128, 64, 2],
-#                                            [128, 128, 64, 2],
-#                                            [64, 128, 128, 2]]
-#                           for allow_tf32 in [True]
-#                           for col_a in [True, False]
-#                           for col_b in [True, False]
-#                           for dtype in ['int8', 'float16', 'float32']])
 
-
-# MFMA Test Dot tests
 @pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype",
+                         # FMA Test Dot tests
+                         [(*shape, 4, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
+                          for shape in [(64, 64, 64), (16, 16, 16)]
+                          for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
+                          for allow_tf32 in [True, False]
+                          for in_dtype, out_dtype in [('float16', 'float16'),
+                                                      ('float16', 'float32'),
+                                                      ('float32', 'float32')]
+                          if not (allow_tf32 and (in_dtype in ['float16']))] +
+
+                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype)
+                          for shape_nw in [[128, 256, 32, 8],
+                                           [128, 16, 32, 4],
+                                           [32, 128, 64, 4],
+                                           [128, 128, 64, 4],
+                                           [64, 128, 128, 4],
+                                           [32, 128, 64, 2],
+                                           [64, 64, 32, 4],
+                                           [32, 32, 128, 16],
+                                           [128, 128, 64, 2],
+                                           [64, 128, 128, 2]]
+                          for allow_tf32 in [True]
+                          for col_a in [True, False]
+                          for col_b in [True, False]
+                          for in_dtype, out_dtype in [('int8', 'int8'),
+                                                      ('float16', 'float16'),
+                                                      ('float16', 'float32'),
+                                                      ('float32', 'float32')]]
+                         if not triton.language.semantic.gpu_has_mfma() else
+                         # MFMA Test Dot tests
                          [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
                           for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [True, False]
                           for in_dtype, out_dtype in [('float16', 'float16'),
+                                                      ('bfloat16', 'float32'),
                                                       ('float16', 'float32'),
                                                       ('float32', 'float32')]
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
@@ -1264,7 +1274,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                           for allow_tf32 in [False, True]
                           for col_a in [True, False]
                           for col_b in [True, False]
-                          for in_dtype in ['int8', 'float16', 'float32']
+                          for in_dtype in ['int8', 'bfloat16', 'float16', 'float32']
                           for out_dtype in [None]])
 def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, device='cuda'):
     capability = torch.cuda.get_device_capability()
@@ -1272,6 +1282,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
     if torch.version.hip is not None:
         # set capability to large number to jump over check below
         # check are not relevant to amd gpu, left them for smaller diff between test_core.py and test_core_amd.py tests
+        if (M, N, K) == (128, 256, 32):
+            pytest.skip("Out of resources")
         capability = (100, 100)
         if out_dtype is None:
             if in_dtype in float_dtypes:
@@ -1354,6 +1366,10 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
     x_tri = to_triton(x, device=device)
     y_tri = to_triton(y, device=device)
     w_tri = to_triton(w, device=device)
+    if in_dtype == 'bfloat16':
+        x_tri = x_tri.to(torch.bfloat16)
+        y_tri = y_tri.to(torch.bfloat16)
+        w_tri = w_tri.to(torch.bfloat16)
     # triton result
     if out_dtype == 'int8':
         z = 1 + numpy_random((M, N), dtype_str='int32', rs=rs)
@@ -1413,6 +1429,10 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         # XXX: Somehow there's a larger difference when we use float32
         np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-3)
     elif out_dtype == tl.float16:
+        np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-2)
+    elif in_dtype == 'bfloat16':
+        # added atol, to loose precision for bfloat16xbfloat16->float32 case
+        # bfloat16 has less fraction bits than float16
         np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-2)
     else:
         # added atol, to loose precision for float16xfloat16->float32 case

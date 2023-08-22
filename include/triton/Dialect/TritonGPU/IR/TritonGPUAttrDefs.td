@@ -89,6 +89,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           if (isKDimInner) {
             const int numBanks = 32;
             const int bankBitWidth = 32;
+            const int SIMDWidth = 16;
 
             // number of inner dimension rows per one pattern repeat
             int outerDimGranularity = mfmaEnc.getNonKDim();
@@ -97,9 +98,21 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
             int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeBitWidth;
 
             int perPhase = std::max(1, elemsPerOneBanksRow / innerDimLength);
-            int maxPhase = outerDimGranularity / perPhase;
-            int vecSize = innerDimLength / maxPhase;
-            assert(vecSize > 0);
+            // Note: the following settings is customized to avoid
+            // **load** bank conflicts
+            //
+            // vecSize is set to k_base, which is the number of elements each
+            // workitem loads for one mfma instruction.
+            // For now, the k_base rules are as follows
+            // 1. All selected mfma instructions produce a single block
+            // 2. For f16 data type, 2 VGPRs are used for operand A --> k_base = 4
+            // 3. For non-f16 data types, 1 VGPR are used for operand A
+            //    k_base = 32 / elemTypeInBits
+            // 4. TODO: what about f64?
+            //
+            // maxPhase is set to SIMDWidth / perPhase
+            int vecSize = (eltTy.isF16() ? 64 : 32 ) / typeBitWidth;
+            int maxPhase = SIMDWidth / perPhase;
 
             return $_get(context, vecSize, perPhase, maxPhase, order);
           } else {
@@ -623,7 +636,7 @@ section 9.7.13.4.1 for more details.
     ins
     "unsigned":$opIdx,
     "Attribute":$parent,
-    "unsigned":$MMAv2kWidth
+    "unsigned":$kWidth
   );
 
   let builders = [
@@ -635,16 +648,16 @@ section 9.7.13.4.1 for more details.
       if (!parentAttr || !parentAttr.isAmpere())
         return $_get(context, opIdx, parent, 0);
       unsigned bitwidth = eltTy.getIntOrFloatBitWidth();
-      unsigned MMAv2kWidth = 32 / bitwidth;
-      return $_get(context, opIdx, parent, MMAv2kWidth);
+      unsigned kWidth = 32 / bitwidth;
+      return $_get(context, opIdx, parent, kWidth);
     }]>,
 
     // Specially for MFMA(MI100/MI200)
     AttrBuilder<(ins "unsigned":$opIdx,
                      "Attribute":$parent), [{
       assert(llvm::isa<MfmaEncodingAttr>(parent));
-      unsigned MMAv2kWidth = 0; // unused for MFMA ops
-      return $_get(context, opIdx, parent, MMAv2kWidth);
+      unsigned kWidth = 0; // unused for MFMA ops
+      return $_get(context, opIdx, parent, kWidth);
     }]>
   ];
 

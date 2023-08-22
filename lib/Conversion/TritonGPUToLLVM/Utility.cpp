@@ -216,6 +216,7 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
   }
   auto swait = builder.create("s_waitcnt lgkmcnt(0)");
   (*swait)();
+  return builder.launch(rewriter, loc, val.getType(), true);
 #else
   PTXBuilder builder;
   auto &shfl = builder.create("shfl.sync")->o(shuffleType).o("b32");
@@ -225,8 +226,8 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
   auto *cOpr = builder.newConstantOperand(clamp);
   auto *maskOpr = builder.newConstantOperand("0xffffffff");
   shfl(dOpr, aOpr, bOpr, cOpr, maskOpr);
-#endif
   return builder.launch(rewriter, loc, val.getType(), false);
+#endif
 }
 
 Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,

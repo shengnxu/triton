@@ -679,7 +679,7 @@ static SmallVector<int64_t> getMFMAInstrShape(Type abElemType) {
   if (abElemType.isF32())
     return {32l, 32l, 2l}; // FP32_FP32_FP32_FP32;
   if (abElemType.isBF16())
-    return {32l, 32l, 4l}; // FP32_BF16_BF16_FP32;
+    return {32l, 32l, 8l}; // FP32_BF16_BF16_FP32;
   if (abElemType.isInteger(8))
     return {32l, 32l, 8l}; // INT32_INT8_INT8_INT32;
   if (abElemType.isF64())
@@ -1107,7 +1107,7 @@ void DotOperandEncodingAttr::print(mlir::AsmPrinter &printer) const {
   printer << "<{"
           << "opIdx = " << getOpIdx() << ", parent = " << getParent();
   if (mmaParent && mmaParent.isAmpere())
-    printer << ", kWidth = " << getMMAv2kWidth();
+    printer << ", kWidth = " << getKWidth();
   printer << "}>";
 }
 

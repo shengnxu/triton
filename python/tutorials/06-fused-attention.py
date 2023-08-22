@@ -340,20 +340,17 @@ empty = torch.empty(128, device="cuda")
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, sm_scale):
-        if torch.version.hip is not None:
-            BLOCK = 64
-        else:
-            BLOCK = 128
+    def forward(ctx, q, k, v, causal, sm_scale, split_kernel):
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
         o = torch.empty_like(q)
-        grid = (triton.cdiv(q.shape[2], BLOCK), q.shape[0] * q.shape[1], 1)
+        BLOCK_M = 128
+        BLOCK_N = 64
         L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
         num_warps = 4 if Lk <= 64 else 8
-
+        grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         _fwd_kernel[grid](
             q, k, v, sm_scale,
             L,
@@ -363,25 +360,23 @@ class _attention(torch.autograd.Function):
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1], q.shape[2],
+            BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_DMODEL=Lk,
             IS_CAUSAL=causal,
-            BLOCK_M=BLOCK, BLOCK_N=BLOCK,
-            BLOCK_DMODEL=Lk, num_warps=num_warps,
-            num_stages=2,
+            num_warps=num_warps,
+            num_stages=1,
         )
         # print(h.asm["ttgir"])
-
         ctx.save_for_backward(q, k, v, o, L)
         ctx.grid = grid
         ctx.sm_scale = sm_scale
         ctx.BLOCK_DMODEL = Lk
+        ctx.causal = causal
+        ctx.split_kernel = split_kernel
         return o
 
     @staticmethod
     def backward(ctx, do):
-        if torch.version.hip is not None:
-            BLOCK = 64
-        else:
-            BLOCK = 128
+        BLOCK = 64
         q, k, v, o, l = ctx.saved_tensors
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
@@ -389,30 +384,65 @@ class _attention(torch.autograd.Function):
         dv = torch.empty_like(v)
         do_scaled = torch.empty_like(do)
         delta = torch.empty_like(l)
-        grid = (triton.cdiv(q.shape[2], BLOCK), q.shape[0] * q.shape[1], 1)
-        _bwd_preprocess[(grid[0] * grid[1], )](
+        # Figure out what BLOCK size fwd used and adjust num_blocks accordingly.
+        # If the two are the same, we don't need this but the bwd pass block size
+        # is smaller than the fwd so we need this scaling to ensure we loop over all
+        # values and don't skip some blocks. 
+        # Alternatively we could compute a new grid but this keeps it consistent
+        # with fwd and easier to reason about.
+        block_scale = (q.shape[2] // ctx.grid[0]) // BLOCK
+        _bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
             o, do,
             do_scaled, delta,
-            BLOCK_M=BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
+            BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
         )
-        _bwd_kernel[(grid[1],)](
-            q, k, v, ctx.sm_scale,
-            o, do_scaled,
-            dq, dk, dv,
-            l,
-            delta,
-            q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-            k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-            v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-            q.shape[0], q.shape[1], q.shape[2],
-            grid[0],
-            BLOCK_M=BLOCK, BLOCK_N=BLOCK,
-            BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
-            num_stages=1,
-        )
+        if not ctx.split_kernel:
+            _bwd_kernel[(ctx.grid[1],)](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dq, dk, dv,
+                l,
+                delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                block_scale * ctx.grid[0],
+                BLOCK_M=BLOCK, BLOCK_N=BLOCK,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+                num_stages=1,
+            )
+        else :
+            _bwd_kernel_dk_dv[(block_scale * ctx.grid[0], ctx.grid[1])](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dk, dv,
+                l,
+                delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                BLOCK_M=64, BLOCK_N=64,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+                num_stages=1,
+            )
+            _bwd_kernel_dq[ctx.grid](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dq,
+                l,
+                delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                BLOCK_M=128, BLOCK_N=64,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+                num_stages=1,
+            )
         # print(h.asm["ttgir"])
-        return dq, dk, dv, None, None
-
+        return dq, dk, dv, None, None, None
 
 attention = _attention.apply
 
@@ -426,6 +456,7 @@ def test_op(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     # This is from the attention algorithm.
     sm_scale = q.shape[-1] ** (-0.5)
     causal = True
+    split_kernel = True
     dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
@@ -440,7 +471,7 @@ def test_op(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     ref_dk, k.grad = k.grad.clone(), None
     ref_dq, q.grad = q.grad.clone(), None
     # # triton implementation
-    tri_out = attention(q, k, v, causal, sm_scale)
+    tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
     tri_out.backward(dout)
     tri_dv, v.grad = v.grad.clone(), None
     tri_dk, k.grad = k.grad.clone(), None
@@ -484,12 +515,13 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, mode, provider, dtype=torch.f
     warmup = 25
     rep = 100
     causal = True
+    split_kernel = True
     if provider == "triton":
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         sm_scale = 1.3
-        fn = lambda: attention(q, k, v, causal, sm_scale)
+        fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':
             o = fn()
             do = torch.randn_like(o)

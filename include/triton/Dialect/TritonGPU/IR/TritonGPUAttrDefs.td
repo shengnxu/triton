@@ -111,7 +111,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
             // 4. TODO: what about f64?
             //
             // maxPhase is set to SIMDWidth / perPhase
-            int vecSize = (eltTy.isF16() ? 64 : 32 ) / typeBitWidth;
+            int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeBitWidth;
             int maxPhase = SIMDWidth / perPhase;
 
             return $_get(context, vecSize, perPhase, maxPhase, order);
@@ -151,11 +151,11 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 
         // ---- begin Ampere ----
         if (mmaEnc.isAmpere()) {
-          int perPhase = 128 / (shape[order[0]] * 4 / dotOpEnc.getMMAv2kWidth());
+          int perPhase = 128 / (shape[order[0]] * 4 / dotOpEnc.getKWidth());
           perPhase = std::max<int>(perPhase, 1);
-          std::vector<size_t> matShape = {8, 8, 4 * dotOpEnc.getMMAv2kWidth()};
+          std::vector<size_t> matShape = {8, 8, 4 * dotOpEnc.getKWidth()};
           // for now, disable swizzle when using transposed int8 tensor cores
-          if ((32 / typeWidthInBit != dotOpEnc.getMMAv2kWidth()) && order[0] == inner)
+          if ((32 / typeWidthInBit != dotOpEnc.getKWidth()) && order[0] == inner)
             return $_get(context, 1, 1, 1, order);
 
           // --- handle A operand ---

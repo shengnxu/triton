@@ -501,12 +501,8 @@ private:
 
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
     unsigned numThreads =
-<<<<<<< HEAD
-        product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) * wavefront_size;
-=======
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) *
         triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
->>>>>>> 5df904233c11a65bd131ead7268f84cca7804275
     unsigned elemsPerThread = std::max<unsigned>(elems / numThreads, 1);
     Value readOffset = threadId;
     for (unsigned round = 0; round < elemsPerThread; ++round) {

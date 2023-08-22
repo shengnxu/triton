@@ -235,15 +235,11 @@ empty = torch.empty(128, device="cuda")
 class _attention(torch.autograd.Function):
 
     @staticmethod
-<<<<<<< HEAD
-    def forward(ctx, q, k, v, sm_scale):
+    def forward(ctx, q, k, v, causal, sm_scale):
         if torch.version.hip is not None:
             BLOCK = 64
         else:
             BLOCK = 128
-=======
-    def forward(ctx, q, k, v, causal, sm_scale):
->>>>>>> 5df904233c11a65bd131ead7268f84cca7804275
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
@@ -278,16 +274,11 @@ class _attention(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-<<<<<<< HEAD
         if torch.version.hip is not None:
             BLOCK = 64
         else:
             BLOCK = 128
-        q, k, v, o, l, m = ctx.saved_tensors
-=======
-        BLOCK = 128
         q, k, v, o, L = ctx.saved_tensors
->>>>>>> 5df904233c11a65bd131ead7268f84cca7804275
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
         dk = torch.empty_like(k)

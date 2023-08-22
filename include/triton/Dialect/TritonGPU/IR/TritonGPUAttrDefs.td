@@ -77,8 +77,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
     AttrBuilder<(ins "DotOperandEncodingAttr":$dotOpEnc,
                      "ArrayRef<int64_t>":$shape,
                      "ArrayRef<unsigned>":$order,
-<<<<<<< HEAD
-                     "Type":$eltTy), [{
+                     "unsigned":$typeWidthInBit), [{
 
 #ifdef USE_ROCM
         // ---- begin GFX908/GFX90A ----
@@ -93,7 +92,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
 
             // number of inner dimension rows per one pattern repeat
             int outerDimGranularity = mfmaEnc.getNonKDim();
-            int typeBitWidth = eltTy.getIntOrFloatBitWidth();
+            int typeBitWidth = typeWidthInBit;
             int innerDimLength = shape[order[0]];
             int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeBitWidth;
 
@@ -110,9 +109,6 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
           }
         }
 #endif
-=======
-                     "unsigned":$typeWidthInBit), [{
->>>>>>> 5df904233c11a65bd131ead7268f84cca7804275
         auto mmaEnc = dotOpEnc.getParent().dyn_cast<MmaEncodingAttr>();
 
         if(!mmaEnc)

@@ -190,6 +190,148 @@ def _bwd_kernel(
         tl.store(dv_ptrs, dv)
         tl.store(dk_ptrs, dk)
 
+@triton.jit
+def _bwd_kernel_dk_dv(
+    Q, K, V, sm_scale, Out, DO,
+    DK, DV,
+    L,
+    D,
+    stride_qz, stride_qh, stride_qm, stride_qk,
+    stride_kz, stride_kh, stride_kn, stride_kk,
+    stride_vz, stride_vh, stride_vk, stride_vn,
+    Z, H, N_CTX,
+    BLOCK_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    start_m = tl.program_id(0)
+    off_hz = tl.program_id(1)
+    qvk_offset = off_hz * stride_qh
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    # Q is consumed depending on block ID. Every block uses
+    # previous block offset by BLOCK_M x D_HEAD.
+    off_q = qvk_offset + start_m * BLOCK_M * stride_qm + offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    # K and V are used transposed only, so load them transposed.
+    off_k = qvk_offset + offs_m[None, :] * stride_kn + offs_d[:, None] * stride_kk
+    off_v = qvk_offset + offs_m[None, :] * stride_vk + offs_d[:, None] * stride_vn
+    off_do = qvk_offset + start_m * BLOCK_M * stride_qm +  offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    # Initialize pointers to Q, K, V
+    q_ptrs = Q + off_q
+    k_ptrs = K + off_k
+    v_ptrs = V + off_v
+    do_ptrs = DO + off_do
+    # pointer to row-wise quantities in value-like data
+    D_ptrs = D + off_hz * N_CTX
+    l_ptrs = L + off_hz * N_CTX
+    qk_scale = sm_scale * 1.44269504
+    # load k and v: they will stay in SRAM throughout
+    k = tl.load(k_ptrs)
+    v = tl.load(v_ptrs)
+    dv = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    dk = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    # This lower loop bound is because of the causal mask. We create a lower triangular
+    # result. The upper triangular is -inf (becomes 0 when we do e^x). As such, it can
+    # be ignored in the GEMM.
+    lo = start_m * BLOCK_M
+    hi = N_CTX
+    # loop over q, do
+    for start_n in range(lo, hi, BLOCK_N):
+        offs_m_curr = offs_n[:, None] + start_n
+        # -- load q, do --
+        q = tl.load(q_ptrs)
+        do = tl.load(do_ptrs)
+        # -- compute qk ----
+        qk = tl.dot(q, k)
+        qk = tl.where(offs_m_curr >= offs_m[None, :], qk, float("-inf"))
+        l_i = tl.load(l_ptrs + offs_m_curr)
+        p = tl.math.exp2(qk * qk_scale - l_i)
+        # compute dv
+        dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
+        Di = tl.load(D_ptrs + offs_m_curr)
+        dp = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32) - Di
+        dp += tl.dot(do, v)
+        # compute ds = p * (dp - delta[:, None])
+        ds = p * dp * sm_scale
+        # compute dk
+        dk += tl.dot(tl.trans(ds.to(Q.dtype.element_ty)), q)
+        # update pointers
+        q_ptrs += BLOCK_N * stride_qm
+        do_ptrs += BLOCK_N * stride_qm
+    # initialize pointers to output
+    off_dk = off_hz * stride_kh + offs_m[:, None] * stride_kn + offs_n[None, :] * stride_kk
+    off_dv = off_hz * stride_vh + offs_m[:, None] * stride_vk + offs_n[None, :] * stride_vn
+    dk_ptrs = DK + off_dk
+    dv_ptrs = DV + off_dv
+    tl.store(dk_ptrs, dk.to(tl.float16))
+    tl.store(dv_ptrs, dv.to(tl.float16))
+
+@triton.jit
+def _bwd_kernel_dq(
+    Q, K, V, sm_scale, Out, DO,
+    DQ,
+    L,
+    D,
+    stride_qz, stride_qh, stride_qm, stride_qk,
+    stride_kz, stride_kh, stride_kn, stride_kk,
+    stride_vz, stride_vh, stride_vk, stride_vn,
+    Z, H, N_CTX,
+    BLOCK_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    start_m = tl.program_id(0)
+    off_hz = tl.program_id(1)
+    qvk_offset = off_hz * stride_qh
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    off_q = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    off_k = qvk_offset + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kk
+    off_v = qvk_offset + offs_n[None, :] * stride_vk + offs_d[:, None] * stride_vn
+    off_do = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    # Initialize pointers to Q, K, V
+    q_ptrs = Q + off_q
+    k_ptrs = K + off_k
+    v_ptrs = V + off_v
+    do_ptrs = DO + off_do
+    # pointer to row-wise quantities in value-like data
+    D_ptrs = D + off_hz * N_CTX
+    l_ptrs = L + off_hz * N_CTX
+    qk_scale = sm_scale * 1.44269504
+    # load q and do: they will stay in SRAM throughout
+    q = tl.load(q_ptrs)
+    do = tl.load(do_ptrs)
+    Di = tl.load(D_ptrs + offs_m)
+    l_i = tl.load(l_ptrs + offs_m)
+    dq = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    lo = 0
+    hi = (start_m + 1) * BLOCK_M
+    for start_n in range(lo, hi, BLOCK_N):
+        # -- load k, v --
+        k = tl.load(k_ptrs)
+        v = tl.load(v_ptrs)
+        # -- compute qk ----
+        qk = tl.dot(q, k)
+        qk = tl.where(offs_m[:, None] >= (offs_n[None, :] + start_n), qk, float("-inf"))
+        p = tl.math.exp2(qk * qk_scale - l_i[:, None])
+        # compute dp = dot(v, do)
+        dp = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32) - Di[:, None]
+        dp += tl.dot(do, v)
+        # compute ds = p * (dp - delta[:, None])
+        ds = p * dp * sm_scale
+        # compute dq. Unfortunately we cannot avoid transpose here as this loop
+        # uses k both normal and transpose.
+        dq += tl.dot(ds.to(Q.dtype.element_ty), tl.trans(k))
+        # update pointers
+        k_ptrs += BLOCK_N * stride_kn
+        v_ptrs += BLOCK_N * stride_vk
+    # initialize pointers to output
+    off_dq = off_hz * stride_qh + offs_m[:, None] * stride_qm + offs_n[None, :] * stride_qk
+    dq_ptrs = DQ + off_dq
+    tl.store(dq_ptrs, dq.to(tl.float16))
+
 empty = torch.empty(128, device="cuda")
 
 

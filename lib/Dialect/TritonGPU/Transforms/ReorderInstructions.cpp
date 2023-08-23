@@ -57,8 +57,8 @@ public:
         return;
       opToMove.insert({op, *user_begin});
     });
-    if (opToMove.size() == 0)
-        llvm::outs() << "nothing in opToMove\n";
+    //if (opToMove.size() == 0)
+        //llvm::outs() << "nothing in opToMove\n";
     for (auto &kv : opToMove) {
       kv.first->moveBefore(kv.second);
       llvm::outs() << "moved: " << kv.first << "\n";
@@ -75,8 +75,8 @@ public:
       // will hoist the conversion outside the loop. Consequently, during
       // computation, we will be able to maintain the Q tensor in the registers.
 #ifdef USE_ROCM
-      if (!dstEncoding.isa<triton::gpu::SharedEncodingAttr>() &&
-          !dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>())
+      if (dstEncoding.isa<triton::gpu::SharedEncodingAttr>() ||
+          dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>())
         return;
 #elif
       if (!dstEncoding.isa<triton::gpu::SharedEncodingAttr>())
@@ -85,7 +85,7 @@ public:
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
-      llvm::outs() << "We are moving one convert_layout right after its def\n";
+      //llvm::outs() << "We are moving one convert_layout right after its def\n";
       //llvm::outs() << op << "\n";
       op->moveAfter(argOp);
     });
@@ -104,7 +104,7 @@ public:
     // conversion for Q tensor in flash attention into the main loop. This
     // increases LDS pressure and requires additional computation in every loop
     // iteration.
-    return;
+    //return;
 #endif
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();

@@ -356,7 +356,10 @@ def test_op(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
     #assert torch.allclose(ref_dk, tri_dk, atol=1e-2, rtol=0)
     #assert torch.allclose(ref_dq, tri_dq, atol=1e-2, rtol=0)
 
-test_op(128, 16, 1024, 64, 128, False, dtype=torch.float16)
+test_op(4, 48, 8192, 64, 128, False, dtype=torch.float16)
+test_op(32, 16, 4096, 64, 128, False, dtype=torch.float16)
+test_op(64, 16, 2048, 64, 128, False, dtype=torch.float16)
+test_op(4, 48, 16384, 64, 128, False, dtype=torch.float16)
 
 
 try:
@@ -429,4 +432,4 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path='.', print_data=True)
+#bench_flash_attention.run(save_path='.', print_data=True)

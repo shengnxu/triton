@@ -57,8 +57,14 @@ public:
         return;
       opToMove.insert({op, *user_begin});
     });
-    for (auto &kv : opToMove)
+    if (opToMove.size() == 0)
+        llvm::outs() << "nothing in opToMove\n";
+    for (auto &kv : opToMove) {
       kv.first->moveBefore(kv.second);
+      llvm::outs() << "moved: " << kv.first << "\n";
+    }
+
+
     // Move convert(load) immediately after dependent load
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();
@@ -79,6 +85,8 @@ public:
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
+      llvm::outs() << "We are moving one convert_layout right after its def\n";
+      //llvm::outs() << op << "\n";
       op->moveAfter(argOp);
     });
     // Move transpositions just after their definition

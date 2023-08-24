@@ -1,7 +1,7 @@
 #! /bin/bash
 
 
-bs=4
+bs=2
 nheads=48
 d=64
 seqlen=16384
@@ -9,7 +9,7 @@ rep=1000
 
 for seqlen in 1024 2048  4096 8192 16384
 do
-    rep=$(echo "16384000 / $seqlen" | bc)
+    rep=$(echo "163840000 / $seqlen" | bc)
     args="-bs $bs -nheads $nheads -d $d -seqlen $seqlen -rep $rep"
 
     start_time=$(date +%s.%3N)

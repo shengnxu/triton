@@ -75,8 +75,8 @@ public:
       // will hoist the conversion outside the loop. Consequently, during
       // computation, we will be able to maintain the Q tensor in the registers.
 #ifdef USE_ROCM
-      if (dstEncoding.isa<triton::gpu::SharedEncodingAttr>() ||
-          dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>())
+      //if (dstEncoding.isa<triton::gpu::SharedEncodingAttr>() ||
+      //   dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>())
         return;
 #elif
       if (!dstEncoding.isa<triton::gpu::SharedEncodingAttr>())

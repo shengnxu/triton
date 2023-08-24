@@ -46,11 +46,11 @@ def ttir_compute_capability_rewrite(mod, arch):
     pm.enable_debug()
     if _is_cuda(arch):
         pm.add_rewrite_tensor_pointer_pass(arch, False)
-    else:
-        device = get_current_device()
-        capabilityTuple = get_device_capability(device)
-        capability = capabilityTuple[0] * 10 + capabilityTuple[1]
+    elif is_hip():
+        capability = 90
         pm.add_rewrite_tensor_pointer_pass(capability, True)
+    else:
+        assert(False, "unsupported target")
     pm.run(mod)
     return mod
 

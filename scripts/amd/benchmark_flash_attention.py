@@ -1,8 +1,11 @@
 import argparse
 import sys
+import git
 
 
-sys.path.insert(0, '../../python/tutorials')
+git_repo = git.Repo('.', search_parent_directories=True)
+git_root = git_repo.git.rev_parse("--show-toplevel")
+sys.path.insert(0, git_root+'/python/tutorials')
 FA = __import__('06-fused-attention')
 
 attention = FA._attention.apply

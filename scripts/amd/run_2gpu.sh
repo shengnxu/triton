@@ -4,6 +4,11 @@
 ## A simple script to run two flash attention forward kernels
 ## with batch2-nheads48-d64 on two GPUs in parallel
 
+TRITON_DIR=$(git rev-parse --show-toplevel)
+
+echo $TRITON_DIR
+BENCHMARK_DRIVER=${TRITON_DIR}/scripts/amd/benchmark_flash_attention.py
+
 bs=2
 nheads=48
 d=64
@@ -15,10 +20,10 @@ do
 
     start_time=$(date +%s.%3N)
     export ROCR_VISIBLE_DEVICES=0
-    python ./benchmark_flash_attention.py $args &
+    python ${BENCHMARK_DRIVER} $args &
 
     export ROCR_VISIBLE_DEVICES=1
-    python ./benchmark_flash_attention.py $args
+    python ${BENCHMARK_DRIVER} $args
 
     wait
     end_time=$(date +%s.%3N)

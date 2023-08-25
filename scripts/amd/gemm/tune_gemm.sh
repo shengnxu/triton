@@ -19,4 +19,4 @@ reduceSpace=$5
 
 DRIVER=$(echo $DRIVER | sed -e "s/matmul_grouped.py/matmul.py/g")
 
-python $DRIVER -m $M -n $N -k $K
+python $DRIVER -m $M -n $N -k $K --specify_size

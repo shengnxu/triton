@@ -10,8 +10,9 @@ std::unique_ptr<Pass> createCombineOpsPass();
 
 std::unique_ptr<Pass> createReorderBroadcastPass();
 
-std::unique_ptr<Pass>
-createRewriteTensorPointerPass(int computeCapability = 80);
+std::unique_ptr<Pass> 
+createRewriteTensorPointerPass(int computeCapability = 80,
+                                       bool isROCM = false);
 
 } // namespace triton
 

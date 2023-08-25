@@ -10,8 +10,11 @@ import triton
 import triton.language as tl
 import yaml
 import os
+import traceback
 
-
+@triton.heuristics({
+    'EVEN_K': lambda args: args['K'] % (args['BLOCK_SIZE_K'] * args['SPLIT_K']) == 0,
+})
 @triton.jit
 def matmul_kernel_splitK(
     # Pointers to matrices
@@ -201,7 +204,7 @@ def leaky_relu(x):
 # We can now create a convenience wrapper function that only takes two input tensors,
 # and (1) checks any shape constraint; (2) allocates the output; (3) launches the above kernel.
 
-def use_split_k(size_m, size_n, size_k):
+def check_split_k(size_m, size_n, size_k):
     return (size_m < 64 or size_n < 64) and size_k > 1024
 
 def triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warps):
@@ -209,12 +212,12 @@ def triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warp
     size_n = b.shape[1]
     size_k = a.shape[1]
 
-    if use_split_k(size_m, size_n, size_k):
+    if check_split_k(size_m, size_n, size_k):
         grid_splitK = lambda META: (
             triton.cdiv(size_m, META['BLOCK_SIZE_M']) * triton.cdiv(size_n, META['BLOCK_SIZE_N']),
             META['SPLIT_K']
         )
-        matmul_kernel_splitK[grid](a_ptr=a, b_ptr=b, c_ptr=c,
+        matmul_kernel_splitK[grid_splitK](a_ptr=a, b_ptr=b, c_ptr=c,
                             stride_am=a.stride(0), stride_ak=a.stride(1),
                             stride_bk=b.stride(0), stride_bn=b.stride(1),
                             stride_cm=c.stride(0), stride_cn=c.stride(1),
@@ -225,7 +228,8 @@ def triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warp
                             SPLIT_K=split_k,
                             num_stages=1,
                             GROUP_SIZE_M=group_m,
-                            num_warps=num_warps)
+                            num_warps=num_warps,
+                            ACTIVATION="")
     else:
         grid = lambda META: (
             triton.cdiv(size_m, META['BLOCK_SIZE_M']) * triton.cdiv(size_n, META['BLOCK_SIZE_N']),
@@ -240,48 +244,10 @@ def triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warp
                             BLOCK_SIZE_K=block_k,
                             num_stages=1,
                             GROUP_SIZE_M=group_m,
-                            num_warps=num_warps)
+                            num_warps=num_warps,
+                            ACTIVATION="")
 
     return c
-
-# def matmul(a, b, activation=""):
-#     # Check constraints.
-#     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
-#     assert a.is_contiguous(), "Matrix A must be contiguous"
-#     assert b.is_contiguous(), "Matrix B must be contiguous"
-#     M, K = a.shape
-#     K, N = b.shape
-#     # Allocates output.
-#     c = torch.empty((M, N), device=a.device, dtype=a.dtype)
-#     # 1D launch kernel where each block gets its own program.
-
-#     if (M < 64 or N < 64) and K > 1024:
-#         grid_splitK = lambda META: (
-#             triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
-#             META['SPLIT_K']
-#         )
-#         matmul_kernel_splitK[grid_splitK](
-#             a, b, c,
-#             M, N, K,
-#             a.stride(0), a.stride(1),
-#             b.stride(0), b.stride(1),
-#             c.stride(0), c.stride(1),
-#             ACTIVATION=activation
-#         )
-#     else:
-#         grid = lambda META: (
-#             triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
-#         )
-#         matmul_kernel[grid](
-#             a, b, c,
-#             M, N, K,
-#             a.stride(0), a.stride(1),
-#             b.stride(0), b.stride(1),
-#             c.stride(0), c.stride(1),
-#             ACTIVATION=activation
-#         )
-
-#     return c
 
 
 def get_variant_golden(a, b):
@@ -304,38 +270,58 @@ def get_variant_golden(a, b):
 # if no tuning config is available, get these default small tuning space
 # to run the gemm performance
 def get_default_tuning_configs(SIZE_M, SIZE_N, SIZE_K, use_split_k):
-    configs=[
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=1),
-    ] if use_split_k else [
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
-    ]
+    result = []
+    if use_split_k:
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 2}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 2}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8, 'NUM_WARPS': 2}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10, 'NUM_WARPS': 2}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10, 'NUM_WARPS': 1}
+        result.append(config)
+    else:
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 4}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 2}
+        result.append(config)
+        config = {'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1, 'NUM_WARPS': 2}
+        result.append(config)
 
     # add M, N, K to each tuning config
-    for i, c in enumerate(configs):
+    for i, c in enumerate(result):
         c["M"] = SIZE_M
         c["N"] = SIZE_N
         c["K"] = SIZE_K
-        configs[i] = c
+        result[i] = c
 
-    return configs
+    return result
 
 def get_full_tuning_sapce(SIZE_M, SIZE_N, SIZE_K, use_split_k):
     # tune space
@@ -361,11 +347,11 @@ def get_full_tuning_sapce(SIZE_M, SIZE_N, SIZE_K, use_split_k):
                             tuning_config["M"] = SIZE_M
                             tuning_config["N"] = SIZE_N
                             tuning_config["K"] = SIZE_K
-                            tuning_config["BLOCK_M"] = block_m
-                            tuning_config["BLOCK_N"] = block_n
-                            tuning_config["BLOCK_K"] = block_k
+                            tuning_config["BLOCK_SIZE_M"] = block_m
+                            tuning_config["BLOCK_SIZE_N"] = block_n
+                            tuning_config["BLOCK_SIZE_K"] = block_k
                             tuning_config["SPLIT_K"] = 1
-                            tuning_config["GROUP_M"] = group_m
+                            tuning_config["GROUP_SIZE_M"] = group_m
                             tuning_config["NUM_WARPS"] = num_warps
                             full_tuning_sapce.append(tuning_config)
                         else:
@@ -379,11 +365,11 @@ def get_full_tuning_sapce(SIZE_M, SIZE_N, SIZE_K, use_split_k):
                                 tuning_config["M"] = SIZE_M
                                 tuning_config["N"] = SIZE_N
                                 tuning_config["K"] = SIZE_K
-                                tuning_config["BLOCK_M"] = block_m
-                                tuning_config["BLOCK_N"] = block_n
+                                tuning_config["BLOCK_SIZE_M"] = block_m
+                                tuning_config["BLOCK_SIZE_N"] = block_n
                                 tuning_config["SPLIT_K"] = split_k
-                                tuning_config["BLOCK_K"] = block_k
-                                tuning_config["GROUP_M"] = group_m
+                                tuning_config["BLOCK_SIZE_K"] = block_k
+                                tuning_config["GROUP_SIZE_M"] = group_m
                                 tuning_config["NUM_WARPS"] = num_warps
                                 full_tuning_sapce.append(tuning_config)
     return full_tuning_sapce
@@ -391,13 +377,16 @@ def get_full_tuning_sapce(SIZE_M, SIZE_N, SIZE_K, use_split_k):
 
 def get_gemm_tuning_cache_file():
     TRITON_DIR = os.getenv('TRITON_DIR')
-    file_path_name = TRITON_DIR + "/scripts/amd/gemm/gemm_tuning_config.yaml"
+    if TRITON_DIR is not None:
+        file_path_name = TRITON_DIR + "/scripts/amd/gemm/gemm_tuning_config.yaml"
+    else:
+        file_path_name = os.getcwd() + "/gemm_tuning_config.yaml"
+    print(f'file_path_name = {file_path_name}')
     return file_path_name
 
-
 # get the full tuning space to tune the input GEMM size
-def get_tuning_space(SIZE_M, SIZE_N, SIZE_K, use_split_k, force_tuning, force_no_tuning):
-    use_split_k = use_split_k(SIZE_M, SIZE_N, SIZE_K)
+def get_tuning_space(SIZE_M, SIZE_N, SIZE_K, force_tuning, force_no_tuning):
+    use_split_k = check_split_k(SIZE_M, SIZE_N, SIZE_K)
     if force_tuning:
         return get_full_tuning_sapce(SIZE_M, SIZE_N, SIZE_K, use_split_k)
     else:
@@ -449,35 +438,28 @@ def update_cached_tuning_config(best_config):
     with open(tuning_config_cache_file, "w") as config_file:
         yaml.dump(tuning_configs, config_file)
 
-# def tune_gemm(SIZE_M, SIZE_N, SIZE_K, num_warps, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, SPLIT_K, kpack, mPerWave):
-def tune_gemm(SIZE_M, SIZE_N, SIZE_K, tuning_configs, compare_result, force_no_tuning):
+
+def run_speed(SIZE_M, SIZE_N, SIZE_K, tuning_configs, outfile, compare_result, force_no_tuning):
     a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float16)
     b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float16)
     c = torch.zeros((SIZE_M, SIZE_N), device=a.device, dtype=torch.float32)
-
-    warmup_iter_num = 10
-    repeat_num = 50
-    # heuristics: large input matrices repeat less number of times
-    if SIZE_M >= 512 and SIZE_N >= 512 and SIZE_K >= 512:
-        warmup_iter_num = 5
-        repeat_num = 20
 
     index = 0
     best_config = {}
     min_time = 1024 * 1024 * 1024
     for tune_config in tuning_configs:
-        block_m = tune_config["BLOCK_M"]
-        block_n = tune_config["BLOCK_N"]
-        block_k = tune_config["BLOCK_K"]
+        block_m = tune_config["BLOCK_SIZE_M"]
+        block_n = tune_config["BLOCK_SIZE_N"]
+        block_k = tune_config["BLOCK_SIZE_K"]
         split_k = tune_config["SPLIT_K"]
-        group_m = tune_config["GROUP_M"]
+        group_m = tune_config["GROUP_SIZE_M"]
         num_warps = tune_config["NUM_WARPS"]
         
         try:
-            perf_config_str = f'{block_m},{block_n},{block_k},{split_k},{num_warps}'
+            perf_config_str = f'{block_m},{block_n},{block_k},{split_k},{group_m},{num_warps}'
             c.zero_()
-            exec_time = triton.testing.do_bench(lambda: triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warps), warmup=warmup_iter_num, rep=repeat_num)
-        except Exception:
+            exec_time = triton.testing.do_bench(lambda: triton_matmul(a, b, c, block_m, block_n, block_k, split_k, group_m, num_warps))
+        except:
             print("Exception happened in matmul, skip")
             continue
 
@@ -512,9 +494,17 @@ def tune_gemm(SIZE_M, SIZE_N, SIZE_K, tuning_configs, compare_result, force_no_t
         update_cached_tuning_config(best_config)
 
     flops = 2 * SIZE_M * SIZE_N * SIZE_K / min_time / 1.0e9
-    best_config_str = f'{best_config["BLOCK_M"]},{best_config["BLOCK_N"]},{best_config["BLOCK_K"]},{best_config["SPLIT_K"]},{best_config["NUM_WARPS"]}'
+    best_config_str = f'{best_config["BLOCK_SIZE_M"]},{best_config["BLOCK_SIZE_N"]},{best_config["BLOCK_SIZE_K"]},{best_config["SPLIT_K"]},{best_config["GROUP_SIZE_M"]},{best_config["NUM_WARPS"]}'
     strr = f'Best Result: {SIZE_M},{SIZE_N},{SIZE_K} best parameters: {best_config_str} --> {flops} TFLOPS, {min_time * 1000000}'
     print(strr)
+    if outfile != "":
+        ofile = open(outfile, 'a')
+        ofile.write(f'{strr}\n')
+        ofile.close()
+
+    flops = lambda ms: 2 * SIZE_M * SIZE_N * SIZE_K / min_time / 1000000000
+    return min_time * 1000000, flops(min_time)
+
 
 
 def parse_args():
@@ -526,7 +516,13 @@ def parse_args():
     parser.add_argument("-m", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-n", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-k", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("--compare", action='store_false', default=False)
+    parser.add_argument("-dtype", type=str, default='fp16', help="Input data type, default is fp16")
+    parser.add_argument("--specify_type", action='store_true', default=False, help="Whether user specify data type, default false")
+    parser.add_argument("--specify_size", action='store_true', default=False, help="Whether user specify input matrix size, default false")
+    parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
+    parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
+    parser.add_argument("--outfile", type=str, default="", help='outputfile to store tuning results')
+
     # default behavior is: If tuning config is available for an input size,
     # Use the tuning config to run performance directly. Otherwise, if
     # tuning config is unavailable, we will tune the input size and cache
@@ -548,10 +544,6 @@ def parse_args():
 def main():
     args = parse_args()
 
-    M = args.m
-    N = args.n
-    K = args.k
-
     force_tuning = False
     if args.force_tuning:
         force_tuning = True
@@ -564,12 +556,46 @@ def main():
         print("Flags \"--force_tuning\" and \"--force_no_tuning\" cannot be set at the same time!")
         sys.exit(1)
 
-    compare_result=False
-    if args.compare:
-        compare_result=True
+    dtype = torch.float16
+    if args.specify_type:
+        if args.dtype == 'fp16':
+            dtype = torch.float16
+        elif args.dtype == 'fp32':
+            dtype = torch.float32
+        elif args.dtype == 'bf16':
+            dtype = torch.bfloat16
+        else:
+            print(f"Unsupported datatype {args.dtype}")
+            sys.exit(1)
 
-    tuning_configs = get_tuning_space(M, N, K, force_tuning, force_no_tuning)
-    tune_gemm(M, N, K, tuning_configs, compare_result, force_no_tuning)
+    mnks = []
+    if args.specify_size:
+        M = args.m
+        N = args.n
+        K = args.k
+        if M == 0 or N == 0 or K == 0:
+            print(f"Input matrix size: (M {M}, N {N}, K {K}) contains dim size 0!")
+        mnks = [(M, N, K)]
+    else:
+        matrix_size_file = args.gemm_size_file
+        if matrix_size_file == "" or not os.path.isfile(matrix_size_file):
+            print(f"Matrix size file: {matrix_size_file} does not exist!")
+            sys.exit(1)
+
+        with open(matrix_size_file) as file:
+            matrix_sizes = yaml.safe_load(file)
+
+        for sizes in matrix_sizes:
+            M = sizes['M']
+            N = sizes['N']
+            K = sizes['K']
+            mnks.append((M, N, K))
+
+    for (m, n, k) in mnks:
+        tuning_configs = get_tuning_space(m, n, k, force_tuning, force_no_tuning)
+        min_ms, flops = run_speed(m, n, k, tuning_configs, args.outfile, args.compare, force_no_tuning)
+        print(f'SIZE: {m}, {n}, {k}, TFLOPS: {flops}, time: {min_ms * 1000000}')
+
 
 if __name__ == '__main__':
     sys.exit(main())

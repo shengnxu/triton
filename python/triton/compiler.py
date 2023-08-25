@@ -1612,9 +1612,12 @@ def get_amdgpu_arch_fulldetails():
     get the amdgpu full ISA details for compiling:
     i.e., arch_triple: amdgcn-amd-amdhsa; arch_name: gfx906; arch_features: sramecc+:xnack-
     """
+
     try:
         arch_info = _triton.get_arch_info()
         warpsize = _triton.get_warp_size()
+        if (not arch_info):
+            return None
         gfx_arch_details = re.search('amd.*', arch_info).group(0).strip().split('--')
         arch_triple = gfx_arch_details[0]
         arch_name_features = gfx_arch_details[1].split(':')
@@ -1625,7 +1628,7 @@ def get_amdgpu_arch_fulldetails():
                             "-" + re.search('\\w+', arch_name_features[2]).group(0)
         return [arch_triple, arch_name, arch_features]
     except Exception as e:
-        print("Error: Attempting to get amgpu ISA Details {}".format(e))
+        print("Unable to get amgpu ISA Details {}".format(e))
         return None
 
 def make_stub(name, signature, constants):
@@ -1871,7 +1874,11 @@ def _get_amdgcn_bitcode_paths():
                                              "oclc_unsafe_math_off.bc",
                                              "oclc_wavefrontsize64_on.bc"]
     
-      gfx_arch = _get_amdgcn_bitcode_paths.discovered_gfx_arch_fulldetails[1]
+      gfx_full = _get_amdgcn_bitcode_paths.discovered_gfx_arch_fulldetails
+      if (gfx_full == None):
+          return {}
+      else:
+          gfx_arch = gfx_full[1]
       gfx_arch_id = re.search('gfx(\\w+)', gfx_arch).group(1).strip()
 
       gpu_arch_specific_bitcode_library = 'oclc_isa_version_' + gfx_arch_id + ".bc"

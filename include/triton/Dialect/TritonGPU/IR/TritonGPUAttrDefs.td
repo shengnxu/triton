@@ -92,10 +92,8 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
             const int SIMDWidth = 16;
 
             // number of inner dimension rows per one pattern repeat
-            int outerDimGranularity = mfmaEnc.getNonKDim();
-            int typeBitWidth = typeWidthInBit;
             int innerDimLength = shape[order[0]];
-            int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeBitWidth;
+            int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeWidthInBit;
 
             int perPhase = std::max(1, elemsPerOneBanksRow / innerDimLength);
             // Note: the following settings is customized to avoid

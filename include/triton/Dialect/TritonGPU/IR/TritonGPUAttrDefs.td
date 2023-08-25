@@ -109,7 +109,7 @@ A_{3, 2}  A_{3, 3}  A_{3, 0}  A_{3, 1} ...   [phase 1] /
             // 4. TODO: what about f64?
             //
             // maxPhase is set to SIMDWidth / perPhase
-            int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeBitWidth;
+            int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
             int maxPhase = SIMDWidth / perPhase;
 
             return $_get(context, vecSize, perPhase, maxPhase, order);

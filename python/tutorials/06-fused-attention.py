@@ -8,6 +8,7 @@ This is a Triton implementation of the Flash Attention algorithm
 
 import pytest
 import torch
+import sys
 
 import triton
 import triton.language as tl

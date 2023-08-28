@@ -14,7 +14,7 @@ import os
 # global flag to indicate whether using the full tuing space
 tuning_full_space = False
 
-def get_configs_io_bound(use_split_k):
+def get_full_tuning_space(use_split_k):
     configs = []
     if not tuning_full_space:
         return configs
@@ -43,7 +43,7 @@ def get_configs_io_bound(use_split_k):
 #   - An auto-tuning *key* whose change in values will trigger evaluation of all the
 #       provided configs
 @triton.autotune(
-    configs= get_configs_io_bound(True) if tuning_full_space else [
+    configs= get_full_tuning_space(True) if tuning_full_space else [
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
@@ -56,7 +56,7 @@ def get_configs_io_bound(use_split_k):
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=2),
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=4),
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=1),
-    ] + get_configs_io_bound(True),
+    ],
     key=['M', 'N', 'K'],
 )
 @triton.heuristics({
@@ -158,7 +158,7 @@ def matmul_kernel_splitK(
 
 # Kernel no split K
 @triton.autotune(
-    configs= get_configs_io_bound(False) if tuning_full_space else [
+    configs= get_full_tuning_space(False) if tuning_full_space else [
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),

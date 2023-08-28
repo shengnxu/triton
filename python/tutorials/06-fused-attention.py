@@ -363,7 +363,7 @@ empty = torch.empty(128, device="cuda")
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, sm_scale, split_kernel):
+    def forward(ctx, q, k, v, causal, sm_scale, split_kernel=False):
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
@@ -478,11 +478,11 @@ attention = _attention.apply
 
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, P_SEQ',
-                         [(4, 48, 1024, 64, 0),
-                          (4, 48, 2048, 64, 0),
-                          (4, 48, 4096, 64, 0),
-                          (4, 48, 8192, 64, 0),
-                          (4, 48, 16384, 64, 0)
+                         [(4, 48, 1024, 64, 128),
+                          (4, 48, 2048, 64, 128),
+                          (4, 48, 4096, 64, 128),
+                          (4, 48, 8192, 64, 128),
+                          (4, 48, 16384, 64, 128)
                           ])
 @pytest.mark.parametrize('causal', [False, True])
 def test_op(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
@@ -500,7 +500,7 @@ def test_op(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
     p = torch.softmax(p.float(), dim=-1).half()
     ref_out = torch.matmul(p, v)
     # triton implementation
-    tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
+    tri_out = attention(q, k, v, causal, sm_scale)
     # compare
     assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
 

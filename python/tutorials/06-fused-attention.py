@@ -453,7 +453,7 @@ class _attention(torch.autograd.Function):
                 k.stride(0), k.stride(1), k.stride(2), k.stride(3),
                 v.stride(0), v.stride(1), v.stride(2), v.stride(3),
                 q.shape[0], q.shape[1], q.shape[2],
-                BLOCK_M=64, BLOCK_N=64,
+                BLOCK_M=BLOCK, BLOCK_N=BLOCK,
                 BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
                 num_stages=1,
             )
@@ -467,7 +467,7 @@ class _attention(torch.autograd.Function):
                 k.stride(0), k.stride(1), k.stride(2), k.stride(3),
                 v.stride(0), v.stride(1), v.stride(2), v.stride(3),
                 q.shape[0], q.shape[1], q.shape[2],
-                BLOCK_M=128, BLOCK_N=64,
+                BLOCK_M=2*BLOCK, BLOCK_N=BLOCK,
                 BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
                 num_stages=1,
             )
@@ -485,7 +485,7 @@ attention = _attention.apply
                           (4, 48, 16384, 64, 128)
                           ])
 @pytest.mark.parametrize('causal', [False, True])
-def test_op(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
     torch.manual_seed(20)
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()

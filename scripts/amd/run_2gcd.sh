@@ -35,6 +35,7 @@ else
     repA[16384]=100
 fi
 
+echo "Benchmarking FA $mode kernel on 2 GCDs"
 for seqlen in 1024 2048  4096 8192 16384
 do
     rep=${repA[$seqlen]}

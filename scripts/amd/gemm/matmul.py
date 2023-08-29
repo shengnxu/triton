@@ -432,7 +432,11 @@ def main():
             split_k = best_config.kwargs['SPLIT_K'] if 'SPLIT_K' in best_config.kwargs.keys() else 1
             # num_warps = best_config['num_warps']
             num_warps = best_config.num_warps
-            run_cmd = f'python rocprof_gemm.py -m {m} -n {n} -k {k} \
+            driver = 'rocprof_gemm.py'
+            TRITON_DIR = os.getenv('TRITON_DIR')
+            if TRITON_DIR is not None:
+                driver = os.path.join(TRITON_DIR, 'scripts/amd/gemm', driver)
+            run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
                         -group_m {group_m} -split_k {split_k} -num_warps {num_warps} \
                         -dtype {dtype_str}'

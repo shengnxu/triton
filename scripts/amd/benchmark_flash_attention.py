@@ -53,7 +53,7 @@ def main(args=None):
     parser.add_argument("-d", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-seqlen", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-rep", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("-mode", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("-mode", type=str, default=argparse.SUPPRESS)
 
     parsed_args = parser.parse_args(args)
 

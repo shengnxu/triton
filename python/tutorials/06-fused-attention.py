@@ -229,50 +229,77 @@ def _bwd_kernel_dk_dv(
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     qvk_offset = off_hz * stride_qh
+    qdo_offset = qvk_offset + start_m * BLOCK_M * stride_qm
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, BLOCK_DMODEL)
-    # Q is consumed depending on block ID. Every block uses
-    # previous block offset by BLOCK_M x D_HEAD.
-    off_q = qvk_offset + start_m * BLOCK_M * stride_qm + offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
-    # K and V are used transposed only, so load them transposed.
-    off_k = qvk_offset + offs_m[None, :] * stride_kn + offs_d[:, None] * stride_kk
-    off_v = qvk_offset + offs_m[None, :] * stride_vk + offs_d[:, None] * stride_vn
-    off_do = qvk_offset + start_m * BLOCK_M * stride_qm +  offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + qdo_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(0, 0),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    K_block_ptr = tl.make_block_ptr(
+        base=K + qvk_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, start_m * BLOCK_M),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    V_block_ptr = tl.make_block_ptr(
+        base=V + qvk_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
+        strides=(stride_vn, stride_vk),
+        offsets=(0, start_m * BLOCK_M),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    DO_block_ptr = tl.make_block_ptr(
+        base=DO + qdo_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(0, 0),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    #off_q = qvk_offset + start_m * BLOCK_M * stride_qm + offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    #off_k = qvk_offset + offs_m[None, :] * stride_kn + offs_d[:, None] * stride_kk
+    #off_v = qvk_offset + offs_m[None, :] * stride_vk + offs_d[:, None] * stride_vn
+    #off_do = qvk_offset + start_m * BLOCK_M * stride_qm +  offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
     # Initialize pointers to Q, K, V
-    q_ptrs = Q + off_q
-    k_ptrs = K + off_k
-    v_ptrs = V + off_v
-    do_ptrs = DO + off_do
+    #q_ptrs = Q + off_q
+    #k_ptrs = K + off_k
+    #v_ptrs = V + off_v
+    #do_ptrs = DO + off_do
     # pointer to row-wise quantities in value-like data
     D_ptrs = D + off_hz * N_CTX
     l_ptrs = L + off_hz * N_CTX
     qk_scale = sm_scale * 1.44269504
     # load k and v: they will stay in SRAM throughout
-    k = tl.load(k_ptrs)
+    k = tl.load(K_block_ptr)
     k = (k * qk_scale).to(tl.float16)
-    v = tl.load(v_ptrs)
+    v = tl.load(V_block_ptr)
     dv = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     dk = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
-    # This lower loop bound is because of the causal mask. We create a lower triangular
-    # result. The upper triangular is -inf (becomes 0 when we do e^x). As such, it can
-    # be ignored in the GEMM.
     lo = start_m * BLOCK_M
     hi = N_CTX
-    # loop over q, do
+    # loop over q, do 
     for start_n in range(lo, hi, BLOCK_N):
         offs_m_curr = offs_n[:, None] + start_n
-        # -- load q, do --
-        q = tl.load(q_ptrs)
-        do = tl.load(do_ptrs)
+        # -- load k, v --
+        q = tl.load(Q_block_ptr)
+        do = tl.load(DO_block_ptr)
         # -- compute qk ----
         qk = tl.dot(q, k)
         qk = tl.where(offs_m_curr >= offs_m[None, :], qk, float("-inf"))
         l_i = tl.load(l_ptrs + offs_m_curr)
         p = tl.math.exp2(qk - l_i)
-        # compute dv
         dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
+        # compute dp = dot(v, do)
         Di = tl.load(D_ptrs + offs_m_curr)
         dp = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32) - Di
         dp += tl.dot(do, v)
@@ -281,15 +308,33 @@ def _bwd_kernel_dk_dv(
         # compute dk
         dk += tl.dot(tl.trans(ds.to(Q.dtype.element_ty)), q)
         # update pointers
-        q_ptrs += BLOCK_N * stride_qm
-        do_ptrs += BLOCK_N * stride_qm
+        Q_block_ptr = tl.advance(Q_block_ptr, (BLOCK_N, 0))
+        DO_block_ptr = tl.advance(DO_block_ptr, (BLOCK_N, 0))
+        #q_ptrs += BLOCK_N * stride_qm
+        #do_ptrs += BLOCK_N * stride_qm
     # initialize pointers to output
-    off_dk = off_hz * stride_kh + offs_m[:, None] * stride_kn + offs_n[None, :] * stride_kk
-    off_dv = off_hz * stride_vh + offs_m[:, None] * stride_vk + offs_n[None, :] * stride_vn
-    dk_ptrs = DK + off_dk
-    dv_ptrs = DV + off_dv
-    tl.store(dk_ptrs, (dk * sm_scale).to(tl.float16))
-    tl.store(dv_ptrs, dv.to(tl.float16))
+    DK_block_ptr = tl.make_block_ptr(
+        base=DK + qvk_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_kn, stride_kk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    DV_block_ptr = tl.make_block_ptr(
+        base=DV + qvk_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_vk, stride_vn),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    #off_dk = off_hz * stride_kh + offs_m[:, None] * stride_kn + offs_n[None, :] * stride_kk
+    #off_dv = off_hz * stride_vh + offs_m[:, None] * stride_vk + offs_n[None, :] * stride_vn
+    #dk_ptrs = DK + off_dk
+    #dv_ptrs = DV + off_dv
+    tl.store(DK_block_ptr, (dk * sm_scale).to(tl.float16))
+    tl.store(DV_block_ptr, dv.to(tl.float16))
 
 @triton.jit
 def _bwd_kernel_dq(
@@ -311,32 +356,65 @@ def _bwd_kernel_dq(
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, BLOCK_DMODEL)
-    off_q = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
-    off_k = qvk_offset + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kk
-    off_v = qvk_offset + offs_n[None, :] * stride_vk + offs_d[:, None] * stride_vn
-    off_do = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + qvk_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    K_block_ptr = tl.make_block_ptr(
+        base=K + qvk_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, 0),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    V_block_ptr = tl.make_block_ptr(
+        base=V + qvk_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
+        strides=(stride_vn, stride_vk),
+        offsets=(0, 0),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    DO_block_ptr = tl.make_block_ptr(
+        base=DO + qvk_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    #off_q = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    #off_k = qvk_offset + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kk
+    #off_v = qvk_offset + offs_n[None, :] * stride_vk + offs_d[:, None] * stride_vn
+    #off_do = qvk_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
     # Initialize pointers to Q, K, V
-    q_ptrs = Q + off_q
-    k_ptrs = K + off_k
-    v_ptrs = V + off_v
-    do_ptrs = DO + off_do
+    #q_ptrs = Q + off_q
+    #k_ptrs = K + off_k
+    #v_ptrs = V + off_v
+    #do_ptrs = DO + off_do
     # pointer to row-wise quantities in value-like data
     D_ptrs = D + off_hz * N_CTX
     l_ptrs = L + off_hz * N_CTX
     qk_scale = sm_scale * 1.44269504
     # load q and do: they will stay in SRAM throughout
-    q = tl.load(q_ptrs)
+    q = tl.load(Q_block_ptr)
     q = (q * qk_scale).to(tl.float16)
-    do = tl.load(do_ptrs)
+    do = tl.load(DO_block_ptr)
     Di = tl.load(D_ptrs + offs_m)
     l_i = tl.load(l_ptrs + offs_m)
     dq = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    # loop over k, v 
     lo = 0
     hi = (start_m + 1) * BLOCK_M
     for start_n in range(lo, hi, BLOCK_N):
         # -- load k, v --
-        k = tl.load(k_ptrs)
-        v = tl.load(v_ptrs)
+        k = tl.load(K_block_ptr)
+        v = tl.load(V_block_ptr)
         # -- compute qk ----
         qk = tl.dot(q, k)
         qk = tl.where(offs_m[:, None] >= (offs_n[None, :] + start_n), qk, float("-inf"))
@@ -346,16 +424,23 @@ def _bwd_kernel_dq(
         dp += tl.dot(do, v)
         # compute ds = p * (dp - delta[:, None])
         ds = p * dp
-        # compute dq. Unfortunately we cannot avoid transpose here as this loop
-        # uses k both normal and transpose.
+        # compute dq
         dq += tl.dot(ds.to(Q.dtype.element_ty), tl.trans(k))
         # update pointers
-        k_ptrs += BLOCK_N * stride_kn
-        v_ptrs += BLOCK_N * stride_vk
+        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+        V_block_ptr = tl.advance(V_block_ptr, (0, BLOCK_N))
     # initialize pointers to output
-    off_dq = off_hz * stride_qh + offs_m[:, None] * stride_qm + offs_n[None, :] * stride_qk
-    dq_ptrs = DQ + off_dq
-    tl.store(dq_ptrs, (dq * sm_scale).to(tl.float16))
+    DQ_block_ptr = tl.make_block_ptr(
+        base=DQ + qvk_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    #off_dq = off_hz * stride_qh + offs_m[:, None] * stride_qm + offs_n[None, :] * stride_qk
+    #dq_ptrs DQDblock_Q +off_dq
+    tl.store(DQ_block_ptr, (dq * sm_scale).to(tl.float16))
 
 empty = torch.empty(128, device="cuda")
 
@@ -409,7 +494,7 @@ class _attention(torch.autograd.Function):
         BLOCK = 64
         q, k, v, o, l = ctx.saved_tensors
         do = do.contiguous()
-        dq = torch.zeros_like(q, dtype=torch.float32)
+        dq = torch.zeros_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
         do_scaled = torch.empty_like(do)
@@ -549,76 +634,76 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, P_SEQ, dtype=torch.float16):
     assert torch.allclose(ref_dq, tri_dq, atol=5e-2, rtol=0)
 
 
-try:
-    from flash_attn.flash_attn_interface import \
-        flash_attn_qkvpacked_func as flash_attn_func
-    FLASH_VER = 2
-except BaseException:
-    try:
-        from flash_attn.flash_attn_interface import flash_attn_func
-        FLASH_VER = 1
-    except BaseException:
-        FLASH_VER = None
-HAS_FLASH = FLASH_VER is not None
-
-BATCH, N_HEADS, N_CTX, D_HEAD = 4, 48, 4096, 64
-# vary seq length for fixed head and batch=4
-configs = [triton.testing.Benchmark(
-    x_names=['N_CTX'],
-    x_vals=[2**i for i in range(10, 15)],
-    line_arg='provider',
-    line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-    line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-    styles=[('red', '-'), ('blue', '-')],
-    ylabel='ms',
-    plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}',
-    args={'H': N_HEADS, 'BATCH': BATCH, 'D_HEAD': D_HEAD, 'dtype': torch.float16, 'mode': mode, 'causal': causal}
-) for mode in ['fwd'] for causal in [False]]
-
-
-@triton.testing.perf_report(configs)
-def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"):
-    assert mode in ['fwd', 'bwd']
-    warmup = 25
-    rep = 100
-    causal = True
-    split_kernel = True
-    if provider == "triton":
-        q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        sm_scale = 1.3
-        fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
-        if mode == 'bwd':
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn((BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True)
-        if FLASH_VER == 1:
-            lengths = torch.full((BATCH,), fill_value=N_CTX, device=device)
-            cu_seqlens = torch.zeros((BATCH + 1,), device=device, dtype=torch.int32)
-            cu_seqlens[1:] = lengths.cumsum(0)
-            qkv = qkv.reshape(BATCH * N_CTX, 3, H, D_HEAD)
-            fn = lambda: flash_attn_func(qkv, cu_seqlens, 0., N_CTX, causal=causal)
-        elif FLASH_VER == 2:
-            fn = lambda: flash_attn_func(qkv, causal=causal)
-        else:
-            raise ValueError(f'unknown {FLASH_VER = }')
-        if mode == 'bwd':
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 2. * BATCH * H * N_CTX * N_CTX * D_HEAD
-    total_flops = 2 * flops_per_matmul
-    if causal:
-        total_flops *= 0.5
-    if mode == 'bwd':
-        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-    return total_flops / ms * 1e-9
-
-
-# only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path='.', print_data=True)
+#try:
+#    from flash_attn.flash_attn_interface import \
+#        flash_attn_qkvpacked_func as flash_attn_func
+#    FLASH_VER = 2
+#except BaseException:
+#    try:
+#        from flash_attn.flash_attn_interface import flash_attn_func
+#        FLASH_VER = 1
+#    except BaseException:
+#        FLASH_VER = None
+#HAS_FLASH = FLASH_VER is not None
+#
+#BATCH, N_HEADS, N_CTX, D_HEAD = 4, 48, 4096, 64
+## vary seq length for fixed head and batch=4
+#configs = [triton.testing.Benchmark(
+#    x_names=['N_CTX'],
+#    x_vals=[2**i for i in range(10, 15)],
+#    line_arg='provider',
+#    line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+#    line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+#    styles=[('red', '-'), ('blue', '-')],
+#    ylabel='ms',
+#    plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}',
+#    args={'H': N_HEADS, 'BATCH': BATCH, 'D_HEAD': D_HEAD, 'dtype': torch.float16, 'mode': mode, 'causal': causal}
+#) for mode in ['fwd'] for causal in [False]]
+#
+#
+#@triton.testing.perf_report(configs)
+#def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"):
+#    assert mode in ['fwd', 'bwd']
+#    warmup = 25
+#    rep = 100
+#    causal = True
+#    split_kernel = True
+#    if provider == "triton":
+#        q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#        k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#        sm_scale = 1.3
+#        fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
+#        if mode == 'bwd':
+#            o = fn()
+#            do = torch.randn_like(o)
+#            fn = lambda: o.backward(do, retain_graph=True)
+#        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#    if provider == "flash":
+#        qkv = torch.randn((BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True)
+#        if FLASH_VER == 1:
+#            lengths = torch.full((BATCH,), fill_value=N_CTX, device=device)
+#            cu_seqlens = torch.zeros((BATCH + 1,), device=device, dtype=torch.int32)
+#            cu_seqlens[1:] = lengths.cumsum(0)
+#            qkv = qkv.reshape(BATCH * N_CTX, 3, H, D_HEAD)
+#            fn = lambda: flash_attn_func(qkv, cu_seqlens, 0., N_CTX, causal=causal)
+#        elif FLASH_VER == 2:
+#            fn = lambda: flash_attn_func(qkv, causal=causal)
+#        else:
+#            raise ValueError(f'unknown {FLASH_VER = }')
+#        if mode == 'bwd':
+#            o = fn()
+#            do = torch.randn_like(o)
+#            fn = lambda: o.backward(do, retain_graph=True)
+#        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#    flops_per_matmul = 2. * BATCH * H * N_CTX * N_CTX * D_HEAD
+#    total_flops = 2 * flops_per_matmul
+#    if causal:
+#        total_flops *= 0.5
+#    if mode == 'bwd':
+#        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+#    return total_flops / ms * 1e-9
+#
+#
+## only works on post-Ampere GPUs right now
+#bench_flash_attention.run(save_path='.', print_data=True)

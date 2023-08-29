@@ -84,6 +84,7 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
   if (metadata.isKernel) {
     if (isROCM) {
       func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+      func->addFnAttr("amdgpu-waves-per-eu", "3");
       func->addFnAttr("amdgpu-flat-work-group-size",
                       "1, " + std::to_string(threadsPerCTA));
       func->addFnAttr("denormal-fp-math-f32", "preserve-sign");

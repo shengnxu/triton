@@ -639,7 +639,7 @@ configs = [triton.testing.Benchmark(
     line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
     styles=[('red', '-'), ('blue', '-')],
     ylabel='ms',
-    plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}',
+    plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-causal={causal}-{mode}',
     args={'H': N_HEADS, 'BATCH': BATCH, 'D_HEAD': D_HEAD, 'dtype': torch.float16, 'mode': mode, 'causal': causal}
 ) for mode in ['fwd', 'bwd'] for causal in [True, False]]
 

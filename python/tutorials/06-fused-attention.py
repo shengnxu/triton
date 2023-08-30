@@ -2,8 +2,13 @@
 Fused Attention
 ===============
 
-This is a Triton implementation of the Flash Attention algorithm
-(see: Dao et al., https://arxiv.org/pdf/2205.14135v2.pdf; Rabe and Staats https://arxiv.org/pdf/2112.05682v2.pdf)
+This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao (https://tridao.me/publications/flash2/flash2.pdf)
+
+Extra Credits:
+- Original flash attention paper (https://arxiv.org/abs/2205.14135)
+- Rabe and Staats (https://arxiv.org/pdf/2112.05682v2.pdf)
+- Adam P. Goucher for simplified vector math
+
 """
 
 import pytest
@@ -11,6 +16,11 @@ import torch
 
 import triton
 import triton.language as tl
+
+
+@triton.jit
+def max_fn(x, y):
+    return tl.math.max(x, y)
 
 
 @triton.jit
@@ -124,7 +134,6 @@ def _bwd_preprocess(
     do = tl.load(DO + off_m[:, None] * D_HEAD + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
-    tl.store(NewDO + off_m[:, None] * D_HEAD + off_n[None, :], do)
     tl.store(Delta + off_m, delta)
 
 
@@ -141,10 +150,12 @@ def _bwd_kernel(
     num_block,
     BLOCK_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    CAUSAL: tl.constexpr,
 ):
     off_hz = tl.program_id(0)
     off_z = off_hz // H
     off_h = off_hz % H
+    qk_scale = sm_scale * 1.44269504
     # offset pointers for batch/head
     Q += off_z * stride_qz + off_h * stride_qh
     K += off_z * stride_qz + off_h * stride_qh
@@ -156,7 +167,10 @@ def _bwd_kernel(
     # See fwd pass above for explanation.
     qk_scale = sm_scale * 1.44269504
     for start_n in range(0, num_block):
-        lo = start_n * BLOCK_M
+        if CAUSAL:
+            lo = start_n * BLOCK_M
+        else:
+            lo = 0
         # initialize row/col offsets
         offs_qm = lo + tl.arange(0, BLOCK_M)
         offs_n = start_n * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -449,6 +463,7 @@ class _attention(torch.autograd.Function):
         L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
         P_SEQ = 0 if q.shape[-2] == k.shape[-2] else k.shape[-2] - q.shape[-2]
 
+        num_warps = 4 if Lk <= 64 else 8
         _fwd_kernel[grid](
             q, k, v, sm_scale,
             L,

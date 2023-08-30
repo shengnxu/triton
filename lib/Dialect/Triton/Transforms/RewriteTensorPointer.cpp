@@ -471,6 +471,7 @@ public:
 
   void runOnOperation() override {
     // Only rewrite if the hardware does not support
+
     if (!isROCM && computeCapability >= 90)
       return;
 

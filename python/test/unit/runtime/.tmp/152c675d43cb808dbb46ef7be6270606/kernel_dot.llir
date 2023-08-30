@@ -1,0 +1,129 @@
+; ModuleID = 'LLVMDialectModule'
+source_filename = "LLVMDialectModule"
+
+@global_smem = external local_unnamed_addr addrspace(3) global [0 x i8]
+
+; Function Attrs: mustprogress nofree nounwind willreturn
+define amdgpu_kernel void @kernel_dot_0d(ptr addrspace(1) nocapture %0) local_unnamed_addr #0 {
+  %2 = tail call i32 @llvm.amdgcn.workitem.id.x()
+  %3 = and i32 %2, 255
+  %4 = zext i32 %3 to i64
+  %5 = getelementptr float, ptr addrspace(1) %0, i64 %4
+  %6 = addrspacecast ptr addrspace(1) %5 to ptr
+  %7 = load <1 x float>, ptr %6, align 4
+  %8 = getelementptr float, ptr addrspace(3) @global_smem, i64 %4
+  store <1 x float> %7, ptr addrspace(3) %8, align 4
+  fence syncscope("workgroup") release
+  tail call void @llvm.amdgcn.s.barrier()
+  fence syncscope("workgroup") acquire
+  %9 = and i32 %2, 15
+  %10 = zext i32 %9 to i64
+  %11 = getelementptr float, ptr addrspace(3) @global_smem, i64 %10
+  %12 = load float, ptr addrspace(3) %11, align 4
+  %13 = getelementptr float, ptr addrspace(3) %11, i64 16
+  %14 = load float, ptr addrspace(3) %13, align 4
+  %15 = getelementptr float, ptr addrspace(3) %11, i64 32
+  %16 = load float, ptr addrspace(3) %15, align 4
+  %17 = getelementptr float, ptr addrspace(3) %11, i64 48
+  %18 = load float, ptr addrspace(3) %17, align 4
+  %19 = getelementptr float, ptr addrspace(3) %11, i64 64
+  %20 = load float, ptr addrspace(3) %19, align 4
+  %21 = getelementptr float, ptr addrspace(3) %11, i64 80
+  %22 = load float, ptr addrspace(3) %21, align 4
+  %23 = getelementptr float, ptr addrspace(3) %11, i64 96
+  %24 = load float, ptr addrspace(3) %23, align 4
+  %25 = getelementptr float, ptr addrspace(3) %11, i64 112
+  %26 = load float, ptr addrspace(3) %25, align 4
+  %27 = getelementptr float, ptr addrspace(3) %11, i64 128
+  %28 = load float, ptr addrspace(3) %27, align 4
+  %29 = getelementptr float, ptr addrspace(3) %11, i64 144
+  %30 = load float, ptr addrspace(3) %29, align 4
+  %31 = getelementptr float, ptr addrspace(3) %11, i64 160
+  %32 = load float, ptr addrspace(3) %31, align 4
+  %33 = getelementptr float, ptr addrspace(3) %11, i64 176
+  %34 = load float, ptr addrspace(3) %33, align 4
+  %35 = getelementptr float, ptr addrspace(3) %11, i64 192
+  %36 = load float, ptr addrspace(3) %35, align 4
+  %37 = getelementptr float, ptr addrspace(3) %11, i64 208
+  %38 = load float, ptr addrspace(3) %37, align 4
+  %39 = getelementptr float, ptr addrspace(3) %11, i64 224
+  %40 = load float, ptr addrspace(3) %39, align 4
+  %41 = getelementptr float, ptr addrspace(3) %11, i64 240
+  %42 = load float, ptr addrspace(3) %41, align 4
+  %43 = and i32 %2, 240
+  %44 = zext i32 %43 to i64
+  %45 = getelementptr float, ptr addrspace(3) @global_smem, i64 %44
+  %46 = load float, ptr addrspace(3) %45, align 4
+  %47 = getelementptr float, ptr addrspace(3) %45, i64 1
+  %48 = load float, ptr addrspace(3) %47, align 4
+  %49 = getelementptr float, ptr addrspace(3) %45, i64 2
+  %50 = load float, ptr addrspace(3) %49, align 4
+  %51 = getelementptr float, ptr addrspace(3) %45, i64 3
+  %52 = load float, ptr addrspace(3) %51, align 4
+  %53 = getelementptr float, ptr addrspace(3) %45, i64 4
+  %54 = load float, ptr addrspace(3) %53, align 4
+  %55 = getelementptr float, ptr addrspace(3) %45, i64 5
+  %56 = load float, ptr addrspace(3) %55, align 4
+  %57 = getelementptr float, ptr addrspace(3) %45, i64 6
+  %58 = load float, ptr addrspace(3) %57, align 4
+  %59 = getelementptr float, ptr addrspace(3) %45, i64 7
+  %60 = load float, ptr addrspace(3) %59, align 4
+  %61 = getelementptr float, ptr addrspace(3) %45, i64 8
+  %62 = load float, ptr addrspace(3) %61, align 4
+  %63 = getelementptr float, ptr addrspace(3) %45, i64 9
+  %64 = load float, ptr addrspace(3) %63, align 4
+  %65 = getelementptr float, ptr addrspace(3) %45, i64 10
+  %66 = load float, ptr addrspace(3) %65, align 4
+  %67 = getelementptr float, ptr addrspace(3) %45, i64 11
+  %68 = load float, ptr addrspace(3) %67, align 4
+  %69 = getelementptr float, ptr addrspace(3) %45, i64 12
+  %70 = load float, ptr addrspace(3) %69, align 4
+  %71 = getelementptr float, ptr addrspace(3) %45, i64 13
+  %72 = load float, ptr addrspace(3) %71, align 4
+  %73 = getelementptr float, ptr addrspace(3) %45, i64 14
+  %74 = load float, ptr addrspace(3) %73, align 4
+  %75 = getelementptr float, ptr addrspace(3) %45, i64 15
+  %76 = load float, ptr addrspace(3) %75, align 4
+  %77 = tail call float @llvm.fmuladd.f32(float %46, float %12, float 0.000000e+00)
+  %78 = tail call float @llvm.fmuladd.f32(float %48, float %14, float %77)
+  %79 = tail call float @llvm.fmuladd.f32(float %50, float %16, float %78)
+  %80 = tail call float @llvm.fmuladd.f32(float %52, float %18, float %79)
+  %81 = tail call float @llvm.fmuladd.f32(float %54, float %20, float %80)
+  %82 = tail call float @llvm.fmuladd.f32(float %56, float %22, float %81)
+  %83 = tail call float @llvm.fmuladd.f32(float %58, float %24, float %82)
+  %84 = tail call float @llvm.fmuladd.f32(float %60, float %26, float %83)
+  %85 = tail call float @llvm.fmuladd.f32(float %62, float %28, float %84)
+  %86 = tail call float @llvm.fmuladd.f32(float %64, float %30, float %85)
+  %87 = tail call float @llvm.fmuladd.f32(float %66, float %32, float %86)
+  %88 = tail call float @llvm.fmuladd.f32(float %68, float %34, float %87)
+  %89 = tail call float @llvm.fmuladd.f32(float %70, float %36, float %88)
+  %90 = tail call float @llvm.fmuladd.f32(float %72, float %38, float %89)
+  %91 = tail call float @llvm.fmuladd.f32(float %74, float %40, float %90)
+  %92 = tail call float @llvm.fmuladd.f32(float %76, float %42, float %91)
+  store float %92, ptr addrspace(1) %5, align 4
+  ret void
+}
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare i32 @llvm.amdgcn.workitem.id.x() #1
+
+; Function Attrs: convergent mustprogress nocallback nofree nounwind willreturn
+declare void @llvm.amdgcn.s.barrier() #2
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare float @llvm.fmuladd.f32(float, float, float) #1
+
+attributes #0 = { mustprogress nofree nounwind willreturn "amdgpu-flat-work-group-size"="1, 256" "amdgpu-unsafe-fp-atomics"="true" "denormal-fp-math-f32"="preserve-sign" }
+attributes #1 = { mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none) }
+attributes #2 = { convergent mustprogress nocallback nofree nounwind willreturn }
+
+!nvvm.annotations = !{!0}
+!opencl.ocl.version = !{!1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1, !1}
+!llvm.ident = !{!2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2, !2}
+!llvm.module.flags = !{!3, !4}
+
+!0 = !{ptr @kernel_dot_0d, !"kernel", i32 1}
+!1 = !{i32 2, i32 0}
+!2 = !{!"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"}
+!3 = !{i32 1, !"wchar_size", i32 4}
+!4 = !{i32 8, !"PIC Level", i32 1}

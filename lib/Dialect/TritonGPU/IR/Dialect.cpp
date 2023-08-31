@@ -1,6 +1,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include <numeric>
+#include <iostream>
 
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/OpImplementation.h"
@@ -673,8 +674,13 @@ DotOperandEncodingAttr::getMMAv2Rep(ArrayRef<int64_t> shape,
   }
 }
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ();
+}
+
 static SmallVector<int64_t> getMFMAInstrShape(Type abElemType) {
-  if (abElemType.isF16())
+  // Now fp8 uses f16 mfma instruction
+  if (abElemType.isF16() or isF8(abElemType))
     return {32l, 32l, 8l}; // FP32_FP16_FP16_FP32
   if (abElemType.isF32())
     return {32l, 32l, 2l}; // FP32_FP32_FP32_FP32;

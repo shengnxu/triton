@@ -53,12 +53,16 @@ int getSizePerThreadForMN(BlockedEncodingAttr layout, bool isM) {
   return isM ? mSizePerThread : nSizePerThread;
 }
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ();
+}
+
 Value getStructFromValueTable(ArrayRef<Value> vals,
                               ConversionPatternRewriter &rewriter, Location loc,
                               TritonGPUToLLVMTypeConverter *typeConverter,
                               Type elemTy) {
 #ifdef USE_ROCM
-  Type resElemTy = elemTy.isBF16() ? i16_ty : elemTy;
+  Type resElemTy = elemTy.isBF16() ? i16_ty : (isF8(elemTy) ? i8_ty : elemTy);
   SmallVector<Type> elemTypes(vals.size(), resElemTy);
   SmallVector<Value> elems;
   elems.reserve(vals.size());

@@ -771,6 +771,10 @@ const std::string S8_to_Bf16 =
     "}";
 #endif
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ();
+}
+
 static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
                                         Type inType, Type ouType) {
   auto inTensorTy = inType.dyn_cast<RankedTensorType>();
@@ -994,7 +998,9 @@ public:
   LogicalResult
   matchAndRewrite(SourceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto resultTy = op.getType();
+    auto opType = op.getType();
+    auto resultTy = isF8(opType) ? i8_ty : opType;
+
     Location loc = op->getLoc();
     // element type
     auto resultElementTy = getElementTypeOrSelf(resultTy);
@@ -1023,6 +1029,12 @@ public:
         if (!static_cast<bool>(v))
           return failure();
         resultVals.push_back(v);
+        // if (resultTy == opType) {
+        //   resultVals.push_back(v);
+        // }
+        // else {
+        //   resultVals.push_back(bitcast(v, resultTy));
+        // }
       }
       it += curr.size();
     }

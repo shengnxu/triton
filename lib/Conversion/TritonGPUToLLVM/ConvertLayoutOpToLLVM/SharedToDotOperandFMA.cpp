@@ -57,12 +57,25 @@ Value getStructFromValueTable(ArrayRef<Value> vals,
                               ConversionPatternRewriter &rewriter, Location loc,
                               TritonGPUToLLVMTypeConverter *typeConverter,
                               Type elemTy) {
+#ifdef USE_ROCM
+  Type resElemTy = elemTy.isBF16() ? i16_ty : elemTy;
+  SmallVector<Type> elemTypes(vals.size(), resElemTy);
+  SmallVector<Value> elems;
+  elems.reserve(vals.size());
+  for (auto &val : vals) {
+    if (resElemTy == elemTy)
+      elems.push_back(val);
+    else
+      elems.push_back(bitcast(val, resElemTy));
+  }
+#else
   SmallVector<Type> elemTypes(vals.size(), elemTy);
   SmallVector<Value> elems;
   elems.reserve(vals.size());
   for (auto &val : vals) {
     elems.push_back(val);
   }
+#endif
   MLIRContext *ctx = elemTy.getContext();
   Type structTy = struct_ty(elemTypes);
   return typeConverter->packLLElements(loc, elems, rewriter, structTy);

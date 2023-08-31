@@ -1028,13 +1028,12 @@ public:
       for (auto v : curr) {
         if (!static_cast<bool>(v))
           return failure();
-        resultVals.push_back(v);
-        // if (resultTy == opType) {
-        //   resultVals.push_back(v);
-        // }
-        // else {
-        //   resultVals.push_back(bitcast(v, resultTy));
-        // }
+        if (resultTy == opType) {
+          resultVals.push_back(v);
+        }
+        else {
+          resultVals.push_back(bitcast(v, resultTy));
+        }
       }
       it += curr.size();
     }

@@ -79,7 +79,7 @@ if __name__ == '__main__':
         module = optimize_ttgir(module, num_stages=3, arch=args.gfx)
         # triton-gpu-ir -> llvm-ir
         # use compute_capability == 80
-        module = ttgir_to_llir(module, extern_libs=None, arch=args.gfx,  waves_per_eu=0)
+        module = ttgir_to_llir(module, extern_libs=None, arch=args.gfx)
         # llvm-ir -> amdgcn asm, hsaco binary
         module, hsaco_path = llir_to_amdgcn_and_hsaco(module, arch_name, arch_triple, arch_features)
 
@@ -103,7 +103,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     # triton-gpu-ir -> llvm-ir
-    module = ttgir_to_llir(module, extern_libs=None, arch=arch,  waves_per_eu=0)
+    module = ttgir_to_llir(module, extern_libs=None, arch=arch)
     if args.target == 'llvm-ir':
         print(module)
         sys.exit(0)

@@ -162,7 +162,7 @@ def _add_external_libs(mod, libs):
     add_external_libs(mod, list(libs.keys()), list(libs.values()))
 
 
-def ttgir_to_llir(mod, extern_libs, arch, tma_infos, waves_per_eu):
+def ttgir_to_llir(mod, extern_libs, arch, tma_infos, waves_per_eu=0):
     if extern_libs:
         _add_external_libs(mod, extern_libs)
     # TODO: separate tritongpu_to_llvmir for different backends

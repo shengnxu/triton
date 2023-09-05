@@ -62,6 +62,7 @@ static SmallVector<Value>
 Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
+std::cout << "loc10" << std::endl;
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -69,7 +70,7 @@ Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
   a0 = insert_element(fp8x4VecTy, a0, v1, i32_val(3));
   a0 = bitcast(a0, i32_ty);
-
+std::cout << "loc11" << std::endl;
   Value a1 = undef(fp8x4VecTy);
   a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(0));
   a1 = insert_element(fp8x4VecTy, a1, v2, i32_val(1));
@@ -77,15 +78,28 @@ Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
   a1 = insert_element(fp8x4VecTy, a1, v3, i32_val(3));
   a1 = bitcast(a1, i32_ty);
 
+std::cout << "loc12" << std::endl;
   auto fp16x2VecTy = vec_ty(f16_ty, 2);
   auto fp16x2Vec0 = bitcast(a0, fp16x2VecTy);
   auto fp16x2Vec1 = bitcast(a1, fp16x2VecTy);
+std::cout << "loc13" << std::endl;
+  auto r1 = extract_element(f16_ty, fp16x2Vec0, i32_val(0));
+std::cout << "loc14" << std::endl;
+  auto r2 = extract_element(f16_ty, fp16x2Vec0, i32_val(1));
+std::cout << "loc15" << std::endl;
+  auto r3 = extract_element(f16_ty, fp16x2Vec1, i32_val(0));
+std::cout << "loc16" << std::endl;
+  auto r4 = extract_element(f16_ty, fp16x2Vec1, i32_val(1));
+std::cout << "loc17" << std::endl;
 
-  return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
-	   extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
-	   extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
-	   extract_element(f16_ty, fp16x2Vec1, i32_val(1))
-	 };
+  return {r1, r2, r3, r4};
+
+
+  // return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
+	//    extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
+	//    extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
+	//    extract_element(f16_ty, fp16x2Vec1, i32_val(1))
+	//  };
 }
 #else
 const std::string Fp8E5M2_to_Fp16 = "{                           \n"
@@ -772,7 +786,7 @@ const std::string S8_to_Bf16 =
 #endif
 
 static bool isF8(Type eType) {
-  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ();
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
 }
 
 static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
@@ -866,15 +880,21 @@ inline SmallVector<Value> unpackI32(const SmallVector<Value> &inValues,
   auto tensorTy = srcTy.dyn_cast<RankedTensorType>();
   if (!tensorTy)
     return inValues;
+  std::cout << "unpackI32, loc1" << std::endl;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>()))
+  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>())) {
+    std::cout << "unpackI32, loc2" << std::endl;
     return inValues;
+  }
+  std::cout << "unpackI32, loc3" << std::endl;
   SmallVector<Value> outValues;
   for (auto v : inValues) {
     // cast i32 to appropriate eltType vector and extract elements
+    std::cout << "unpackI32, loc4" << std::endl;
     auto eltType = typeConverter->convertType(tensorTy.getElementType());
     auto vecType = vec_ty(eltType, 32 / eltType.getIntOrFloatBitWidth());
     auto vec = bitcast(v, vecType);
+    std::cout << "unpackI32, loc5" << std::endl;
     for (int i = 0; i < 32 / eltType.getIntOrFloatBitWidth(); i++) {
       outValues.push_back(extract_element(vec, i32_val(i)));
     }
@@ -890,15 +910,20 @@ inline SmallVector<Value> packI32(const SmallVector<Value> &inValues,
   if (!tensorTy)
     return inValues;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>()))
+  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>())) {
+    std::cout << "packI32, loc1" << std::endl;
     return inValues;
+  }
   SmallVector<Value> outValues;
+  std::cout << "packI32, loc2" << std::endl;
   auto eltType = typeConverter->convertType(tensorTy.getElementType());
   int vecWidth = 32 / eltType.getIntOrFloatBitWidth();
   auto vecType = vec_ty(eltType, vecWidth);
   for (int i = 0; i < inValues.size(); i += vecWidth) {
+    std::cout << "packI32, loc3" << std::endl;
     Value vec = undef(vecType);
     for (int j = 0; j < vecWidth; j++) {
+      std::cout << "packI32, loc4" << std::endl;
       vec = insert_element(vec, inValues[i + j], i32_val(j));
     }
     outValues.push_back(bitcast(vec, i32_ty));
@@ -998,8 +1023,9 @@ public:
   LogicalResult
   matchAndRewrite(SourceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto opType = op.getType();
-    auto resultTy = isF8(opType) ? i8_ty : opType;
+    // auto resultTy = isF8(opType) ? i8_ty : opType;
+    auto resultTy = op.getType();
+    auto opType = resultTy;
 
     Location loc = op->getLoc();
     // element type
@@ -1223,22 +1249,47 @@ struct FpToFpOpConversion
            "FP8 casting only support tensors with 4-aligned sizes");
     auto srcElementType = getElementType(op.getFrom());
     auto dstElementType = getElementType(op.getResult());
+    std::string type = "fp32";
+    if (srcElementType.isF16()) {
+      type = "fp16";
+    }
+    else if (isF8(srcElementType)) {
+      type = "fp8";
+    }
+    std::string typed = "fp32";
+    if (dstElementType.isF16()) {
+      typed = "fp16";
+    }
+    else if (isF8(dstElementType)) {
+      typed = "fp8";
+    }
+    std::cout << "srcIs: " << type << ", dstIs: " << typed << std::endl;
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
+    std::cout << "isSrcFP32 = " << isSrcFP32 << ", isDstFP32 = " << isDstFP32 << std::endl;
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
                                      isDstFP32 ? f16_ty : dstElementType);
     SmallVector<Value> inVals = {operands[0][0], operands[1][0], operands[2][0],
                                  operands[3][0]};
+    std::cout << "loc1" << std::endl;
     if (isSrcFP32)
-      for (Value &v : inVals)
+    {
+      std::cout << "loc1.1" << std::endl;
+      for (Value &v : inVals) {
+        std::cout << "loc1.1.1" << std::endl;
         v = convertFp32ToFp16(loc, rewriter, v);
+      }
+    }
+    std::cout << "loc2" << std::endl;
     SmallVector<Value> outVals =
         cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);
+    std::cout << "loc3" << std::endl;
     assert(outVals.size() == inVals.size());
     if (isDstFP32)
       for (Value &v : outVals)
         v = convertFp16ToFp32(loc, rewriter, v);
     // Pack values
+    std::cout << "loc4" << std::endl;
     return outVals;
   }
 };

@@ -2,6 +2,7 @@
 
 #include "../ConvertLayoutOpToLLVM.h"
 #include "../Utility.h"
+#include <iostream>
 
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getOrder;
@@ -10,11 +11,22 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+}
+
 Type getShemPtrTy(Type elemTy) {
   if (elemTy.isBF16()) {
     auto ctx = elemTy.getContext();
     return ptr_ty(type::i16Ty(ctx), 3);
   }
+
+  if (isF8(elemTy)) {
+    std::cout << "int8_ptr" << std::endl;
+    auto ctx = elemTy.getContext();
+    return ptr_ty(type::i8Ty(ctx), 3);
+  }
+
   return ptr_ty(elemTy, 3);
 }
 
@@ -413,6 +425,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   assert(mfmaLayout.getNonKDim() == 32);
   auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
 
+  std::cout << "loadA" << std::endl;
+
   auto aTensorTy = tensor.getType().cast<RankedTensorType>();
   SmallVector<int64_t> shape(aTensorTy.getShape().begin(),
                              aTensorTy.getShape().end());
@@ -460,6 +474,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
     Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
+    resElemTy = isF8(aElemTy) ? i8_ty : resElemTy;
 
     int loadsPerThread = offsets.size() / (numRepM * numRepK);
     const int elemsPerLoad = numOfElems / loadsPerThread;
@@ -471,6 +486,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
         Value valVec = undef(vecTy);
         for (unsigned loadId = 0; loadId < loadsPerThread; ++loadId) {
           auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
+          // auto loadVecTy = vec_ty(resElemTy, elemsPerLoad);
           Value loadOffset =
               offsets[m * loadsPerThread * numRepK + k * loadsPerThread + loadId];
           Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
@@ -489,7 +505,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        if (aElemTy == i8_ty)
+        if (aElemTy == i8_ty or isF8(aElemTy))
           valVec = bitcast(valVec, i32_ty);
         ha.push_back(valVec);
       }
@@ -501,6 +517,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
     Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
+    resElemTy = isF8(resElemTy) ? i8_ty : resElemTy;
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
 
@@ -531,7 +548,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        if (aElemTy == i8_ty)
+        if (aElemTy == i8_ty or isF8(aElemTy))
           valVec = bitcast(valVec, i32_ty);
         ha.push_back(valVec);
       }
@@ -552,6 +569,9 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto mfmaLayout = encoding.getParent().cast<MfmaEncodingAttr>();
   assert(mfmaLayout.getNonKDim() == 32);
   auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+
+  std::cout << "loadB" << std::endl;
+
 
   auto bTensorTy = tensor.getType().cast<RankedTensorType>();
   ArrayRef<int64_t> shape = bTensorTy.getShape();
@@ -609,6 +629,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
     Type resElemTy = bElemTy.isBF16() ? i16_ty : bElemTy;
+    resElemTy = isF8(bElemTy) ? i8_ty : resElemTy;
 
     Type smemPtrTy = getShemPtrTy(bElemTy);
 
@@ -640,7 +661,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        if (bElemTy == i8_ty)
+        if (bElemTy == i8_ty or isF8(bElemTy))
           valVec = bitcast(valVec, i32_ty);
         hb.push_back(valVec);
       }
@@ -653,6 +674,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
 
     Type resElemTy = bElemTy.isBF16() ? i16_ty : bElemTy;
+    resElemTy = isF8(bElemTy) ? i8_ty : resElemTy;
 
     Type smemPtrTy = getShemPtrTy(bElemTy);
 
@@ -682,7 +704,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        if (bElemTy == i8_ty)
+        if (bElemTy == i8_ty or isF8(bElemTy))
           valVec = bitcast(valVec, i32_ty);
         hb.push_back(valVec);
       }

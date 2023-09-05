@@ -50,13 +50,16 @@ Type TritonGPUToLLVMTypeConverter::convertTritonPointerType(
 Value TritonGPUToLLVMTypeConverter::packLLElements(
     Location loc, ValueRange resultVals, ConversionPatternRewriter &rewriter,
     Type type) {
+  llvm::outs() << "input_type = " << type << "\n";
   auto structType = this->convertType(type).dyn_cast<LLVM::LLVMStructType>();
+  llvm::outs() << "structType = " << structType << "\n";
   if (!structType) {
     assert(resultVals.size() == 1);
     return *resultVals.begin();
   }
 
   auto elementTypes = structType.getBody();
+  llvm::outs() << "elementTypes = " << elementTypes << "\n";
   if (elementTypes.size() != resultVals.size()) {
     emitError(loc) << " size mismatch when packing elements for LLVM struct"
                    << " expected " << elementTypes.size() << " but got "
@@ -83,15 +86,19 @@ SmallVector<Value> TritonGPUToLLVMTypeConverter::unpackLLElements(
     Location loc, Value llvmStruct, ConversionPatternRewriter &rewriter,
     Type type) {
   assert(bool(llvmStruct) && "can not unpack null values");
+// llvm::outs() << "unpackLLElements, loc1\n";
   if (llvmStruct.getType().isIntOrIndexOrFloat() ||
       llvmStruct.getType().isa<triton::PointerType>() ||
-      llvmStruct.getType().isa<LLVM::LLVMPointerType>())
+      llvmStruct.getType().isa<LLVM::LLVMPointerType>()) {
+// llvm::outs() << "unpackLLElements, loc2\n";
     return {llvmStruct};
+  }
   ArrayRef<Type> types =
       llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
   SmallVector<Value> results(types.size());
   for (unsigned i = 0; i < types.size(); ++i) {
     Type type = types[i];
+// llvm::outs() << "unpackedTypes = " << type << "\n";
     results[i] = extract_val(type, llvmStruct, i);
   }
   return results;

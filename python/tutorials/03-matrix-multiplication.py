@@ -156,6 +156,7 @@ import triton
 import triton.language as tl
 import sys
 import argparse
+import pytest
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
 #   - A list of `triton.Config` objects that define different configurations of
@@ -309,11 +310,22 @@ def matmul(a, b, activation=""):
 # ---------
 #
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
-
-def test_correctness():
+@pytest.mark.parametrize("M, N, K, in_dtype, out_dtype",
+[ (*shape, in_dtype, out_dtype)
+    for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
+                  (128, 128, 64), (64, 128, 128), (32, 128, 64),
+                  (64, 64, 32), (32, 32, 128), (128, 128, 64),
+                   (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
+    for in_dtype, out_dtype in [('int8', 'int8'),
+                                ('float16', 'float16'),
+                                ('bfloat16', 'bfloat16'),
+                                ('float16', 'float32'),
+                                ('float32', 'float32')]]
+)
+def test_correctness(M, N, K, in_dtype, out_dtype):
     torch.manual_seed(0)
-    a = torch.randn((512, 512), device='cuda', dtype=torch.float16)
-    b = torch.randn((512, 512), device='cuda', dtype=torch.float16)
+    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
+    b = torch.randn((K, N), device='cuda', dtype=torch.float16)
     triton_output = matmul(a, b)
     torch_output = torch.matmul(a, b)
     print(f"triton_output={triton_output}")
@@ -323,6 +335,8 @@ def test_correctness():
         print("✅ Triton and Torch match")
     else:
         print("❌ Triton and Torch differ")
+        assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol)
+
 
 # %%
 # Benchmark
@@ -388,8 +402,6 @@ def main():
     global verbose
     args = parse_args()
     verbose=args.v
-
-    test_correctness()
     benchmark.run(show_plots=True, print_data=True)
 
 if __name__ == '__main__':

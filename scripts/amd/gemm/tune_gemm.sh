@@ -7,7 +7,7 @@
 ## $5: 1: reduced tuning space
 
 if [[ $# -lt 4 ]];then
-    echo "Usage: ./tritonProfiler.sh <driver program> M N K"
+    echo "Usage: ./tune_gemm.sh <driver program> M N K"
     exit
 fi
 

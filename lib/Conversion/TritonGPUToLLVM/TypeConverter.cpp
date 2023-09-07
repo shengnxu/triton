@@ -50,16 +50,15 @@ Type TritonGPUToLLVMTypeConverter::convertTritonPointerType(
 Value TritonGPUToLLVMTypeConverter::packLLElements(
     Location loc, ValueRange resultVals, ConversionPatternRewriter &rewriter,
     Type type) {
-  llvm::outs() << "input_type = " << type << "\n";
+  llvm::outs() << "packLLElements, input_type = " << type << "\n";
   auto structType = this->convertType(type).dyn_cast<LLVM::LLVMStructType>();
-  llvm::outs() << "structType = " << structType << "\n";
+  llvm::outs() << "packLLElements, structType = " << structType << "\n";
   if (!structType) {
     assert(resultVals.size() == 1);
     return *resultVals.begin();
   }
 
   auto elementTypes = structType.getBody();
-  llvm::outs() << "elementTypes = " << elementTypes << "\n";
   if (elementTypes.size() != resultVals.size()) {
     emitError(loc) << " size mismatch when packing elements for LLVM struct"
                    << " expected " << elementTypes.size() << " but got "
@@ -82,23 +81,52 @@ Value TritonGPUToLLVMTypeConverter::packLLElements(
   return llvmStruct;
 }
 
+SmallVector<Value> TritonGPUToLLVMTypeConverter::packMfmaOperand(
+    const SmallVector<Value> &inValues, Type srcTy,
+    ConversionPatternRewriter &rewriter, Location loc) {
+  auto tensorTy = srcTy.dyn_cast<RankedTensorType>();
+  if (!tensorTy)
+    return inValues;
+  auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
+  if (!(encoding && encoding.getParent().isa<MfmaEncodingAttr>())) {
+    return inValues;
+  }
+
+  SmallVector<Value> result;
+  auto structType = this->convertType(srcTy).dyn_cast<LLVM::LLVMStructType>();
+  auto elementTypes = structType.getBody();
+  assert(elementTypes.size() > 0);
+  auto vecTy = elementTypes[0];
+  unsigned size = 4;
+  for (int i = 0; i < inValues.size(); i += size) {
+    Value valVec = undef(vecTy);
+    valVec = insert_element(vecTy, valVec, inValues[i], i32_val(0));
+    valVec = insert_element(vecTy, valVec, inValues[i + 1], i32_val(1));
+    valVec = insert_element(vecTy, valVec, inValues[i + 2], i32_val(2));
+    valVec = insert_element(vecTy, valVec, inValues[i + 3], i32_val(3));
+    result.push_back(valVec);
+  }
+
+  return result;
+}
+
 SmallVector<Value> TritonGPUToLLVMTypeConverter::unpackLLElements(
     Location loc, Value llvmStruct, ConversionPatternRewriter &rewriter,
     Type type) {
   assert(bool(llvmStruct) && "can not unpack null values");
-// llvm::outs() << "unpackLLElements, loc1\n";
   if (llvmStruct.getType().isIntOrIndexOrFloat() ||
       llvmStruct.getType().isa<triton::PointerType>() ||
       llvmStruct.getType().isa<LLVM::LLVMPointerType>()) {
 // llvm::outs() << "unpackLLElements, loc2\n";
     return {llvmStruct};
   }
+  llvm::outs() << "unpackLLElements, input_types = " << type << "\n";
   ArrayRef<Type> types =
       llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
+  llvm::outs() << "unpackLLElements, result_types = " << types << "\n";
   SmallVector<Value> results(types.size());
   for (unsigned i = 0; i < types.size(); ++i) {
     Type type = types[i];
-// llvm::outs() << "unpackedTypes = " << type << "\n";
     results[i] = extract_val(type, llvmStruct, i);
   }
   return results;

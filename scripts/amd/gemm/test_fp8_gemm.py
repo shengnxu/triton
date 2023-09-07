@@ -12,7 +12,7 @@ import argparse
 
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1}, num_stages=1, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1}, num_stages=1, num_warps=2),
     ],
     key=['M', 'N', 'K'],
 )
@@ -146,7 +146,18 @@ def get_variant_golden(a, b):
     c_padded = torch.matmul(a_padded, b_padded)
     return c_padded[:SIZE_M, :SIZE_N]
 
-def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
+def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
+    a_is_f8 = False
+    if a_type == 1:
+        ab_type = torch.float16
+    elif a_type == 2:
+        ab_type = torch.float16
+        a_is_f8 = True
+    elif a_type == 4:
+        ab_type = torch.int8
+    else:
+        ab_type = torch.bfloat16
+
     print("testing sizes: M: {}, N: {}, K: {}, ab type: {}, c type: {}, a_is_f8: {}".format(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8))
 
     @triton.jit
@@ -157,7 +168,8 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
         output = input
         tl.store(output_ptr + offsets, output, mask=mask)
 
-    if a_is_f8:
+    # a is fp8
+    if a_type == 2:
         a_type = tl.float8e5
         f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
         f8_tensor = f8_tensor.to(torch.int8)
@@ -178,15 +190,27 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, ab_type, c_type, a_is_f8 = False):
 
         golden_abs_err = 0.5
         golden_rel_err = 0.0
-    elif ab_type == torch.int8:
+    elif a_type == 4:
         a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float32).to(torch.int8)
         b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float32).to(torch.int8)
         golden = torch.matmul(a.to(torch.float64), b.to(torch.float64))
         c = matmul(a, b, c_type)
     
-        golden_abs_err = 0.5
-        golden_rel_err = 0.0
+        golden_abs_err = 0
+        golden_rel_err = 0
+    elif a_type == 3: # bfloat16
+        ab_type = torch.bfloat16
+        a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=ab_type)
+        b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=ab_type)
+        golden = torch.matmul(a, b)
+        c = matmul(a, b, c_type)
+
+        golden_variant = get_variant_golden(a, b)
+        golden_diff = golden - golden_variant
+        golden_abs_err = torch.max(torch.abs(golden_diff)).item()
+        golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
     else:
+        ab_type = torch.float16
         a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=ab_type)
         b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=ab_type)
         golden = torch.matmul(a, b)
@@ -211,6 +235,8 @@ def parse_arguments():
     parser.add_argument("-n", type=int, required=True, default=argparse.SUPPRESS)
     parser.add_argument("-k", type=int, required=True, default=argparse.SUPPRESS)
     parser.add_argument("--fp8", action='store_true', default=False)
+    parser.add_argument("--int8", action='store_true', default=False)
+    parser.add_argument("--bf16", action='store_true', default=False)
 
     args = parser.parse_args()
     return args
@@ -221,12 +247,22 @@ def main():
     M = args.m
     N = args.n
     K = args.k
-    a_is_fp8 = False
+    a_type = 1 # fp16
     if args.fp8:
-        a_is_fp8 = True
+        a_type = 2 # a is fp8
+    elif args.bf16:
+        a_type = 3 # bf16
+    elif args.int8:
+        a_type = 4
+    
+    c_type = torch.float16
+    if a_type == 3:
+        c_type = torch.bfloat16
+    if a_type == 4:
+        c_type = torch.int32
 
     try:
-        test_gemm(M, N, K, torch.float16, torch.float32, a_is_f8 = a_is_fp8)
+        test_gemm(M, N, K, a_type, c_type)
     except:
         traceback.print_exc()
         print("FAILED!")

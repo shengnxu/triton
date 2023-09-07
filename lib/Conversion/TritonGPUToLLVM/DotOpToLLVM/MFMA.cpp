@@ -49,6 +49,7 @@ struct DotOpMFMAConversionHelper {
 
   Value generateMFMAOp(MatrixCoreType mfmaTy, Value valA, Value valB,
                        Value valC) const {
+    llvm::outs() << "valA_type = " << valA.getType() << ", valB_type = " << valB.getType() << "\n";
     auto resType = valC.getType();
     Value zeroFlag = i32_val(0);
     switch (mfmaTy) {

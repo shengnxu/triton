@@ -21,11 +21,15 @@ Type getShemPtrTy(Type elemTy) {
     return ptr_ty(type::i16Ty(ctx), 3);
   }
 
+  llvm::outs() << "getShemPtrTy, loc1\n";
+
   if (isF8(elemTy)) {
-    std::cout << "int8_ptr" << std::endl;
+    llvm::outs() << "getShemPtrTy, loc2\n";
     auto ctx = elemTy.getContext();
     return ptr_ty(type::i8Ty(ctx), 3);
   }
+
+  llvm::outs() << "getShemPtrTy, loc3\n";
 
   return ptr_ty(elemTy, 3);
 }
@@ -425,9 +429,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   assert(mfmaLayout.getNonKDim() == 32);
   auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
 
-  std::cout << "loadA" << std::endl;
-
   auto aTensorTy = tensor.getType().cast<RankedTensorType>();
+  llvm::outs() << "loadA, tensorType = " << aTensorTy << "\n";
   SmallVector<int64_t> shape(aTensorTy.getShape().begin(),
                              aTensorTy.getShape().end());
   auto sharedLayout = aTensorTy.getEncoding().cast<SharedEncodingAttr>();
@@ -478,6 +481,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     int loadsPerThread = offsets.size() / (numRepM * numRepK);
     const int elemsPerLoad = numOfElems / loadsPerThread;
+    llvm::outs() << "loadA_elementsPerLoad1 = " << elemsPerLoad << ", loadsPerThread = " << loadsPerThread << "\n";
     assert(numOfElems % loadsPerThread == 0);
 
     for (int m = 0; m < numRepM; ++m) {
@@ -506,6 +510,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           }
         }
         if (aElemTy == i8_ty or isF8(aElemTy))
+        // if (aElemTy == i8_ty)
           valVec = bitcast(valVec, i32_ty);
         ha.push_back(valVec);
       }
@@ -517,12 +522,13 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
     Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
-    resElemTy = isF8(resElemTy) ? i8_ty : resElemTy;
+    // resElemTy = isF8(resElemTy) ? i8_ty : resElemTy;
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
 
     int loadsPerThread = offsets.size() / (numReps[0] * numReps[1]);
     int elemsPerLoad = numOfElems / loadsPerThread;
+    llvm::outs() << "loadA_elementsPerLoad2 = " << elemsPerLoad << ", loadsPerThread = " << loadsPerThread << " repeatM = " << numRepM << " repeatK = " << numRepK << "\n";
 
     for (int m = 0; m < numRepM; ++m) {
       for (int k = 0; k < numRepK; ++k) {
@@ -548,7 +554,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        if (aElemTy == i8_ty or isF8(aElemTy))
+        // if (aElemTy == i8_ty or isF8(aElemTy))
+        if (aElemTy == i8_ty)
           valVec = bitcast(valVec, i32_ty);
         ha.push_back(valVec);
       }
@@ -559,6 +566,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   Type structTy = LLVM::LLVMStructType::getLiteral(
       ctx, SmallVector<Type>(ha.size(), ha[0].getType()));
   auto result = typeConverter->packLLElements(loc, ha, rewriter, structTy);
+  llvm::outs() << "loadA_result = " << result << "\n";
   return result;
 }
 
@@ -570,10 +578,9 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   assert(mfmaLayout.getNonKDim() == 32);
   auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
 
-  std::cout << "loadB" << std::endl;
-
-
   auto bTensorTy = tensor.getType().cast<RankedTensorType>();
+  llvm::outs() << "loadB, tensorType = " << bTensorTy << "\n";
+
   ArrayRef<int64_t> shape = bTensorTy.getShape();
   auto sharedLayout = bTensorTy.getEncoding().cast<SharedEncodingAttr>();
   auto order = sharedLayout.getOrder();

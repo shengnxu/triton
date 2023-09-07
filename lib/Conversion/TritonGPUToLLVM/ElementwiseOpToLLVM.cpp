@@ -872,21 +872,24 @@ inline SmallVector<Value> unpackI32(const SmallVector<Value> &inValues,
   auto tensorTy = srcTy.dyn_cast<RankedTensorType>();
   if (!tensorTy)
     return inValues;
-  llvm::outs() << "unpackI32, loc1\n";
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>())) {
-  llvm::outs() << "unpackI32, loc2\n";
+  // llvm::outs() << "encoding = " << encoding << "\n";
+  // if (encoding) {
+  //   llvm::outs() << "encoding_is_mfma = " << encoding.getParent().isa<MmaEncodingAttr>() << "\n";
+  // }
+  if (!(encoding && (encoding.getParent().isa<MmaEncodingAttr>() or encoding.getParent().isa<MfmaEncodingAttr>()))) {
+  // llvm::outs() << "unpackI32, loc2\n";
     return inValues;
   }
-  llvm::outs() << "unpackI32, loc3\n";
+  // llvm::outs() << "unpackI32, loc3\n";
   SmallVector<Value> outValues;
   for (auto v : inValues) {
     // cast i32 to appropriate eltType vector and extract elements
-  llvm::outs() << "unpackI32, loc4\n";
+  // llvm::outs() << "unpackI32, loc4\n";
     auto eltType = typeConverter->convertType(tensorTy.getElementType());
     auto vecType = vec_ty(eltType, 32 / eltType.getIntOrFloatBitWidth());
     auto vec = bitcast(v, vecType);
-  llvm::outs() << "unpackI32, loc5\n";
+  // llvm::outs() << "unpackI32, loc5\n";
     for (int i = 0; i < 32 / eltType.getIntOrFloatBitWidth(); i++) {
       outValues.push_back(extract_element(vec, i32_val(i)));
     }
@@ -902,20 +905,21 @@ inline SmallVector<Value> packI32(const SmallVector<Value> &inValues,
   if (!tensorTy)
     return inValues;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>())) {
-    llvm::outs() << "packI32, loc1\n";
+  // if (!(encoding && (encoding.getParent().isa<MmaEncodingAttr>() or encoding.getParent().isa<MfmaEncodingAttr>()))) {
+  if (!(encoding && (encoding.getParent().isa<MmaEncodingAttr>()))) {
+    // llvm::outs() << "packI32, loc1\n";
     return inValues;
   }
   SmallVector<Value> outValues;
-    llvm::outs() << "packI32, loc2\n";
+    // llvm::outs() << "packI32, loc2\n";
   auto eltType = typeConverter->convertType(tensorTy.getElementType());
   int vecWidth = 32 / eltType.getIntOrFloatBitWidth();
   auto vecType = vec_ty(eltType, vecWidth);
   for (int i = 0; i < inValues.size(); i += vecWidth) {
-    llvm::outs() << "packI32, loc3\n";
+    // llvm::outs() << "packI32, loc3\n";
     Value vec = undef(vecType);
     for (int j = 0; j < vecWidth; j++) {
-    llvm::outs() << "packI32, loc4\n";
+    // llvm::outs() << "packI32, loc4\n";
       vec = insert_element(vec, inValues[i + j], i32_val(j));
     }
     outValues.push_back(bitcast(vec, i32_ty));
@@ -1017,8 +1021,6 @@ public:
                   ConversionPatternRewriter &rewriter) const override {
     auto resultTy = op.getType();
     auto opType = resultTy;
-    // auto resultTy = isF8(opType) ? i8_ty : opType;
-    llvm::outs() << "resultTy = " << resultTy << "\n";
 
     Location loc = op->getLoc();
     // element type
@@ -1026,15 +1028,17 @@ public:
     llvm::outs() << "===============================opType = " << opType << ", resultElementTy = " << resultElementTy << "\n";
 
     Type elemTy = this->getTypeConverter()->convertType(resultElementTy);
-    llvm::outs() << "elemTy = " << elemTy << "\n";
+    // llvm::outs() << "elemTy = " << elemTy << "\n";
     SmallVector<SmallVector<Value>> allOperands;
     for (auto operand : adaptor.getOperands()) {
       auto argTy = op->getOperand(0).getType();
       llvm::outs() << "argTy = " << argTy << "\n";
       auto subOperands = this->getTypeConverter()->unpackLLElements(
           loc, operand, rewriter, argTy);
+      llvm::outs() << "subOperand_size1 = " << subOperands.size() << "\n";
       subOperands = unpackI32(subOperands, argTy, rewriter, loc,
                               this->getTypeConverter());
+      llvm::outs() << "subOperand_size2 = " << subOperands.size() << "\n";
       allOperands.resize(subOperands.size());
       for (auto v : llvm::enumerate(subOperands))
         allOperands[v.index()].push_back(v.value());
@@ -1042,13 +1046,13 @@ public:
     if (allOperands.size() == 0)
       allOperands.push_back({});
 
-    llvm::outs() << "before type conversion\n";
-    for (auto &vec : allOperands) {
-      llvm::outs() << "vec\n";
-      for (auto &v : vec) {
-        llvm::outs() << "operand = " << v << ", type = " << v.getType() << "\n";
-      }
-    }
+    // llvm::outs() << "before type conversion\n";
+    // for (auto &vec : allOperands) {
+    //   llvm::outs() << "vec\n";
+    //   for (auto &v : vec) {
+    //     llvm::outs() << "operand = " << v << ", type = " << v.getType() << "\n";
+    //   }
+    // }
 
     SmallVector<Value> resultVals;
     for (auto it = allOperands.begin(), end = allOperands.end(); it != end;) {
@@ -1069,25 +1073,28 @@ public:
       it += curr.size();
     }
 
-    llvm::outs() << "after type conversion, before reorder" << "\n";
-    for (auto& v : resultVals) {
-      llvm::outs() << "v = " << v << ", type = " << v.getType() << "\n";
-    }
-    // llvm::outs() << "num_operands = " << op->getNumOperands() << "\n";
+    // llvm::outs() << "after type conversion, before reorder" << "\n";
+    // for (auto& v : resultVals) {
+    //   llvm::outs() << "v = " << v << ", type = " << v.getType() << "\n";
+    // }
     if (op->getNumOperands() > 0) {
       auto argTy = op->getOperand(0).getType();
       resultVals = reorderValues(resultVals, argTy, resultTy);
     }
-    llvm::outs() << "after reorder, before packI32" << "\n";
-    for (auto& v : resultVals) {
-      llvm::outs() << "v = " << v << ", type = " << v.getType() << "\n";
-    }
-    resultVals =
-        packI32(resultVals, resultTy, rewriter, loc, this->getTypeConverter());
-    llvm::outs() << "after packI32" << "\n";
+    // llvm::outs() << "after reorder, before packI32" << "\n";
     // for (auto& v : resultVals) {
     //   llvm::outs() << "v = " << v << ", type = " << v.getType() << "\n";
     // }
+    resultVals =
+        packI32(resultVals, resultTy, rewriter, loc, this->getTypeConverter());
+    // llvm::outs() << "after packI32" << "\n";
+    // for (auto& v : resultVals) {
+    //   llvm::outs() << "v = " << v << ", type = " << v.getType() << "\n";
+    // }
+    // llvm::outs() << "before packLLElements\n";
+
+    resultVals = this->getTypeConverter()->packMfmaOperand(resultVals, resultTy, rewriter, loc);
+
     Value view = this->getTypeConverter()->packLLElements(loc, resultVals,
                                                           rewriter, resultTy);
     rewriter.replaceOp(op, view);

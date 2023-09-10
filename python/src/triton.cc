@@ -1713,7 +1713,7 @@ void init_triton_ir(py::module &&m) {
            })
       .def("add_tritongpu_optimize_dot_operands_pass",
            [](mlir::PassManager &self) {
-             self.addPass(mlir::createTritonGPUOptimizeDotOperandsPass());
+            //  self.addPass(mlir::createTritonGPUOptimizeDotOperandsPass());
            })
       .def("add_tritongpu_remove_layout_conversions_pass",
            [](mlir::PassManager &self) {

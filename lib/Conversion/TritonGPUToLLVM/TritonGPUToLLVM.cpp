@@ -512,7 +512,7 @@ struct AddPtrOpConversion
     auto ptrTy = op.getPtr().getType();
     auto resultTensorTy = resultTy.dyn_cast<RankedTensorType>();
     auto isTargetShape = [](RankedTensorType ty) {
-        if (ty && (ty.getShape()[0] == 128) && (ty.getShape()[1] == 64))
+        if (ty && (ty.getShape().size() == 2) && (ty.getShape()[0] == 128) && (ty.getShape()[1] == 64))
             return 1;
         else return 0;
     };

@@ -12,7 +12,7 @@ import argparse
 
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1}, num_stages=1, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1}, num_stages=0, num_warps=2),
     ],
     key=['M', 'N', 'K'],
 )

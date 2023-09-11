@@ -511,8 +511,17 @@ struct AddPtrOpConversion
     auto offsetTy = op.getOffset().getType();
     auto ptrTy = op.getPtr().getType();
     auto resultTensorTy = resultTy.dyn_cast<RankedTensorType>();
+    auto isTargetShape = [](RankedTensorType ty) {
+        if (ty && (ty.getShape()[0] == 128) && (ty.getShape()[1] == 64))
+            return 1;
+        else return 0;
+    };
     if (resultTensorTy) {
       unsigned elems = getTotalElemsPerThread(resultTy);
+      if (isTargetShape(resultTensorTy)) {
+          llvm::outs() << "Find a target shape [128,64] for addptr\n";
+          llvm::outs() << "elems per thread: " << elems << "\n";
+      }
       Type elemTy =
           getTypeConverter()->convertType(resultTensorTy.getElementType());
       auto ptrs = getTypeConverter()->unpackLLElements(loc, adaptor.getPtr(),

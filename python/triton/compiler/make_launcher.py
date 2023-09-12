@@ -279,12 +279,6 @@ static inline void gpuAssert(CUresult code, const char *file, int line)
 
 #define CUDA_CHECK(ans) {{ gpuAssert((ans), __FILE__, __LINE__); }}
 
-<<<<<<< HEAD
-static void _launch(int gridX, int gridY, int gridZ, int num_warps, int shared_memory, CUstream stream, CUfunction function, {arg_decls}) {{
-  void *params[] = {{ {', '.join(f"&arg{i}" for i in signature.keys() if i not in constants)} }};
-  if(gridX*gridY*gridZ > 0){{
-    CUDA_CHECK(cuLaunchKernel(function, gridX, gridY, gridZ, num_warps * 32, 1, 1, shared_memory, stream, params, 0));
-=======
 typedef CUresult (*cuLaunchKernelEx_t)(const CUlaunchConfig* config, CUfunction f, void** kernelParams, void** extra);
 
 static cuLaunchKernelEx_t getLaunchKernelExHandle() {{
@@ -336,7 +330,6 @@ static void _launch(int gridX, int gridY, int gridZ, int num_warps, int num_ctas
       }}
       CUDA_CHECK(cuLaunchKernelExHandle(&config, function, params, 0));
     }}
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
   }}
 }}
 

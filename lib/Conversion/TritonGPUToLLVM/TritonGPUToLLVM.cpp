@@ -486,33 +486,11 @@ struct GetNumProgramsOpConversion
     std::string sreg = numCTAs == 1 ? "%nctaid." : "%nclusterid.";
     sreg.append(1, 'x' + op.getAxis()); // 0 -> 'x', 1 -> 'y', 2 -> 'z'
 
-<<<<<<< HEAD
-#ifdef USE_ROCM
-    // Seem like GridDimOp returns the number of threads (not the number of 
-    // workgroups) in a kernel (a bug in llvm https://reviews.llvm.org/D156009), 
-    // so as a workaround here, we divide by the number of threads 
-    // per workgroup to get the number of workgroups in a kernel.
-    // TODO: when we do upstream to include llvm fix, we can remove this workaround
-    // The unit test added in this PR can guarantee that.
-    Value threadsPerGrid =
-        rewriter.create<::mlir::gpu::GridDimOp>(loc, dims[op.getAxis()]);
-    Value threadsPerBlock =
-        rewriter.create<::mlir::gpu::BlockDimOp>(loc, dims[op.getAxis()]);
-    Value threadNumPerGrid = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerGrid);
-    Value threadNumPerBlock = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerBlock);    
-    rewriter.replaceOpWithNewOp<LLVM::UDivOp>(op, threadNumPerGrid, threadNumPerBlock);
-#else
-    Value blockId =
-        rewriter.create<::mlir::gpu::GridDimOp>(loc, dims[op.getAxis()]);
-    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, i32_ty, blockId);
-#endif // USE_ROCM
-=======
     Value numPrograms = getSRegValue(rewriter, loc, sreg);
     rewriter.replaceOp(op, numPrograms);
     return success();
   }
 };
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
 
 // TODO[goostavz]: GetThreadIdOp/GetClusterCTAIdOp is a temporary solution
 // before async dialect is done. These concepts should appear in ttgpu

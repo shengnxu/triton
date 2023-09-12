@@ -90,11 +90,7 @@ def _fwd_kernel(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float16)
         if IS_CAUSAL:
             qk = tl.where(P_SEQ + offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
-<<<<<<< HEAD
-        qk += tl.dot(q, k)
-=======
         qk += tl.dot(q, k, out_dtype=tl.float16)
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         # -- compute scaling constant ---
         m_i_new = tl.maximum(m_i, tl.max(qk, 1))
         alpha = tl.math.exp2(m_i - m_i_new)
@@ -168,17 +164,11 @@ def _bwd_kernel(
     V += off_z * stride_vz + off_h * stride_vh
     DO += off_z * stride_qz + off_h * stride_qh
     DQ += off_z * stride_qz + off_h * stride_qh
-<<<<<<< HEAD
-    DK += off_z * stride_qz + off_h * stride_qh
-    DV += off_z * stride_qz + off_h * stride_qh
-    # See fwd pass above for explanation.
-    qk_scale = sm_scale * 1.44269504
-    for start_n in range(0, num_block):
-=======
     DK += off_z * stride_kz + off_h * stride_kh
     DV += off_z * stride_vz + off_h * stride_vh
+    # See fwd pass above for explanation.
+    qk_scale = sm_scale * 1.44269504
     for start_n in range(0, num_block_kv):
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         if CAUSAL:
             lo = tl.math.max(start_n * BLOCK_M - P_SEQ, 0)
         else:
@@ -210,12 +200,8 @@ def _bwd_kernel(
             q = tl.load(q_ptrs)
             # recompute p = softmax(qk, dim=-1).T
             if CAUSAL:
-<<<<<<< HEAD
                 qk = tl.dot(q, tl.trans(k), out_dtype=tl.float32)
-                qk = tl.where(offs_m_curr[:, None] >= (offs_n[None, :]), qk, float("-inf"))
-=======
-                qk = tl.where(P_SEQ + offs_m_curr[:, None] >= (offs_n[None, :]), float(0.), float("-inf"))
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
+                qk = tl.where(P_SEQ + offs_m_curr[:, None] >= (offs_n[None, :]), qk, float("-inf"))
             else:
                 qk = tl.dot(q, tl.trans(k), out_dtype=tl.float32)
             l_i = tl.load(l_ptrs + offs_m_curr)
@@ -470,26 +456,16 @@ class _attention(torch.autograd.Function):
         assert Lk in {16, 32, 64, 128}
         o = torch.empty_like(q)
         BLOCK_M = 128
-<<<<<<< HEAD
         if torch.version.hip is None:
             BLOCK_N = 64 if Lk <= 64 else 32
             num_stages = 4 if Lk <= 64 else 3
         else:
             BLOCK_N = 64
             num_stages = 1
-=======
-        BLOCK_N = 64 if Lk <= 64 else 32
-        num_stages = 4 if Lk <= 64 else 3
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         num_warps = 4
         grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
         P_SEQ = 0 if q.shape[-2] == k.shape[-2] else k.shape[-2] - q.shape[-2]
-<<<<<<< HEAD
-
-        num_warps = 4 if Lk <= 64 else 8
-=======
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         _fwd_kernel[grid](
             q, k, v, sm_scale,
             L,
@@ -509,10 +485,7 @@ class _attention(torch.autograd.Function):
         ctx.sm_scale = sm_scale
         ctx.BLOCK_DMODEL = Lk
         ctx.causal = causal
-<<<<<<< HEAD
         ctx.split_kernel = split_kernel
-=======
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         ctx.P_SEQ = P_SEQ
         return o
 
@@ -540,28 +513,8 @@ class _attention(torch.autograd.Function):
         block_scale = (q.shape[2] // ctx.grid[0]) // BLOCK
         _bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
             o, do,
-<<<<<<< HEAD
             do_scaled, delta,
             BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
-=======
-            delta,
-            BLOCK_M=BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
-        )
-        _bwd_kernel[(ctx.grid[1],)](
-            q, k, v, ctx.sm_scale,
-            o, do,
-            dq, dk, dv,
-            L, delta,
-            q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-            k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-            v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-            q.shape[0], q.shape[1], q.shape[2], ctx.P_SEQ,
-            ctx.grid[0], triton.cdiv(k.shape[2], BLOCK),
-            BLOCK_M=BLOCK, BLOCK_N=BLOCK,
-            BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=8,
-            CAUSAL=ctx.causal,
-            num_stages=1,
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
         )
         if not ctx.split_kernel:
             _bwd_kernel[(ctx.grid[1],)](
@@ -613,7 +566,6 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 
-<<<<<<< HEAD
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, P_SEQ',
                          [(4, 48, 1024, 64, 128),
                           (4, 48, 2048, 64, 128),
@@ -623,16 +575,10 @@ attention = _attention.apply
                           ])
 @pytest.mark.parametrize('causal', [False, True])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
-=======
-@pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, P_SEQ', [(6, 9, 1024, 64, 128)])
-@pytest.mark.parametrize('causal', [False, True])
-def test_op(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
     torch.manual_seed(20)
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-<<<<<<< HEAD
     sm_scale = q.shape[-1] ** (-0.5)
     dout = torch.randn_like(q)
     # reference implementation
@@ -665,12 +611,6 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, P_SEQ, dtype=torch.float16):
     dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX + P_SEQ), device="cuda"), diagonal=P_SEQ)
-=======
-    sm_scale = 0.5
-    dout = torch.randn_like(q)
-    # reference implementation
-    M = torch.tril(torch.ones((N_CTX, N_CTX + P_SEQ), device="cuda"), diagonal=P_SEQ)
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
     p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")

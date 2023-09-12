@@ -75,7 +75,6 @@ warpsPerTileV2(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
   return ret;
 }
 
-<<<<<<< HEAD
 #ifdef USE_ROCM
 SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
                                            const ArrayRef<int64_t> shape,
@@ -104,7 +103,18 @@ SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
         ret[0] *= 2;
       } else
         ret[1] *= 2;
-=======
+          } else {
+      ret[1] *= 2;
+    }
+  } while (true);
+
+  if (ret[1] * shapePerWarp[1] > tensorShape[1]) {
+    return {ret[1], ret[0]};
+  }
+
+  return ret;
+}
+
 SmallVector<unsigned, 2>
 warpsPerTileV3(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
                const SmallVector<unsigned, 3> &instrShape) {
@@ -122,17 +132,10 @@ warpsPerTileV3(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
       break;
     if (shape[0] > shapePerWarp[0] * ret[0]) {
       ret[0] *= 2;
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
     } else {
       ret[1] *= 2;
     }
   } while (true);
-<<<<<<< HEAD
-
-  if (ret[1] * shapePerWarp[1] > tensorShape[1]) {
-    return {ret[1], ret[0]};
-  }
-
   return ret;
 }
 
@@ -224,11 +227,6 @@ public:
 };
 #endif
 
-=======
-  return ret;
-}
-
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
 class BlockedToMMA : public mlir::RewritePattern {
   int computeCapability;
   mutable int mmaV1Counter{}; // used to generate ID for MMAv1 encoding

@@ -58,11 +58,7 @@ struct NVVMMetadata {
 
 // Add the nvvm related metadata to LLVM IR.
 static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
-<<<<<<< HEAD
-                          bool isROCM, const int threadsPerCTA) {
-=======
                           Target target) {
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
   auto *module = func->getParent();
   auto &ctx = func->getContext();
 
@@ -92,18 +88,8 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
   }
 
   if (metadata.isKernel) {
-<<<<<<< HEAD
-    if (isROCM) {
-      func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-      func->addFnAttr("amdgpu-flat-work-group-size",
-                      "1, " + std::to_string(threadsPerCTA));
-      func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
-      func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
-    } else {
-=======
     switch (target) {
     case Target::NVVM: {
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
       llvm::Metadata *mdArgs[] = {
           llvm::ValueAsMetadata::get(func), llvm::MDString::get(ctx, "kernel"),
           llvm::ValueAsMetadata::get(
@@ -113,7 +99,10 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
     } break;
     case Target::ROCDL: {
       func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-      func->addFnAttr("amdgpu-flat-work-group-size", "1, 1024");
+      func->addFnAttr("amdgpu-flat-work-group-size",
+                      "1, " + std::to_string(threadsPerCTA));
+      func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
+      func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
     } break;
     }
   }
@@ -341,11 +330,7 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module,
   for (auto &func : llvmModule->functions()) {
     auto it = nvvmMetadata.find(func.getName());
     if (it != nvvmMetadata.end())
-<<<<<<< HEAD
-      amendLLVMFunc(&func, it->second, isROCM, threadsPerCTA);
-=======
       amendLLVMFunc(&func, it->second, target);
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
   }
 
   return llvmModule;

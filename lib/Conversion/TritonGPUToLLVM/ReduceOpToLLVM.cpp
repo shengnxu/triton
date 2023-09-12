@@ -425,8 +425,17 @@ private:
 
     for (unsigned N = numLaneToReduce / 2; N > 0; N >>= 1) {
       SmallVector<Value> shfl(acc.size());
+      unsigned shuffleIdx = N;
+#ifdef USE_ROCM
+      if (inMfma && inMfma.getIsTransposed()) {
+        assert(sizeIntraWarps == 2);
+        // Adjecant threads in y dimension in transposed MFMA layout are 32
+        // apart: [[0 0 0 0 32 32 32 32 ...] [1 1 1 1 33 33 33 33 ...] ...].
+        shuffleIdx = 32;
+      }
+#endif
       for (unsigned i = 0; i < acc.size(); ++i) {
-        shfl[i] = shflSync(loc, rewriter, acc[i], N);
+        shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx);
       }
       accumulate(rewriter, op.getCombineOp(), acc, shfl, false);
     }
@@ -532,34 +541,7 @@ private:
 
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
-<<<<<<< HEAD
       SmallVector<Value> acc = it.second;
-
-      // Reduce within warps
-      for (unsigned N = sizeIntraWarps / 2; N > 0; N >>= 1) {
-        SmallVector<Value> shfl(op.getNumOperands());
-        unsigned shuffleIdx = N;
-#ifdef USE_ROCM
-        if (inMfma && inMfma.getIsTransposed()) {
-          assert(sizeIntraWarps == 2);
-          // Adjecant threads in y dimension in transposed MFMA layout are 32
-          // apart: [[0 0 0 0 32 32 32 32 ...] [1 1 1 1 33 33 33 33 ...] ...].
-          shuffleIdx = 32;
-        }
-#endif
-        for (unsigned i = 0; i < op.getNumOperands(); ++i) {
-          shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx);
-        }
-        accumulate(rewriter, *combineOp, acc, shfl, false);
-      }
-
-      if (isWarpSync) {
-        finalAccs[key] = acc;
-        continue;
-      }
-=======
-      SmallVector<Value> &acc = it.second;
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
 
       SmallVector<Value> writeIdx = indices[key];
       writeIdx[axis] = warpIdAxis;

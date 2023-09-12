@@ -320,8 +320,9 @@ unsigned ScanLoweringHelper::getAxisBlockStride() {
   for (unsigned dim : order) {
     if (dim == getAxis())
       return stride;
-    stride *= type.getShape()[dim] /
-              (sizePerThreads[dim] * threadsPerWarp[dim] * warpsPerCTA[dim]);
+    stride *= ceil<unsigned int>(type.getShape()[dim], sizePerThreads[dim] *
+                                                           threadsPerWarp[dim] *
+                                                           warpsPerCTA[dim]);
   }
   llvm_unreachable("Axis not found in order");
 }
@@ -452,8 +453,10 @@ bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
   // layout when opIdx == 1.
   return mfmaLayout.getWarpsPerCTA()[1] == 1 &&
          dotOperandLayout.getOpIdx() == 0 &&
+         dotOperandLayout.getKWidth() == 8 &&
          dotOperandLayout.getParent() == mfmaLayout &&
-         mfmaLayout.getIsTransposed() && (srcTy.getElementType().isF16() || srcTy.getElementType().isBF16());
+         mfmaLayout.getIsTransposed() &&
+         (srcTy.getElementType().isF16() || srcTy.getElementType().isBF16());
 }
 #endif
 

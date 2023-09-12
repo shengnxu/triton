@@ -25,7 +25,7 @@ class OutOfResources(Exception):
 
 
 class Autotuner(KernelInterface):
-    def __init__(self, fn, arg_names, configs, key, reset_to_zero, prune_configs_by: Dict = None):
+    def __init__(self, fn, arg_names, configs, key, reset_to_zero, prune_configs_by: Dict = None, warmup=25, rep=100):
         '''
         :param prune_configs_by: a dict of functions that are used to prune configs, fields:
             'perf_model': performance model used to predicate running time with different configs, returns running time
@@ -33,7 +33,7 @@ class Autotuner(KernelInterface):
             'prune_num_stages_by'(optional): a function used to prune num_stages. It takes configs:List[Config] as its input, and returns pruned configs.
         '''
         if not configs:
-            self.configs = [Config({}, num_warps=4, num_stages=2)]
+            self.configs = [Config({}, num_warps=4, num_stages=2, num_ctas=1)]
         else:
             self.configs = configs
         self.key_idx = [arg_names.index(k) for k in key]
@@ -58,6 +58,8 @@ class Autotuner(KernelInterface):
         self.perf_model, self.configs_top_k = perf_model, top_k
         self.early_config_prune = early_config_prune
         self.fn = fn
+        self.warmup = warmup
+        self.rep = rep
 
     def _bench(self, *args, config, **meta):
         # check for conflicts, i.e. meta-parameters both provided
@@ -70,14 +72,19 @@ class Autotuner(KernelInterface):
             )
         # augment meta-parameters with tunable ones
         current = dict(meta, **config.kwargs)
+        full_nargs = {**self.nargs, **current}
 
         def kernel_call():
             if config.pre_hook:
-                config.pre_hook(self.nargs)
+                config.pre_hook(full_nargs)
             self.hook(args)
-            self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages, **current)
+            self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages,
+                        num_ctas=config.num_ctas,
+                        enable_warp_specialization=config.enable_warp_specialization,
+                        # enable_persistent=False,
+                        **current)
         try:
-            return do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+            return do_bench(kernel_call, warmup=self.warmup, rep=self.rep, quantiles=(0.5, 0.2, 0.8))
         except OutOfResources:
             return [float('inf'), float('inf'), float('inf')]
 
@@ -105,9 +112,14 @@ class Autotuner(KernelInterface):
         else:
             config = self.configs[0]
         self.best_config = config
+        full_nargs = {**self.nargs, **kwargs, **self.best_config.kwargs}
         if config.pre_hook is not None:
-            config.pre_hook(self.nargs)
-        return self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages, **kwargs, **config.kwargs)
+            config.pre_hook(full_nargs)
+        ret = self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages,
+                          num_ctas=config.num_ctas,
+                          enable_warp_specialization=config.enable_warp_specialization, **kwargs, **config.kwargs)
+        self.nargs = None
+        return ret
 
     def prune_configs(self, kwargs):
         pruned_configs = self.configs
@@ -120,10 +132,16 @@ class Autotuner(KernelInterface):
             if len(pruned_configs) > top_k:
                 est_timing = {
                     config: self.perf_model(**self.nargs, **kwargs, **config.kwargs, num_stages=config.num_stages,
-                                            num_warps=config.num_warps)
+                                            num_warps=config.num_warps,
+                                            num_ctas=config.num_ctas,
+                                            enable_warp_specialization=config.enable_warp_specialization,
+                                            enable_persistent=config.enable_persistent)
                     for config in pruned_configs
                 }
-                pruned_configs = sorted(est_timing.keys(), key=lambda x: est_timing[x])[:top_k]
+                pruned_configs = sorted(
+                    est_timing.keys(),
+                    key=lambda x: est_timing[x])[
+                    :top_k]
         return pruned_configs
 
     def warmup(self, *args, **kwargs):
@@ -132,7 +150,10 @@ class Autotuner(KernelInterface):
             self.fn.warmup(
                 *args,
                 num_warps=config.num_warps,
+                num_ctas=config.num_ctas,
                 num_stages=config.num_stages,
+                enable_warp_specialization=config.enable_warp_specialization,
+                enable_persistent=config.enable_persistent,
                 **kwargs,
                 **config.kwargs,
             )
@@ -151,15 +172,20 @@ class Config:
     :type num_warps: int
     :ivar num_stages: the number of stages that the compiler should use when software-pipelining loops.
                        Mostly useful for matrix multiplication workloads on SM80+ GPUs.
-    :type num_stages: int
+    :type enable_warp_specialization: bool
+    :ivar enable_warp_specialization: enable specialization (spatial partitioning) or not. See https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#spatial-partitioning-also-known-as-warp-specialization
     :ivar pre_hook: a function that will be called before the kernel is called. Parameters of this
                     function are args.
     """
 
-    def __init__(self, kwargs, num_warps=4, num_stages=2, pre_hook=None):
+    def __init__(self, kwargs, num_warps=4, num_stages=2, num_ctas=1, enable_warp_specialization=False, pre_hook=None):
         self.kwargs = kwargs
         self.num_warps = num_warps
+        self.num_ctas = num_ctas
         self.num_stages = num_stages
+        self.enable_warp_specialization = enable_warp_specialization
+        # TODO[shuhaoj]: May make enable_persistent configurable in future if necessay.
+        self.enable_persistent = False
         self.pre_hook = pre_hook
 
     def __str__(self):
@@ -167,11 +193,15 @@ class Config:
         for k, v in self.kwargs.items():
             res.append(f'{k}: {v}')
         res.append(f'num_warps: {self.num_warps}')
+        res.append(f'num_ctas: {self.num_ctas}')
         res.append(f'num_stages: {self.num_stages}')
+        res.append(
+            f'enable_warp_specialization: {self.enable_warp_specialization}')
+        res.append(f'enable_persistent: {self.enable_persistent}')
         return ', '.join(res)
 
 
-def autotune(configs, key, prune_configs_by=None, reset_to_zero=None):
+def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, warmup=25, rep=100):
     """
     Decorator for auto-tuning a :code:`triton.jit`'d function.
 
@@ -202,9 +232,13 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None):
         'early_config_prune'(optional): a function used to do early prune (eg, num_stages). It takes configs:List[Config] as its input, and returns pruned configs.
     :param reset_to_zero: a list of argument names whose value will be reset to zero before evaluating any configs.
     :type reset_to_zero: list[str]
+    :param warmup: Warmup time (in ms) to pass to benchmarking, defaults to 25.
+    :type warmup: int
+    :param rep: Repetition time (in ms) to pass to benchmarking, defaults to 100.
+    :type rep: int
     """
     def decorator(fn):
-        return Autotuner(fn, fn.arg_names, configs, key, reset_to_zero, prune_configs_by)
+        return Autotuner(fn, fn.arg_names, configs, key, reset_to_zero, prune_configs_by, warmup, rep)
 
     return decorator
 

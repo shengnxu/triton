@@ -9,6 +9,8 @@ include "mlir/IR/OpBase.td"
 include "mlir/IR/FunctionInterfaces.td" // FunctionOpInterface
 include "mlir/IR/SymbolInterfaces.td" // SymbolUserOpInterface
 include "mlir/IR/OpAsmInterface.td" // OpAsmOpInterface
+include "mlir/Interfaces/CallInterfaces.td" // CallOpInterface
+include "mlir/Interfaces/CastInterfaces.td" // CastOpInterface
 include "mlir/Interfaces/SideEffectInterfaces.td" // Pure
 include "mlir/Interfaces/ControlFlowInterfaces.td" // BranchOpInterface
 include "mlir/Interfaces/InferTypeOpInterface.td" // SameOperandsAndResultType
@@ -31,7 +33,8 @@ class TT_Op<string mnemonic, list<Trait> traits = []> :
 //   fptoui, fptosi, uitofp, sitofp,
 //   extf, tructf,
 //   extui, extsi, tructi
-def TT_IntToPtrOp : TT_Op<"int_to_ptr", [SameOperandsAndResultShape,
+def TT_IntToPtrOp : TT_Op<"int_to_ptr", [Elementwise,
+                                         SameOperandsAndResultShape,
                                          SameOperandsAndResultEncoding,
                                          Pure,
                                          /*DeclareOpInterfaceMethods<CastOpInterface>*/]> {
@@ -44,7 +47,8 @@ def TT_IntToPtrOp : TT_Op<"int_to_ptr", [SameOperandsAndResultShape,
     let assemblyFormat = "$from attr-dict `:` type($from) `->` type($result)";
 }
 
-def TT_PtrToIntOp : TT_Op<"ptr_to_int", [SameOperandsAndResultShape,
+def TT_PtrToIntOp : TT_Op<"ptr_to_int", [Elementwise,
+                                         SameOperandsAndResultShape,
                                          SameOperandsAndResultEncoding,
                                          Pure,
                                          /*DeclareOpInterfaceMethods<CastOpInterface>*/]> {
@@ -58,7 +62,8 @@ def TT_PtrToIntOp : TT_Op<"ptr_to_int", [SameOperandsAndResultShape,
 }
 
 // arith.bitcast doesn't support pointers
-def TT_BitcastOp : TT_Op<"bitcast", [SameOperandsAndResultShape,
+def TT_BitcastOp : TT_Op<"bitcast", [Elementwise,
+                                     SameOperandsAndResultShape,
                                      SameOperandsAndResultEncoding,
                                      Pure,
                                      /*DeclareOpInterfaceMethods<CastOpInterface>*/]> {
@@ -73,6 +78,7 @@ def TT_BitcastOp : TT_Op<"bitcast", [SameOperandsAndResultShape,
     // TODO: Add verifier
 }
 
+// FIXME: Not elementwise because scalars are not supported
 def TT_FpToFpOp : TT_Op<"fp_to_fp", [SameOperandsAndResultShape,
                                      SameOperandsAndResultEncoding,
                                      Pure,
@@ -99,6 +105,7 @@ def TT_FpToFpOp : TT_Op<"fp_to_fp", [SameOperandsAndResultShape,
 //
 def TT_AddPtrOp : TT_Op<"addptr",
                      [Pure,
+                      Elementwise,
                       SameOperandsAndResultShape,
                       SameOperandsAndResultEncoding,
                       TypesMatchWith<"result type matches ptr type",
@@ -130,7 +137,7 @@ def TT_LoadOp : TT_Op<"load",
                       [SameLoadStoreOperandsAndResultShape,
                        SameLoadStoreOperandsAndResultEncoding,
                        AttrSizedOperandSegments,
-                       MemoryEffects<[MemRead]>,
+                       DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
                        TypesMatchWith<"infer ptr type from result type",
                                       "result", "ptr", "$_self",
                                       "mlir::OpTrait::impl::verifyLoadStorePointerAndValueType">,
@@ -392,6 +399,7 @@ def TT_DotOp : TT_Op<"dot", [Pure,
     let results = (outs TT_FpIntTensor:$d);
 
     let assemblyFormat = "$a`,` $b`,` $c attr-dict `:` type($a) `*` type($b) `->` type($d)";
+    let hasVerifier = 1;
 }
 
 //
@@ -425,34 +433,51 @@ def TT_ReduceReturnOp: TT_Op<"reduce.return",
     let assemblyFormat = "$result attr-dict `:` type($result)";
 }
 
+//
+// Scan Op
+//
+def TT_ScanOp: TT_Op<"scan",
+                       [Pure,
+                        SameOperandsAndResultEncoding,
+                        SameOperandsAndResultElementType,
+                        SingleBlock,
+                        DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    let summary = "Reduction using generic combination algorithm";
+    let arguments = (ins Variadic<TT_Tensor>:$operands, I32Attr:$axis);
+    let results = (outs Variadic<TT_Tensor>:$result);
+    let regions = (region SizedRegion<1>:$combineOp);
+    let builders = [
+        OpBuilder<(ins "ValueRange":$operands, "int":$axis)>,
+    ];
+    let hasVerifier = 1;
+}
+
+def TT_ScanReturnOp: TT_Op<"scan.return",
+                             [HasParent<"ScanOp">, Pure, Terminator, ReturnLike]> {
+    let summary = "terminator for scan operator";
+    let arguments = (ins Variadic<AnyType>:$result);
+    let assemblyFormat = "$result attr-dict `:` type($result)";
+}
+
 
 //
 // External Elementwise op
 //
-class TT_ExternElementwiseOpBase<string mnemonic, list<Trait> traits = []> :
-    TT_Op<mnemonic,
-         traits # [SameOperandsAndResultEncoding,
-                   SameVariadicOperandSize]> {
+def TT_ExternElementwiseOp : TT_Op<"extern_elementwise", [Elementwise,
+                                                            SameOperandsAndResultEncoding,
+                                                            SameVariadicOperandSize,
+                                                            DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
 
     let description = [{
         call an external function $symbol implemented in $libpath/$libname with $args
         return $libpath/$libname:$symbol($args...)
     }];
 
-    let arguments = (ins Variadic<TT_Type>:$args, StrAttr:$libname, StrAttr:$libpath, StrAttr:$symbol);
+    let arguments = (ins Variadic<TT_Type>:$args, StrAttr:$libname, StrAttr:$libpath, StrAttr:$symbol, BoolAttr:$pure);
 
     let results = (outs TT_Type:$result);
 
     let assemblyFormat = "operands attr-dict `:` functional-type(operands, $result)";
-}
-
-def TT_PureExternElementwiseOp : TT_ExternElementwiseOpBase<"pure_extern_elementwise", [Pure, Elementwise]> {
-    let summary = "FFI for pure element-wise extern LLVM bitcode functions";
-}
-
-def TT_ImpureExternElementwiseOp : TT_ExternElementwiseOpBase<"impure_extern_elementwise", [MemoryEffects<[MemRead]>,
-                                                                                            MemoryEffects<[MemWrite]>]> {
-    let summary = "FFI for impure element-wise extern LLVM bitcode functions";
 }
 
 //
@@ -473,6 +498,30 @@ def TT_MakeRangeOp : TT_Op<"make_range", [Pure]> {
     let results = (outs TT_IntTensor:$result);
 
     let assemblyFormat = "attr-dict `:` type($result)";
+
+    let hasFolder = 1;
+}
+
+//
+// ElementwiseInlineAsm Op
+//
+def TT_ElementwiseInlineAsmOp : TT_Op<"elementwise_inline_asm", [Elementwise,
+                                                                 SameOperandsAndResultEncoding,
+                                                                 DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "inline assembly applying elementwise operation to a group of packed element.";
+  let description = [{
+   This will apply the given in inline assembly to `packed_element` number of
+   elements of the inputs. The elements packed together is unknown and will
+   depend on the backend implementation.
+  }];
+
+  let arguments = (ins StrAttr:$asm_string, StrAttr:$constraints, BoolAttr:$pure, I32Attr:$packed_element, Variadic<AnyTypeOf<[TT_Type]>>:$args);
+  let results = (outs TT_Type:$result);
+
+
+  let assemblyFormat = [{
+    $asm_string attr-dict ($args^ `:` type($args))? `->` type($result)
+  }];
 }
 
 //
@@ -530,6 +579,7 @@ def TT_MakeTensorPtrOp : TT_Op<"make_tensor_ptr",
 
   let results = (outs TT_TensorPtr:$result);
 
+  // TODO(Keren): define a custom assembly format for this op because the result type cannot be printed correctly
   // Add additional `[]` to increase readability and split variadic lists
   let assemblyFormat = "$base `,` `[` $shape `]` `,` `[` $strides `]` `,` `[` $offsets `]` attr-dict `:` type($result)";
 

@@ -6,8 +6,6 @@ from functools import wraps
 from typing import Callable, List, Sequence, TypeVar
 
 from .._C.libtriton.triton import ir
-# import triton
-from ..runtime.jit import jit
 from . import semantic
 
 T = TypeVar('T')
@@ -77,7 +75,7 @@ def _to_tensor(x, builder):
 class dtype:
     SINT_TYPES = ['int8', 'int16', 'int32', 'int64']
     UINT_TYPES = ['int1', 'uint8', 'uint16', 'uint32', 'uint64']
-    FP_TYPES = ['fp8e4', 'fp8e5', 'fp16', 'bf16', 'fp32', 'fp64']
+    FP_TYPES = ['fp8e4b15', 'fp8e4b15x4', 'fp8e4nv', 'fp8e5', 'fp16', 'bf16', 'fp32', 'fp64']
     STANDARD_FP_TYPES = ['fp16', 'bf16', 'fp32', 'fp64']
     OTHER_TYPES = ['void']
 
@@ -97,24 +95,38 @@ class dtype:
             self.int_bitwidth = int(name.split('int')[-1])
             self.primitive_bitwidth = self.int_bitwidth
         elif name in dtype.FP_TYPES:
-            if name == 'fp8e4':
+            if name == 'fp8e4b15':
                 self.fp_mantissa_width = 3
                 self.primitive_bitwidth = 8
+                self.exponent_bias = 15
+            elif name == 'fp8e4b15x4':
+                self.fp_mantissa_width = 3
+                self.primitive_bitwidth = 8
+                self.exponent_bias = 15
+            elif name == 'fp8e4nv':
+                self.fp_mantissa_width = 3
+                self.primitive_bitwidth = 8
+                self.exponent_bias = 7
             elif name == 'fp8e5':
                 self.fp_mantissa_width = 2
                 self.primitive_bitwidth = 8
+                self.exponent_bias = 15
             elif name == 'fp16':
                 self.fp_mantissa_width = 10
                 self.primitive_bitwidth = 16
+                self.exponent_bias = 15
             elif name == 'bf16':
                 self.fp_mantissa_width = 7
                 self.primitive_bitwidth = 16
+                self.exponent_bias = 127
             elif name == 'fp32':
                 self.fp_mantissa_width = 23
                 self.primitive_bitwidth = 32
+                self.exponent_bias = 127
             elif name == 'fp64':
                 self.fp_mantissa_width = 53
                 self.primitive_bitwidth = 64
+                self.exponent_bias = 1023
             else:
                 raise RuntimeError(f'Unsupported floating-point type {name}')
         elif name == 'void':
@@ -122,6 +134,18 @@ class dtype:
 
     def is_fp8(self):
         return 'fp8' in self.name
+
+    def is_fp8e4nv(self):
+        return self.name == 'fp8e4nv'
+
+    def is_fp8e4b15(self):
+        return self.name == 'fp8e4b15'
+
+    def is_fp8e4b15x4(self):
+        return self.name == 'fp8e4b15x4'
+
+    def is_fp8e5(self):
+        return self.name == 'fp8e5'
 
     def is_fp16(self):
         return self.name == 'fp16'
@@ -181,6 +205,10 @@ class dtype:
         return self.is_int1()
 
     @staticmethod
+    def is_dtype(type_str):
+        return type_str in dtype.SINT_TYPES + dtype.UINT_TYPES + dtype.FP_TYPES + dtype.OTHER_TYPES
+
+    @staticmethod
     def is_void():
         raise RuntimeError("Not implemented")
 
@@ -222,8 +250,12 @@ class dtype:
             return builder.get_int64_ty()
         elif self.name == 'fp8e5':
             return builder.get_fp8e5_ty()
-        elif self.name == 'fp8e4':
-            return builder.get_fp8e4_ty()
+        elif self.name == 'fp8e4nv':
+            return builder.get_fp8e4nv_ty()
+        elif self.name == 'fp8e4b15':
+            return builder.get_fp8e4b15_ty()
+        elif self.name == 'fp8e4b15x4':
+            return builder.get_fp8e4b15x4_ty()
         elif self.name == 'fp16':
             return builder.get_half_ty()
         elif self.name == 'bf16':
@@ -356,7 +388,9 @@ uint16 = dtype('uint16')
 uint32 = dtype('uint32')
 uint64 = dtype('uint64')
 float8e5 = dtype('fp8e5')
-float8e4 = dtype('fp8e4')
+float8e4nv = dtype('fp8e4nv')
+float8e4b15 = dtype('fp8e4b15')
+float8e4b15x4 = dtype('fp8e4b15x4')
 float16 = dtype('fp16')
 bfloat16 = dtype('bf16')
 float32 = dtype('fp32')
@@ -382,6 +416,9 @@ class constexpr:
 
     def __repr__(self) -> str:
         return f"constexpr[{self.value}]"
+
+    def __index__(self):
+        return self.value
 
     def __add__(self, other):
         return constexpr(self.value + other.value)
@@ -1320,11 +1357,6 @@ def reduce(input, axis, combine_fn, _builder=None, _generator=None):
 @builtin
 def _promote_reduction_input(t, _builder=None):
     scalar_ty = t.type.scalar
-    # input is extended to 32-bits if necessary
-    # this increases numerical accuracy and can be done pretty much for free
-    # on GPUs
-    if scalar_ty.is_int() and scalar_ty.int_bitwidth < 32:
-        return t.to(int32, _builder=_builder)
 
     # hardware doesn't support FMAX, FMIN, CMP for bfloat16
     if scalar_ty is bfloat16:
@@ -1351,157 +1383,55 @@ def _reduce_with_indices(input, axis, combine_fn, _builder=None, _generator=None
     return rvalue, rindices
 
 
-@jit
-def minimum(x, y):
-    """
-    Computes the element-wise minimum of :code:`x` and :code:`y`.
+# -----------------------
+# Scans
+# -----------------------
 
-    :param input: the first input tensor
-    :type input: Block
-    :param other: the second input tensor
-    :type other: Block
-    """
-    return where(x < y, x, y)
+def _add_scan_docstr(name: str, return_indices_arg: str = None, tie_break_arg: str = None) -> Callable[[T], T]:
 
+    def _decorator(func: T) -> T:
+        docstr = """
+    Returns the {name} of all elements in the :code:`input` tensor along the provided :code:`axis`
 
-@jit
-def maximum(x, y):
-    """
-    Computes the element-wise maximum of :code:`x` and :code:`y`.
+    :param input: the input values
+    :param axis: the dimension along which the scan should be done"""
+        func.__doc__ = docstr.format(name=name)
+        return func
 
-    :param input: the first input tensor
-    :type input: Block
-    :param other: the second input tensor
-    :type other: Block
-    """
-    return where(x > y, x, y)
+    return _decorator
 
-# max and argmax
-
-
-@jit
-def _argmax_combine(value1, index1, value2, index2, tie_break_left):
-    if tie_break_left:
-        tie = value1 == value2 and index1 < index2
-    else:
-        tie = False
-    gt = value1 > value2 or tie
-    v_ret = where(gt, value1, value2)
-    i_ret = where(gt, index1, index2)
-    return v_ret, i_ret
-
-
-@jit
-def _argmax_combine_tie_break_left(value1, index1, value2, index2):
-    return _argmax_combine(value1, index1, value2, index2, True)
-
-
-@jit
-def _argmax_combine_tie_break_fast(value1, index1, value2, index2):
-    return _argmax_combine(value1, index1, value2, index2, False)
-
-
-@jit
-@_add_reduction_docstr("maximum",
-                       return_indices_arg="return_indices",
-                       tie_break_arg="return_indices_tie_break_left")
-def max(input, axis=None, return_indices=False, return_indices_tie_break_left=True):
-    input = _promote_reduction_input(input)
-    if return_indices:
-        if return_indices_tie_break_left:
-            return _reduce_with_indices(input, axis, _argmax_combine_tie_break_left)
-        else:
-            return _reduce_with_indices(input, axis, _argmax_combine_tie_break_fast)
-    else:
-        return reduce(input, axis, maximum)
-
-
-@jit
-@_add_reduction_docstr("maximum index", tie_break_arg="tie_break_left")
-def argmax(input, axis, tie_break_left=True):
-    (_, ret) = max(input, axis, return_indices=True, return_indices_tie_break_left=tie_break_left)
-    return ret
-
-# min and argmin
-
-
-@jit
-def _argmin_combine(value1, index1, value2, index2, tie_break_left):
-    if tie_break_left:
-        tie = value1 == value2 and index1 < index2
-    else:
-        tie = False
-    lt = value1 < value2 or tie
-    value_ret = where(lt, value1, value2)
-    index_ret = where(lt, index1, index2)
-    return value_ret, index_ret
-
-
-@jit
-def _argmin_combine_tie_break_left(value1, index1, value2, index2):
-    return _argmin_combine(value1, index1, value2, index2, True)
-
-
-@jit
-def _argmin_combine_tie_break_fast(value1, index1, value2, index2):
-    return _argmin_combine(value1, index1, value2, index2, False)
-
-
-@jit
-@_add_reduction_docstr("minimum",
-                       return_indices_arg="return_indices",
-                       tie_break_arg="return_indices_tie_break_left")
-def min(input, axis=None, return_indices=False, return_indices_tie_break_left=True):
-    input = _promote_reduction_input(input)
-    if return_indices:
-        if return_indices_tie_break_left:
-            return _reduce_with_indices(input, axis, _argmin_combine_tie_break_left)
-        else:
-            return _reduce_with_indices(input, axis, _argmin_combine_tie_break_fast)
-    else:
-        return reduce(input, axis, minimum)
-
-
-@jit
-@_add_reduction_docstr("minimum index",
-                       tie_break_arg="tie_break_left")
-def argmin(input, axis, tie_break_left=True):
-    _, ret = min(input, axis, return_indices=True, return_indices_tie_break_left=tie_break_left)
-    return ret
-
-
-@jit
-def _sum_combine(a, b):
-    return a + b
-
-# sum
-
-
-@jit
-@_add_reduction_docstr("sum")
-def sum(input, axis=None):
-    input = _promote_reduction_input(input)
-    return reduce(input, axis, _sum_combine)
-
-
-@jit
-def _xor_combine(a, b):
-    return a ^ b
-
-
-# xor sum
 
 @builtin
-@_add_reduction_docstr("xor sum")
-def xor_sum(input, axis=None, _builder=None, _generator=None):
-    scalar_ty = input.type.scalar
-    if not scalar_ty.is_int():
-        raise ValueError("xor_sum only supported for integers")
+def associative_scan(input, axis, combine_fn, _builder=None, _generator=None):
+    """Applies the combine_fn to each elements with a carry in :code:`input` tensors along the provided :code:`axis` and update the carry
 
-    input = _promote_reduction_input(input, _builder=_builder)
-    return reduce(input, axis, _xor_combine,
-                  _builder=_builder, _generator=_generator)
+    :param input: the input tensor, or tuple of tensors
+    :param axis: the dimension along which the reduction should be done
+    :param combine_fn: a function to combine two groups of scalar tensors (must be marked with @triton.jit)
 
+    """
+    if isinstance(input, tensor):
+        return associative_scan((input,), axis, combine_fn,
+                                _builder=_builder, _generator=_generator)[0]
+
+    def make_combine_region(scan_op):
+        in_scalar_tys = [t.type.scalar for t in input]
+        prototype = function_type(in_scalar_tys, in_scalar_tys * 2)
+
+        region = scan_op.get_region(0)
+        with _insertion_guard(_builder):
+            param_types = [ty.to_ir(_builder) for ty in prototype.param_types]
+            block = _builder.create_block_with_parent(region, param_types)
+            args = [tensor(block.arg(i), ty)
+                    for i, ty in enumerate(prototype.param_types)]
+            results = _generator.call_JitFunction(combine_fn, args, kwargs={})
+            if isinstance(results, tensor):
+                handles = [results.handle]
+            else:
+                handles = [r.handle for r in results]
+            _builder.create_scan_ret(*handles)
+    axis = _constexpr_to_value(axis)
+    return semantic.associative_scan(input, axis, make_combine_region, _builder)
 
 # -----------------------
 # Compiler Hint Ops
@@ -1547,6 +1477,24 @@ def max_contiguous(input, values, _builder=None):
     values = [x.value for x in values]
     return semantic.max_contiguous(input, values)
 
+
+@builtin
+def max_constancy(input, values, _builder=None):
+    """
+    Let the compiler knows that the `value` first values in :code:`input` are constant.
+
+    e.g. if :code:`values` is [4], then each group of 4 values in :code:`input` should all be equal,
+    for example [0, 0, 0, 0, 1, 1, 1, 1].
+    """
+    if isinstance(values, constexpr):
+        values = [values]
+    for i, d in enumerate(values):
+        if not isinstance(d, constexpr):
+            raise TypeError(f"values element {i} must have type `constexpr`")
+        if not isinstance(d.value, int):
+            raise TypeError(f"values element {i} must have type `constexpr[int]`, got `constexpr[{type(d.value)}]")
+    values = [x.value for x in values]
+    return semantic.max_constancy(input, values)
 # -----------------------
 # Debugging functions
 # -----------------------
@@ -1555,15 +1503,15 @@ def max_contiguous(input, values, _builder=None):
 @builtin
 def static_print(*values, sep: str = " ", end: str = "\n", file=None, flush=False, _builder=None):
     '''
-    Print the values at compile time. The parameters are the same as the Python builtin :code:`print`.
+    Print the values at compile time.  The parameters are the same as the builtin :code:`print`.
 
-    Calling the Python builtin :code:`print` inside your kernel is the same as calling this.
+    NOTE: Calling the Python builtin :code:`print` is not the same as calling this, it instead maps to :code:`device_print`,
+    which has special requirements for the arguments.
 
     .. highlight:: python
     .. code-block:: python
 
         tl.static_print(f"{BLOCK_SIZE=}")
-        print(f"{BLOCK_SIZE=}")
     '''
     pass
 
@@ -1585,13 +1533,18 @@ def static_assert(cond, msg="", _builder=None):
 @builtin
 def device_print(prefix, *args, _builder=None):
     '''
-    Print the values at runtime from the device.  String formatting does not work, so you should
-    provide the values you want to print as arguments.
+    Print the values at runtime from the device.  String formatting does not work for runtime values, so you should
+    provide the values you want to print as arguments.  The first value must be a string, all following values must
+    be scalars or tensors.
+
+    Calling the Python builtin :code:`print` is the same as calling this function, and the requirements for the arguments will match
+    this function (not the normal requirements for :code:`print`).
 
     .. highlight:: python
     .. code-block:: python
 
         tl.device_print("pid", pid)
+        print("pid", pid)
 
     :param prefix: a prefix to print before the values. This is required to be a string literal.
     :param args: the values to print. They can be any tensor or scalar.
@@ -1639,13 +1592,58 @@ def device_assert(cond, msg="", _builder=None):
     while hasattr(module, "__name__"):
         frame = frame.f_back
         module = inspect.getmodule(frame)
-    func_name = frame.f_code.co_name
-    file_name = frame.f_back.f_code.co_filename
-    # TODO: The line number currently indicates the line
-    # where the triton function is called but not where the
-    # device_assert is called. Need to enhance this.
-    lineno = frame.f_back.f_lineno
+    lineno = 0
+    func_name = 'unknown'
+    file_name = 'unknown'
+    if frame is not None:
+        func_name = frame.f_code.co_name
+        file_name = frame.f_back.f_code.co_filename
+        # TODO: The line number currently indicates the line
+        # where the triton function is called but not where the
+        # device_assert is called. Need to enhance this.
+        lineno = frame.f_back.f_lineno
     return semantic.device_assert(_to_tensor(cond, _builder), msg, file_name, func_name, lineno, _builder)
+
+
+@builtin
+def inline_asm_elementwise(asm: str, constraints: str, args: list, dtype, is_pure: bool, pack: int, _builder=None):
+    '''
+        Execute the inline assembly to a packed of elements of the tensor
+        :param asm: assembly to be inlined, it has to match the target assembly format
+        :param constraints: string representing the mapping of operands to register
+        :param args: the arguments of the operation
+        :param dtype: the element type of the returned variable
+        :param is_pure: whether the operation is pure
+        :param pack: the number of elements to be processed by one instance of inline assembly
+        :param _builder: the builder
+        :return: the return value of the function
+    '''
+    dispatch_args = args.copy()
+    asm = _constexpr_to_value(asm)
+    constraints = _constexpr_to_value(constraints)
+    pack = _constexpr_to_value(pack)
+    is_pure = _constexpr_to_value(is_pure)
+    ret_shape = None
+    arg_types = []
+    res_ty = dtype
+    for i in range(len(dispatch_args)):
+        dispatch_args[i] = _to_tensor(dispatch_args[i], _builder)
+        arg_types.append(dispatch_args[i].dtype)
+    if len(arg_types) > 0:
+        arg_types = tuple(arg_types)
+        broadcast_arg = dispatch_args[0]
+        # Get the broadcast shape over all the arguments
+        for i, item in enumerate(dispatch_args):
+            _, broadcast_arg = semantic.binary_op_type_checking_impl(
+                item, broadcast_arg, _builder, arithmetic_check=False)
+        # Change the shape of each argument based on the broadcast shape
+        for i in range(len(dispatch_args)):
+            dispatch_args[i], _ = semantic.binary_op_type_checking_impl(
+                dispatch_args[i], broadcast_arg, _builder, arithmetic_check=False)
+        ret_shape = broadcast_arg.shape
+        res_ty = block_type(dtype, ret_shape)
+    call = _builder.create_inline_asm(asm, constraints, [t.handle for t in args], res_ty.to_ir(_builder), is_pure, pack)
+    return tensor(call, res_ty)
 
 
 # -----------------------
@@ -1779,6 +1777,16 @@ def extern_elementwise(lib_name: str, lib_path: str, args: list, arg_type_symbol
             ret_shape = broadcast_arg.shape
     func = getattr(_builder, "create_extern_elementwise")
     return dispatch(func, lib_name, lib_path, dispatch_args, arg_type_symbol_dict, ret_shape, is_pure, _builder)
+
+
+def binary_op_type_legalization(lhs, rhs, builder):
+    '''
+        Convert both operands to a single common type
+        :param lhs: the left operand
+        :param rhs: the right operand
+        :param builder: the builder
+    '''
+    return semantic.binary_op_type_checking_impl(lhs, rhs, builder)
 
 
 def extern(fn):

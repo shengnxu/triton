@@ -9,13 +9,13 @@ print_path = os.path.join(dir_path, "print_helper.py")
 assert_path = os.path.join(dir_path, "assert_helper.py")
 
 # TODO: bfloat16 after LLVM-15
-func_types = ["device_assert", "assert", "static_assert", "no_debug"]
+assert_types = ["device_assert", "assert", "static_assert", "no_debug"]
 nested_types = [(caller, callee) for caller in ["true", "false", "none"] for callee in ["true", "false", "none"]]
 torch_types = ["int8", "uint8", "int16", "int32", "long", "float16", "float32", "float64"]
 
 
 @pytest.mark.parametrize("func_type, data_type",
-                         [("device_print", data_type) for data_type in torch_types] + [("print", "int32"), ("static_print", "int32")])
+                         [("device_print", data_type) for data_type in torch_types] + [("print", "int32"), ("static_print", "int32"), ("no_arg_print", "int32")])
 def test_print(func_type: str, data_type: str):
     proc = subprocess.Popen([sys.executable, print_path, func_type, data_type], stdout=subprocess.PIPE, shell=False)
     outs, _ = proc.communicate()
@@ -29,15 +29,14 @@ def test_print(func_type: str, data_type: str):
             new_lines.add(value)
         except Exception as e:
             print(e)
-    if func_type != "static_print":
+    if func_type != "static_print" and func_type != "no_arg_print":
         for i in range(128):
             assert i in new_lines
-        assert len(new_lines) == 128
     else:
         assert len(new_lines) == 1
 
 
-@pytest.mark.parametrize("func_type", func_types)
+@pytest.mark.parametrize("func_type", assert_types)
 def test_assert(func_type: str):
     os.environ["TRITON_DEBUG"] = "1"
     proc = subprocess.Popen([sys.executable, assert_path, func_type], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)

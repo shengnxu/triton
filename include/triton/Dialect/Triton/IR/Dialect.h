@@ -9,6 +9,8 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/FunctionInterfaces.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h.inc"
 #include "triton/Dialect/Triton/IR/OpsEnums.h.inc"
@@ -45,6 +47,12 @@ public:
   inferDotOpEncoding(Attribute operandEncoding, unsigned opIdx,
                      Attribute retEncoding,
                      std::optional<Location> location) const = 0;
+
+  // Verify that the encoding are compatible to be used together in a dot
+  // operation
+  virtual LogicalResult
+  verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
+                                   Attribute operandEncodingB) const = 0;
 };
 
 } // namespace triton

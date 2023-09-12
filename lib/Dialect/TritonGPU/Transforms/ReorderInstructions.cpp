@@ -1,6 +1,7 @@
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
@@ -16,6 +17,7 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
+#include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #define GEN_PASS_CLASSES
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
 
@@ -42,9 +44,16 @@ public:
 
   void runOnOperation() override {
     ModuleOp m = getOperation();
+    mlir::DominanceInfo dom(m);
     // Sink conversions into loops when they will increase
     // register pressure
     DenseMap<Operation *, Operation *> opToMove;
+    auto moveAfter = [](Operation *lhs, Operation *rhs) {
+      auto lhsId = getWSRoleId(lhs);
+      auto rhsId = getWSRoleId(rhs);
+      if (lhsId == rhsId)
+        lhs->moveAfter(rhs);
+    };
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       if (!willIncreaseRegisterPressure(op))
         return;
@@ -68,7 +77,7 @@ public:
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
-      op->moveAfter(argOp);
+      moveAfter(op, argOp);
     });
     // Move transpositions just after their definition
     opToMove.clear();
@@ -76,10 +85,10 @@ public:
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
-      op->moveAfter(argOp);
+      moveAfter(op, argOp);
     });
-    // Move `dot` operand so that conversions to opIdx=0 happens before
-    // conversions to opIdx=1
+    // Move `dot` operand so that conversions to opIdx=1 happens after
+    // conversions to opIdx=0
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();
       auto dstEncoding =
@@ -87,17 +96,22 @@ public:
       if (!dstEncoding)
         return;
       int opIdx = dstEncoding.getOpIdx();
-      if (opIdx != 0)
+      if (opIdx != 1)
         return;
       if (op->getUsers().empty())
         return;
       auto dotUser = dyn_cast<triton::DotOp>(*op->user_begin());
       if (!dotUser)
         return;
-      auto BOp = dotUser.getOperand(1).getDefiningOp();
-      if (!BOp)
+      auto AOp =
+          dotUser.getOperand(0).getDefiningOp<triton::gpu::ConvertLayoutOp>();
+      if (!AOp)
         return;
-      op->moveBefore(BOp);
+      // Check that the conversion to OpIdx=1 happens before and can be moved
+      // after the conversion to OpIdx=0.
+      if (!dom.dominates(op.getOperation(), AOp.getOperation()))
+        return;
+      moveAfter(op, AOp);
     });
     return;
   }

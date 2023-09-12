@@ -203,8 +203,8 @@ static Value loadA(Value tensor, const SharedMemoryObject &smemObj,
   SmallVector<Value> elems;
   elems.reserve(has.size() * 2);
   for (auto item : has) { // has is a map, the key should be ordered.
-    elems.push_back(item.second.first);
-    elems.push_back(item.second.second);
+    elems.push_back(bitcast(item.second.first, i32_ty));
+    elems.push_back(bitcast(item.second.second, i32_ty));
   }
 
   Value res = typeConverter->packLLElements(loc, elems, rewriter, resultTy);
@@ -327,8 +327,8 @@ static Value loadB(Value tensor, const SharedMemoryObject &smemObj,
 
   SmallVector<Value> elems;
   for (auto &item : hbs) { // has is a map, the key should be ordered.
-    elems.push_back(item.second.first);
-    elems.push_back(item.second.second);
+    elems.push_back(bitcast(item.second.first, i32_ty));
+    elems.push_back(bitcast(item.second.second, i32_ty));
   }
 
   Value res = typeConverter->packLLElements(loc, elems, rewriter, resultTy);
@@ -339,7 +339,7 @@ namespace SharedToDotOperandMMAv1 {
 using CoordTy = SmallVector<Value>;
 using ValueTable = std::map<std::pair<int, int>, std::pair<Value, Value>>;
 
-SmallVector<CoordTy> getMNCoords(Value thread,
+SmallVector<CoordTy> getMNCoords(Value thread, Location loc,
                                  ConversionPatternRewriter &rewriter,
                                  ArrayRef<unsigned int> wpt,
                                  const MmaEncodingAttr &mmaLayout,
@@ -348,7 +348,6 @@ SmallVector<CoordTy> getMNCoords(Value thread,
   static constexpr std::array<int, 3> fpw{{2, 2, 1}};
 
   auto *ctx = thread.getContext();
-  auto loc = UnknownLoc::get(ctx);
   Value _1 = i32_val(1);
   Value _2 = i32_val(2);
   Value _4 = i32_val(4);

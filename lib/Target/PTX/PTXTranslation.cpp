@@ -10,6 +10,11 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/IPO/AlwaysInliner.h"
+#include <filesystem>
+
+#include <mutex>
+#include <optional>
 
 #include <mutex>
 #include <optional>
@@ -42,7 +47,7 @@ std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
   // LLVM version in use may not officially support target hardware.
   // Supported versions for LLVM 14 are here:
   // https://github.com/llvm/llvm-project/blob/f28c006a5895fc0e329fe15fead81e37457cb1d1/clang/include/clang/Basic/BuiltinsNVPTX.def
-  int maxPTX = std::min(80, version);
+  int maxPTX = std::min(82, version);
   int maxCC = std::min(90, cc);
   // options
   auto options = llvm::cl::getRegisteredOptions();
@@ -60,9 +65,14 @@ std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
   std::string layout = "";
   std::string features = "";
   // std::string features = "+ptx" + std::to_string(maxPTX);
+  for (llvm::Function &f : module.functions()) {
+    if (!f.hasFnAttribute(llvm::Attribute::NoInline))
+      f.addFnAttr(llvm::Attribute::AlwaysInline);
+  }
   initLLVM();
   // verify and store llvm
   llvm::legacy::PassManager pm;
+  pm.add(llvm::createAlwaysInlinerLegacyPass());
   pm.add(llvm::createVerifierPass());
   pm.run(module);
   // module->print(llvm::outs(), nullptr);

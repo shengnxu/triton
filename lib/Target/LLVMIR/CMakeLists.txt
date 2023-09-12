@@ -1,10 +1,16 @@
 add_mlir_translation_library(TritonLLVMIR
         LLVMIRTranslation.cpp
+        LLVMDIScope.cpp
 
         LINK_COMPONENTS
         Core
 
-        LINK_LIBS PUBLIC
+        DEPENDS
+        LLVMIRIncGen
+
+        LINK_LIBS
+        ${CMAKE_DL_LIBS}
+        PUBLIC
         MLIRArithToLLVM
         MLIRBuiltinToLLVMIRTranslation
         MLIRExecutionEngineUtils
@@ -19,3 +25,8 @@ add_mlir_translation_library(TritonLLVMIR
         MLIRTargetLLVMIRExport
         TritonGPUToLLVM
         )
+
+set_source_files_properties(
+        LLVMIRTranslation.cpp
+        PROPERTIES
+        COMPILE_FLAGS "-D__BUILD_DIR__=\\\"${CMAKE_BINARY_DIR}\\\"")

@@ -4,8 +4,21 @@ from .. import Config, autotune, cdiv, heuristics, jit
 from .. import language as tl
 from .matmul_perf_model import early_config_prune, estimate_matmul_time
 
-# import triton
-# import language as tl
+_ordered_datatypes = [torch.float16, torch.bfloat16, torch.float32]
+
+
+def get_higher_dtype(a, b):
+    if a is b:
+        return a
+
+    assert a in _ordered_datatypes
+    assert b in _ordered_datatypes
+
+    for d in _ordered_datatypes:
+        if a is d:
+            return b
+        if b is d:
+            return a
 
 
 def init_to_zero(name):
@@ -68,8 +81,9 @@ def _kernel(A, B, C, M, N, K,
             stride_bk, stride_bn,
             stride_cm, stride_cn,
             dot_out_dtype: tl.constexpr,
+            allow_tf32: tl.constexpr,
             BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
-            GROUP_M: tl.constexpr, SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
+            GROUP_M: tl.constexpr, SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr, AB_DTYPE: tl.constexpr
             ):
     # matrix multiplication
     pid = tl.program_id(0)
@@ -98,9 +112,13 @@ def _kernel(A, B, C, M, N, K,
             b = tl.load(B)
         else:
             k_remaining = K - k * (BLOCK_K * SPLIT_K)
-            a = tl.load(A, mask=rk[None, :] < k_remaining, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k_remaining, other=0.)
-        acc += tl.dot(a, b, out_dtype=dot_out_dtype)
+            _0 = tl.zeros((1, 1), dtype=C.dtype.element_ty)
+            a = tl.load(A, mask=rk[None, :] < k_remaining, other=_0)
+            b = tl.load(B, mask=rk[:, None] < k_remaining, other=_0)
+        if AB_DTYPE:
+            a = a.to(C.dtype.element_ty)
+            b = b.to(C.dtype.element_ty)
+        acc += tl.dot(a, b, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
         A += BLOCK_K * SPLIT_K * stride_ak
         B += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to(C.dtype.element_ty)
@@ -122,7 +140,7 @@ class _matmul(torch.autograd.Function):
     _locks = {}
 
     @staticmethod
-    def _call(a, b, dot_out_dtype):
+    def _call(a, b, dot_out_dtype, allow_tf32):
         device = a.device
         # handle non-contiguous inputs if necessary
         if a.stride(0) > 1 and a.stride(1) > 1:
@@ -134,9 +152,14 @@ class _matmul(torch.autograd.Function):
         M, K = a.shape
         _, N = b.shape
         # allocates output
-        c = torch.empty((M, N), device=device, dtype=a.dtype)
+        if a.dtype in [tl.float8e4nv, tl.float8e4b15, tl.float8e5] or\
+           b.dtype in [tl.float8e4nv, tl.float8e4b15, tl.float8e5]:
+            c_dtype = torch.float16
+        else:
+            c_dtype = get_higher_dtype(a.dtype, b.dtype)
+        c = torch.empty((M, N), device=device, dtype=c_dtype)
         if dot_out_dtype is None:
-            if a.dtype in [torch.float16, torch.float32, torch.bfloat16]:
+            if c_dtype in [torch.float16, torch.float32, torch.bfloat16]:
                 dot_out_dtype = tl.float32
             else:
                 dot_out_dtype = tl.int32
@@ -148,6 +171,9 @@ class _matmul(torch.autograd.Function):
                 dot_out_dtype = tl.float32
             else:
                 dot_out_dtype = tl.int32
+        ab_dtype = True
+        if a.dtype in [tl.float8e4nv, tl.float8e5] and b.dtype in [tl.float8e4nv, tl.float8e5]:
+            ab_dtype = False
         # launch kernel
         grid = lambda META: (cdiv(M, META['BLOCK_M']) * cdiv(N, META['BLOCK_N']), META['SPLIT_K'])
         _kernel[grid](a, b, c, M, N, K,
@@ -155,12 +181,13 @@ class _matmul(torch.autograd.Function):
                       b.stride(0), b.stride(1),
                       c.stride(0), c.stride(1),
                       dot_out_dtype=dot_out_dtype,
-                      GROUP_M=8)
+                      allow_tf32=allow_tf32,
+                      GROUP_M=8, AB_DTYPE=ab_dtype)
         return c
 
     @staticmethod
-    def forward(ctx, a, b, dot_out_dtype=None):
-        return _matmul._call(a, b, dot_out_dtype=dot_out_dtype)
+    def forward(ctx, a, b, dot_out_dtype=None, allow_tf32=True):
+        return _matmul._call(a, b, dot_out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
 
 
 matmul = _matmul.apply

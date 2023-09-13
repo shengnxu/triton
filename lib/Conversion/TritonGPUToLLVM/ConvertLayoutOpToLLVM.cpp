@@ -256,6 +256,7 @@ private:
       elemTy = IntegerType::get(elemTy.getContext(), 64);
 
     auto llvmElemTy = getTypeConverter()->convertType(elemTy);
+    llvm::outs() << "llvmElemTy = " << llvmElemTy << "\n";
 
     for (unsigned ctaId = 0; ctaId < accumNumCTAsEachRep; ++ctaId) {
       auto multiDimCTAInRepId =
@@ -588,9 +589,14 @@ private:
     auto inOrd = getOrder(srcLayout);
     auto outOrd = dstSharedLayout.getOrder();
     Value smemBase = getSharedMemoryBase(loc, rewriter, dst);
+    llvm::outs() << "elemTy_dst = " << dstTy.getElementType() << "\n";
+    llvm::outs() << "elemTy_src = " << srcTy.getElementType() << "\n";
     auto elemTy = getTypeConverter()->convertType(srcTy.getElementType());
+    llvm::outs() << "elemTy2 = " << elemTy << "\n";
     auto elemPtrTy = ptr_ty(getTypeConverter()->convertType(elemTy), 3);
+    llvm::outs() << "smemBase_before_cast = " << smemBase << "\n";
     smemBase = bitcast(smemBase, elemPtrTy);
+    llvm::outs() << "smemBase_after_cast = " << smemBase << "\n";
 
     auto dstStrides =
         getStridesFromShapeAndOrder(dstShape, outOrd, loc, rewriter);

@@ -62,6 +62,7 @@ static SmallVector<Value>
 Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
+llvm::outs() << "Fp8E5M2_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -287,6 +288,7 @@ static SmallVector<Value>
 Fp8E4M3B15_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
+llvm::outs() << "Fp8E4M3B15_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -419,6 +421,7 @@ static SmallVector<Value>
 Fp8E4M3B15x4_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
+llvm::outs() << "Fp8E4M3B15X4_to_Fp16\n";
   return {};
 }
 #else
@@ -472,6 +475,7 @@ static SmallVector<Value>
 Fp8E4M3_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
+llvm::outs() << "Fp8E4M3_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -1025,20 +1029,20 @@ public:
     Location loc = op->getLoc();
     // element type
     auto resultElementTy = getElementTypeOrSelf(resultTy);
-    llvm::outs() << "===============================opType = " << opType << ", resultElementTy = " << resultElementTy << "\n";
+//    llvm::outs() << "===============================opType = " << opType << ", resultElementTy = " << resultElementTy << "\n";
 
     Type elemTy = this->getTypeConverter()->convertType(resultElementTy);
     // llvm::outs() << "elemTy = " << elemTy << "\n";
     SmallVector<SmallVector<Value>> allOperands;
     for (auto operand : adaptor.getOperands()) {
       auto argTy = op->getOperand(0).getType();
-      llvm::outs() << "argTy = " << argTy << "\n";
+//      llvm::outs() << "argTy = " << argTy << "\n";
       auto subOperands = this->getTypeConverter()->unpackLLElements(
           loc, operand, rewriter, argTy);
-      llvm::outs() << "subOperand_size1 = " << subOperands.size() << "\n";
+//      llvm::outs() << "subOperand_size1 = " << subOperands.size() << "\n";
       subOperands = unpackI32(subOperands, argTy, rewriter, loc,
                               this->getTypeConverter());
-      llvm::outs() << "subOperand_size2 = " << subOperands.size() << "\n";
+//      llvm::outs() << "subOperand_size2 = " << subOperands.size() << "\n";
       allOperands.resize(subOperands.size());
       for (auto v : llvm::enumerate(subOperands))
         allOperands[v.index()].push_back(v.value());
@@ -1275,7 +1279,7 @@ struct FpToFpOpConversion
            "FP8 casting only support tensors with 4-aligned sizes");
     auto srcElementType = getElementType(op.getFrom());
     auto dstElementType = getElementType(op.getResult());
-    llvm::outs() << "operand[0].size = " << operands[0].size() << "\n";
+//    llvm::outs() << "operand[0].size = " << operands[0].size() << "\n";
     std::string type = "fp32";
     if (srcElementType.isF16()) {
       type = "fp16";
@@ -1290,7 +1294,7 @@ struct FpToFpOpConversion
     else if (isF8(dstElementType)) {
       typed = "fp8";
     }
-    llvm::outs() << "srcIs: " << type << ", dstIs: " << typed << "\n";
+    llvm::outs() << "srcIs: " << srcElementType << ", dstIs: " << dstElementType << "\n";
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
@@ -1304,22 +1308,22 @@ struct FpToFpOpConversion
       }
     }
 
-    llvm::outs() << "before_conversion, inVals.size = " << inVals.size() << "\n";
-    for (auto& v : inVals) {
-      llvm::outs() << "val = " << v << ", type = " << v.getType() << "\n";
-    }
+    // llvm::outs() << "before_conversion, inVals.size = " << inVals.size() << "\n";
+    // for (auto& v : inVals) {
+    //   llvm::outs() << "val = " << v << ", type = " << v.getType() << "\n";
+    // }
     SmallVector<Value> outVals =
         cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);
-    llvm::outs() << "after_conversion, inVals.size = " << inVals.size() << "\n";
-    for (auto& v : outVals) {
-      llvm::outs() << "val = " << v << ", type = " << v.getType() << "\n";
-    }
+    // llvm::outs() << "after_conversion, inVals.size = " << inVals.size() << "\n";
+    // for (auto& v : outVals) {
+    //   llvm::outs() << "val = " << v << ", type = " << v.getType() << "\n";
+    // }
     assert(outVals.size() == inVals.size());
     if (isDstFP32)
       for (Value &v : outVals)
         v = convertFp16ToFp32(loc, rewriter, v);
     // Pack values
-    llvm::outs() << "loc4\n";
+    // llvm::outs() << "loc4\n";
     return outVals;
   }
 };

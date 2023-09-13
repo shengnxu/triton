@@ -82,6 +82,7 @@ struct DotOpMFMAConversionHelper {
     auto aOperandTy = op.getA().getType();
     auto tensorTy = aOperandTy.cast<RankedTensorType>();
     auto elemTy = tensorTy.getElementType();
+    llvm::outs() << "getMatrixCoreTypeFromDot, elemTy = " << elemTy << "\n";
     if (elemTy.isF16())
       return MatrixCoreType::FP32_FP16_FP16_FP32;
     if (elemTy.isF32())
@@ -94,6 +95,10 @@ struct DotOpMFMAConversionHelper {
       return MatrixCoreType::FP64_FP64_FP64_FP64;
     return MatrixCoreType::NOT_APPLICABLE;
   }
+
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+}
 
   // Conduct the Dot conversion.
   LogicalResult convertDot(DotOp op, DotOpAdaptor adaptor) const {
@@ -108,6 +113,7 @@ struct DotOpMFMAConversionHelper {
     auto bTensorTy = b.getType().cast<RankedTensorType>();
     auto dTensorTy = d.getType().cast<RankedTensorType>();
     auto elemTy = aTensorTy.getElementType();
+    llvm::outs() << "aTensorTy = " << elemTy << "\n";
 
     auto aEncoding = aTensorTy.getEncoding().cast<DotOperandEncodingAttr>();
     auto bEncoding = bTensorTy.getEncoding().cast<DotOperandEncodingAttr>();
@@ -159,6 +165,8 @@ struct DotOpMFMAConversionHelper {
         ctx, SmallVector<Type>(fc.size(), dstElemTy));
     Value res = typeConverter->packLLElements(loc, fc, rewriter, structTy);
     rewriter.replaceOp(op, res);
+
+    llvm::outs() << "convertDot\n";
 
     return success();
   }

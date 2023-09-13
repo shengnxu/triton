@@ -21,8 +21,6 @@ Type getShemPtrTy(Type elemTy) {
     return ptr_ty(type::i16Ty(ctx), 3);
   }
 
-  llvm::outs() << "getShemPtrTy, loc1\n";
-
   if (isF8(elemTy)) {
     llvm::outs() << "getShemPtrTy, loc2\n";
     auto ctx = elemTy.getContext();
@@ -253,6 +251,7 @@ Value computeBasePtr(ConversionPatternRewriter &rewriter, Location loc,
                      const SharedMemoryObject &smemObj) {
   Value base = smemObj.base;
   Type type = base.getType();
+  llvm::outs() << "computeBasePtr, type = " << type << "\n";
   for (int i = 0; i < smemObj.strides.size(); ++i) {
     Value offset = sub(i32_val(0), mul(smemObj.offsets[i], smemObj.strides[i]));
     base = gep(type, base, offset);
@@ -437,6 +436,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto order = sharedLayout.getOrder();
 
   auto aElemTy = aTensorTy.getElementType();
+
   auto aElemsPerInstr = encoding.getMFMAElemsPerThread(aElemTy);
   auto mfmaInstrM = aElemsPerInstr[0];
   auto mfmaInstrK = aElemsPerInstr[1];
@@ -456,6 +456,10 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
       std::max<int>(mfmaInstrM * mfmaInstrK / iWaveSize /*wave size*/, 1);
   unsigned int maxNumWarps = shape[0] / mfmaInstrM;
   int warpsPerGroupM = std::min(warpsPerCTA[0], maxNumWarps);
+
+  if (isF8(aElemTy)) {
+    aElemTy = i8_ty;
+  }
 
   SmallVector<Value> ha;
 
@@ -481,7 +485,6 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     int loadsPerThread = offsets.size() / (numRepM * numRepK);
     const int elemsPerLoad = numOfElems / loadsPerThread;
-    llvm::outs() << "loadA_elementsPerLoad1 = " << elemsPerLoad << ", loadsPerThread = " << loadsPerThread << "\n";
     assert(numOfElems % loadsPerThread == 0);
 
     for (int m = 0; m < numRepM; ++m) {
@@ -489,8 +492,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
         auto vecTy = vec_ty(resElemTy, numOfElems);
         Value valVec = undef(vecTy);
         for (unsigned loadId = 0; loadId < loadsPerThread; ++loadId) {
-          auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
-          // auto loadVecTy = vec_ty(resElemTy, elemsPerLoad);
+          auto loadaTy = isF8(aElemTy) ? i8_ty : aElemTy;
+          auto loadVecTy = vec_ty(loadaTy, elemsPerLoad);
           Value loadOffset =
               offsets[m * loadsPerThread * numRepK + k * loadsPerThread + loadId];
           Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
@@ -522,7 +525,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
     Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
-    // resElemTy = isF8(resElemTy) ? i8_ty : resElemTy;
+    resElemTy = isF8(resElemTy) ? i8_ty : resElemTy;
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
 
@@ -535,7 +538,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
         auto vecTy = vec_ty(resElemTy, numOfElems);
         Value valVec = undef(vecTy);
         for (unsigned loadId = 0; loadId < loadsPerThread; ++loadId) {
-          auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
+          auto loadaTy = isF8(aElemTy) ? i8_ty : aElemTy;
+          auto loadVecTy = vec_ty(loadaTy, elemsPerLoad);
           Value loadOffset = offsets[m * loadsPerThread * numRepK +
                                      k * loadsPerThread + loadId];
           Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
@@ -554,8 +558,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
             valVec = bitcast(valVec, resElemTy);
           }
         }
-        // if (aElemTy == i8_ty or isF8(aElemTy))
-        if (aElemTy == i8_ty)
+        if (aElemTy == i8_ty or isF8(aElemTy))
+        // if (aElemTy == i8_ty)
           valVec = bitcast(valVec, i32_ty);
         ha.push_back(valVec);
       }

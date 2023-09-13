@@ -45,9 +45,11 @@ getSharedMemoryObjectFromStruct(Location loc, Value llvmStruct,
                                 ConversionPatternRewriter &rewriter) {
   ArrayRef<Type> types =
       llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
+  llvm::outs() << "getSharedMemoryObjectFromStruct, types = " << types << "\n";
   SmallVector<Value> elems(types.size());
   for (unsigned i = 0; i < types.size(); ++i) {
     Type type = types[i];
+    llvm::outs() << "loc1111, type = " << type << "\n";
     elems[i] = extract_val(type, llvmStruct, i);
   }
 

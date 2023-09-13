@@ -50,9 +50,9 @@ Type TritonGPUToLLVMTypeConverter::convertTritonPointerType(
 Value TritonGPUToLLVMTypeConverter::packLLElements(
     Location loc, ValueRange resultVals, ConversionPatternRewriter &rewriter,
     Type type) {
-  llvm::outs() << "packLLElements, input_type = " << type << "\n";
+  // llvm::outs() << "packLLElements, input_type = " << type << "\n";
   auto structType = this->convertType(type).dyn_cast<LLVM::LLVMStructType>();
-  llvm::outs() << "packLLElements, structType = " << structType << "\n";
+  // llvm::outs() << "packLLElements, structType = " << structType << "\n";
   if (!structType) {
     assert(resultVals.size() == 1);
     return *resultVals.begin();
@@ -120,10 +120,10 @@ SmallVector<Value> TritonGPUToLLVMTypeConverter::unpackLLElements(
 // llvm::outs() << "unpackLLElements, loc2\n";
     return {llvmStruct};
   }
-  llvm::outs() << "unpackLLElements, input_types = " << type << "\n";
+  // llvm::outs() << "unpackLLElements, input_types = " << type << "\n";
   ArrayRef<Type> types =
       llvmStruct.getType().cast<LLVM::LLVMStructType>().getBody();
-  llvm::outs() << "unpackLLElements, result_types = " << types << "\n";
+  // llvm::outs() << "unpackLLElements, result_types = " << types << "\n";
   SmallVector<Value> results(types.size());
   for (unsigned i = 0; i < types.size(); ++i) {
     Type type = types[i];

@@ -18,6 +18,10 @@ LogicalResult invertEncoding(Attribute targetEncoding, Operation *op,
 
 bool isExpensiveLoadOrStore(Operation *op, Attribute &targetEncoding);
 
+std::optional<Attribute> inferSrcEncoding(Operation *op, Attribute encoding);
+std::optional<Attribute> inferDstEncoding(Operation *op, Attribute encoding);
+bool isExpensiveLoadOrStore(Operation *op);
+
 bool isExpensiveToRemat(Operation *op, Attribute &targetEncoding);
 
 // skipInit is True when we only consider the operands of the initOp but
@@ -35,9 +39,20 @@ void rematerializeConversionChain(
     mlir::PatternRewriter &rewriter, SetVector<Operation *> &processed,
     IRMapping &mapping);
 
+bool canFoldIntoConversion(Operation *op, Attribute targetEncoding);
+
 LogicalResult canMoveOutOfLoop(BlockArgument arg,
                                SmallVector<Operation *> &cvts);
 
+LogicalResult
+getConvertBackwardSlice(Value root, SetVector<Value> &slice,
+                        Attribute rootEncoding,
+                        DenseMap<Value, Attribute> &layout,
+                        std::function<bool(Operation *)> stopPropagation);
+
+void populateForOpDeadArgumentElimination(RewritePatternSet &patterns);
+
 } // namespace mlir
+
 
 #endif // TRITON_DIALECT_TRITONGPU_TRANSFORMS_UTILITY_H_

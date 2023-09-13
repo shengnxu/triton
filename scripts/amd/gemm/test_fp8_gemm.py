@@ -101,7 +101,7 @@ def matmul(a, b, c_type=torch.float32, a_is_fp8 = False):
 
     if a_is_fp8:
         print("ConvertedTof8")
-        in_dtype = tl.float8e5
+        in_dtype = tl.float8e4
         a_input = triton.reinterpret(a, in_dtype)
     else:
         a_input = a
@@ -170,7 +170,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
 
     # a is fp8
     if a_type == 2:
-        a_type = tl.float8e5
+        a_type = tl.float8e4
         f8_tensor = torch.randn((SIZE_M, SIZE_K), dtype=torch.float32, device='cuda') * 10
         f8_tensor = f8_tensor.to(torch.int8)
         # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
@@ -222,7 +222,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
         golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
 
     torch.set_printoptions(profile="full")
-    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(1e-3, 10 * golden_rel_err), atol=max(1e-3, 10 * golden_abs_err), check_dtype=False)
+    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(

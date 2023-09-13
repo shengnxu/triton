@@ -143,6 +143,9 @@ Value loadAFMA(Value A, Value llA, BlockedEncodingAttr dLayout, Value thread,
     aOff[i] = add(mul(offA0, strideA0), mul(offA1, strideA1));
   }
   auto elemTy = A.getType().cast<RankedTensorType>().getElementType();
+  if (isF8(elemTy)) {
+    elemTy = i8_ty;
+  }
 
   Type ptrTy = ptr_ty(elemTy, 3);
   SmallVector<Value> aPtrs(aNumPtr);

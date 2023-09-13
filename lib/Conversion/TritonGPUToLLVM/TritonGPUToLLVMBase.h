@@ -168,6 +168,10 @@ struct CacheKeyDenseMapInfo {
   }
 };
 
+// static bool isF8(Type eType) {
+//   return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+// }
+
 class ConvertTritonGPUOpToLLVMPatternBase {
 public:
   // Two levels of value cache in emitting indices calculation:
@@ -240,12 +244,17 @@ public:
                    ->template getParentOfType<FunctionOpInterface>();
     auto *funcAllocation = allocation->getFuncData(funcOp);
     auto smem = allocation->getFunctionSharedMemoryBase(funcOp);
+    llvm::outs() << "smem_base = " << smem << "\n";
     auto bufferId = funcAllocation->getBufferId(value);
     assert(bufferId != Allocation::InvalidBufferId && "BufferId not found");
     size_t offset = funcAllocation->getOffset(bufferId);
     Value offVal = i32_val(offset);
     Value base = gep(ptrTy, smem, offVal);
     return base;
+  }
+
+  bool isF8(Type eType) const {
+    return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
   }
 
   DenseMap<unsigned, Value>
@@ -281,7 +290,12 @@ public:
     // then (x + y) XOR z = 0byyyyxxxx XOR 0b00000zzzz = (x XOR z) + y
     // This means that we can use some immediate offsets for shared memory
     // operations.
+    if (this->isF8(resElemTy)) {
+      resElemTy = i8_ty;
+    }
+
     auto dstPtrTy = ptr_ty(resElemTy, 3);
+    llvm::outs() << "getSwizzledSharedPtrs, resElemTy = " << resElemTy << "\n";
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
     Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);
 

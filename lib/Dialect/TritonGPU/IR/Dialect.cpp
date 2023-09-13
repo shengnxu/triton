@@ -7,7 +7,6 @@
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.cpp.inc"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
@@ -96,6 +95,8 @@ SmallVector<unsigned> getThreadsPerWarp(Attribute layout) {
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
     auto parent = sliceLayout.getParent();
     auto parentThreadsPerWarp = getThreadsPerWarp(parent);
+    assert(parentThreadsPerWarp.size() == 2 &&
+           "getThreadsPerWarp only implemented for 2D slice layout");
     SmallVector<unsigned> threadsPerWarp = parentThreadsPerWarp;
     threadsPerWarp.erase(threadsPerWarp.begin() + sliceLayout.getDim());
     for (unsigned i = 0; i < threadsPerWarp.size(); i++)
@@ -153,6 +154,8 @@ SmallVector<unsigned> getWarpsPerCTA(Attribute layout) {
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
     auto parent = sliceLayout.getParent();
     auto parentWarpsPerCTA = getWarpsPerCTA(parent);
+    assert(parentWarpsPerCTA.size() == 2 &&
+           "getWarpsPerCTA only implemented for 2D slice layout");
     SmallVector<unsigned> warpsPerCTA = parentWarpsPerCTA;
     warpsPerCTA.erase(warpsPerCTA.begin() + sliceLayout.getDim());
     for (unsigned i = 0; i < warpsPerCTA.size(); i++)
@@ -261,20 +264,15 @@ SmallVector<unsigned> getContigPerThread(Attribute layout) {
   }
 }
 
-SmallVector<unsigned> getUniqueContigPerThread(Type type) {
-  if (type.isIntOrIndexOrFloat() || type.isa<triton::PointerType>())
-    return SmallVector<unsigned>(1, 1);
-  auto tensorType = type.cast<RankedTensorType>();
-  auto shape = tensorType.getShape();
+SmallVector<unsigned> getUniqueContigPerThread(Attribute layout,
+                                               ArrayRef<int64_t> shape) {
   // If slice layout, call recursively on parent layout, and drop
   // sliced dim
-  if (auto sliceLayout =
-          tensorType.getEncoding().dyn_cast<SliceEncodingAttr>()) {
+  if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
     auto parentLayout = sliceLayout.getParent();
     auto parentShape = sliceLayout.paddedShape(shape);
-    auto parentTy = RankedTensorType::get(
-        parentShape, tensorType.getElementType(), parentLayout);
-    auto parentUniqueContigPerThread = getUniqueContigPerThread(parentTy);
+    auto parentUniqueContigPerThread =
+        getUniqueContigPerThread(parentLayout, parentShape);
     parentUniqueContigPerThread.erase(parentUniqueContigPerThread.begin() +
                                       sliceLayout.getDim());
     return parentUniqueContigPerThread;
@@ -282,7 +280,7 @@ SmallVector<unsigned> getUniqueContigPerThread(Type type) {
   // Base case
   auto rank = shape.size();
   SmallVector<unsigned> ret(rank);
-  auto contigPerThread = getContigPerThread(tensorType.getEncoding());
+  auto contigPerThread = getContigPerThread(layout);
   assert(contigPerThread.size() == rank && "Unexpected contigPerThread size");
   for (int d = 0; d < rank; ++d) {
     ret[d] = std::min<unsigned>(shape[d], contigPerThread[d]);
@@ -428,9 +426,21 @@ bool isSharedEncoding(Value value) {
   return false;
 }
 
+bool isExpensiveCat(CatOp cat, Attribute &targetEncoding) {
+  // If the new elements per thread is less than the old one, we will need to do
+  // convert encoding that goes through shared memory anyway. So we consider it
+  // as expensive.
+  auto tensorTy = cat.getResult().getType().cast<RankedTensorType>();
+  auto totalElemsPerThread = gpu::getTotalElemsPerThread(tensorTy);
+  auto shape = tensorTy.getShape();
+  auto elemTy = tensorTy.getElementType();
+  auto newTotalElemsPerThread =
+      gpu::getTotalElemsPerThread(targetEncoding, shape, elemTy);
+  return newTotalElemsPerThread < totalElemsPerThread;
+}
+
 } // namespace gpu
 } // namespace triton
-
 } // namespace mlir
 
 static LogicalResult parseIntAttrValue(AsmParser &parser, Attribute attr,
@@ -572,7 +582,7 @@ unsigned SliceEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
 SmallVector<unsigned>
 MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   size_t rank = shape.size();
-  assert(rank == 2 && "Unexpected rank of mma layout");
+  assert(rank == 2 && "Unexpected rank of mfma layout");
 
   SmallVector<unsigned> elemsPerThread(rank);
   if (getIsTransposed()) {
@@ -663,44 +673,31 @@ DotOperandEncodingAttr::getMMAv2Rep(ArrayRef<int64_t> shape,
   }
 }
 
-static SmallVector<int64_t> getMFMAInstrShape(Type abElemType) {
-  if (abElemType.isF16())
-    return {32l, 32l, 8l}; // FP32_FP16_FP16_FP32
-  if (abElemType.isF32())
-    return {32l, 32l, 2l}; // FP32_FP32_FP32_FP32;
-  if (abElemType.isBF16())
-    return {32l, 32l, 8l}; // FP32_BF16_BF16_FP32;
-  if (abElemType.isInteger(8))
-    return {32l, 32l, 8l}; // INT32_INT8_INT8_INT32;
-  if (abElemType.isF64())
-    return {16l, 16l, 4l}; // FP64_FP64_FP64_FP64;
-  assert(false && "unsupported operand data type");
-  return {};
-}
-
 SmallVector<int64_t>
-DotOperandEncodingAttr::getMFMAElemsPerThread(Type elemType) const {
-  auto instrSize = getMFMAInstrShape(elemType);
+DotOperandEncodingAttr::getMFMAElemsPerInstr() const {
+  auto mfmaEncoding = getParent().cast<MfmaEncodingAttr>();
+  int64_t nonKDim = mfmaEncoding.getNonKDim();
+  int64_t kDim = getKWidth();
   if (getOpIdx() == 0)
-    return {instrSize[0], instrSize[2]};
+    return {nonKDim, kDim};
   else
-    return {instrSize[2], instrSize[1]};
+    return {kDim, nonKDim};
 }
 
 SmallVector<int64_t>
 DotOperandEncodingAttr::getMFMARep(ArrayRef<int64_t> operandShape,
                                    Type elemType) const {
-  auto instrSize = getMFMAInstrShape(elemType);
+  auto operandTileShape = getMFMAElemsPerInstr();
   auto warpsPerCTA = getParent().cast<MfmaEncodingAttr>().getWarpsPerCTA();
   if (getOpIdx() == 0)
     return {
-        std::max<int64_t>(1, operandShape[0] / (instrSize[0] * warpsPerCTA[0])),
-        std::max<int64_t>(1, operandShape[1] / instrSize[2])};
+        std::max<int64_t>(1, operandShape[0] / (operandTileShape[0] * warpsPerCTA[0])),
+        std::max<int64_t>(1, operandShape[1] / operandTileShape[1])};
   else {
     assert(getOpIdx() == 1);
-    return {std::max<int64_t>(1, operandShape[0] / instrSize[2]),
+    return {std::max<int64_t>(1, operandShape[0] / operandTileShape[0]),
             std::max<int64_t>(1, operandShape[1] /
-                                     (instrSize[1] * warpsPerCTA[1]))};
+                                     (operandTileShape[1] * warpsPerCTA[1]))};
   }
 }
 
@@ -717,7 +714,7 @@ unsigned DotOperandEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
     int warpsPerCTAM = mfmaParent.getWarpsPerCTA()[0];
     int warpsPerCTAN = mfmaParent.getWarpsPerCTA()[1];
     constexpr int waveSize = 64;
-    auto tileSize = getMFMAElemsPerThread(eltTy);
+    auto tileSize = getMFMAElemsPerInstr();
     auto rep = getMFMARep(shape, eltTy);
     return rep[0] * rep[1];
   }
@@ -1081,11 +1078,13 @@ Attribute DotOperandEncodingAttr::parse(AsmParser &parser, Type type) {
   unsigned kWidth = 0;
   Attribute _kWidth = attrs.get("kWidth");
   if (_kWidth) {
+#ifndef USE_ROCM
     if (!mmaParent || mmaParent.isVolta()) {
       auto loc = parser.getNameLoc();
       parser.emitError(loc, "kWidth only supported for MMAv2+ parent");
       return Attribute();
     }
+#endif
     kWidth = _kWidth.cast<IntegerAttr>().getInt();
   }
   return parser.getChecked<DotOperandEncodingAttr>(parser.getContext(), opIdx,
@@ -1290,6 +1289,23 @@ struct TritonGPUInferLayoutInterface
     } else
       return emitOptionalError(
           location, "Dot's a/b's encoding should be of DotOperandEncodingAttr");
+    return success();
+  }
+
+  LogicalResult
+  verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
+                                   Attribute operandEncodingB) const override {
+    auto aEncoding =
+        operandEncodingA.dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+    auto bEncoding =
+        operandEncodingB.dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+    if (!aEncoding && !bEncoding)
+      return mlir::success();
+    // Verify that the encodings are valid.
+    if (!aEncoding || !bEncoding)
+      return op->emitError("mismatching encoding between A and B operands");
+    if (aEncoding.getKWidth() != bEncoding.getKWidth())
+      return op->emitError("mismatching kWidth between A and B operands");
     return success();
   }
 };

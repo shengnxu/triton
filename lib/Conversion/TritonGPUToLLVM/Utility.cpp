@@ -70,6 +70,82 @@ getStridesFromShapeAndOrder(ArrayRef<int64_t> shape, ArrayRef<unsigned> order,
   return strides;
 }
 
+// Convert an \param index to a multi-dim coordinate given \param shape and
+// \param order.
+SmallVector<Value> delinearize(ConversionPatternRewriter &rewriter,
+                               Location loc, Value linear,
+                               ArrayRef<unsigned> shape,
+                               ArrayRef<unsigned> order) {
+  unsigned rank = shape.size();
+  assert(rank == order.size());
+  auto reordered = reorder(shape, order);
+  SmallVector<Value> reorderedMultiDim(rank);
+  if (auto constantOp = linear.getDefiningOp<arith::ConstantOp>()) {
+    unsigned intVal =
+        constantOp.getValue().cast<IntegerAttr>().getValue().getSExtValue();
+    reorderedMultiDim = delinearize(rewriter, loc, intVal, reordered);
+  } else {
+    reorderedMultiDim = delinearize(rewriter, loc, linear, reordered);
+  }
+  SmallVector<Value> multiDim(rank);
+  for (unsigned i = 0; i < rank; ++i) {
+    multiDim[order[i]] = reorderedMultiDim[i];
+  }
+  return multiDim;
+}
+
+SmallVector<Value> delinearize(ConversionPatternRewriter &rewriter,
+                               Location loc, unsigned linear,
+                               ArrayRef<unsigned> shape) {
+  unsigned rank = shape.size();
+  assert(rank > 0);
+  SmallVector<Value> multiDim(rank);
+  unsigned remained = linear;
+  for (auto &&en : llvm::enumerate(shape)) {
+    unsigned dimSize = en.value();
+    multiDim[en.index()] = i32_val(remained % dimSize);
+    remained = remained / dimSize;
+  }
+  return multiDim;
+}
+
+SmallVector<Value> delinearize(ConversionPatternRewriter &rewriter,
+                               Location loc, Value linear,
+                               ArrayRef<unsigned> shape) {
+  unsigned rank = shape.size();
+  assert(rank > 0);
+  SmallVector<Value> multiDim(rank);
+  Value remained = linear;
+  for (auto &&en : llvm::enumerate(shape)) {
+    Value dimSize = i32_val(en.value());
+    multiDim[en.index()] = urem(remained, dimSize);
+    remained = udiv(remained, dimSize);
+  }
+  return multiDim;
+}
+
+Value linearize(ConversionPatternRewriter &rewriter, Location loc,
+                ArrayRef<Value> multiDim, ArrayRef<unsigned> shape,
+                ArrayRef<unsigned> order) {
+  return linearize(rewriter, loc, reorder<Value>(multiDim, order),
+                   reorder<unsigned>(shape, order));
+}
+
+Value linearize(ConversionPatternRewriter &rewriter, Location loc,
+                ArrayRef<Value> multiDim, ArrayRef<unsigned> shape) {
+  auto rank = multiDim.size();
+  Value linear = i32_val(0);
+  if (rank > 0) {
+    linear = multiDim.back();
+    for (auto [dim, dimShape] :
+         llvm::reverse(llvm::zip(multiDim.drop_back(), shape.drop_back()))) {
+      Value dimSize = i32_val(dimShape);
+      linear = add(mul(linear, dimSize), dim);
+    }
+  }
+  return linear;
+}
+
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
@@ -89,8 +165,9 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 #endif
 }
 
-Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
-               int i) {
+static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
+                            Value val, int i, const std::string &shuffleType,
+                            const std::string &clamp, Value laneId = Value()) {
   unsigned bits = val.getType().getIntOrFloatBitWidth();
 
   if (bits == 64) {
@@ -98,8 +175,8 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
     Value vec = bitcast(val, vecTy);
     Value val0 = extract_element(f32_ty, vec, i32_val(0));
     Value val1 = extract_element(f32_ty, vec, i32_val(1));
-    val0 = shflSync(loc, rewriter, val0, i);
-    val1 = shflSync(loc, rewriter, val1, i);
+    val0 = commonShflSync(loc, rewriter, val0, i, shuffleType, clamp, laneId);
+    val1 = commonShflSync(loc, rewriter, val1, i, shuffleType, clamp, laneId);
     vec = undef(vecTy);
     vec = insert_element(vecTy, vec, val0, i32_val(0));
     vec = insert_element(vecTy, vec, val1, i32_val(1));
@@ -108,49 +185,73 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
 
 #ifdef USE_ROCM
   GCNBuilder builder;
-  if (i > 16) {
-    Value threadId =
-        rewriter
-            .create<UnrealizedConversionCastOp>(
-                loc, TypeRange{i32_ty},
-                ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
-                    loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
-            .getResult(0);
-    Value stride = i32_val(32);
+  if (shuffleType == "bfly") {
+    if (i > 16) {
+      Value threadId =
+          rewriter
+              .create<UnrealizedConversionCastOp>(
+                  loc, TypeRange{i32_ty},
+                  ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
+                      loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
+              .getResult(0);
+      Value stride = i32_val(32);
+      Value byteOffset = i32_val(2);
+      Value lineId = add(threadId, stride);
+      Value permuteAddr = shl(lineId, byteOffset);
+      auto shfl = builder.create("ds_permute_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto addrOpr = builder.newOperand(permuteAddr, "v");
+      auto aOpr = builder.newOperand(val, "v");
+      (*shfl)(dOpr, addrOpr, aOpr);
+    } else {
+      // This map facilates the butterfly shuffle pattern for a stride less
+      // than 16. The pattern stride is the key of the map.
+      DenseMap<short, unsigned int> masks{
+          {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
+      auto shfl = builder.create("ds_swizzle_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto aOpr = builder.newOperand(val, "v");
+      auto maskOpr =
+          builder.newConstantOperand("offset:" + std::to_string(masks[i]));
+      (*shfl)(dOpr, aOpr, maskOpr);
+    }
+  } else { // shuffle_up
+    assert(shuffleType == "up" && "Only shfl_bfly and shfl_up are supported");
+    Value mask = icmp_slt(laneId, i32_val(i));
+    Value delta = sub(laneId, i32_val(i));
+    Value index = select(mask, laneId, delta);
     Value byteOffset = i32_val(2);
-    Value lineId = add(threadId, stride);
-    Value permuteAddr = shl(lineId, byteOffset);
-    auto shfl = builder.create("ds_permute_b32");
+    Value permuteAddr = shl(index, byteOffset);
+    auto shfl = builder.create("ds_bpermute_b32");
     auto dOpr = builder.newOperand("=v");
     auto addrOpr = builder.newOperand(permuteAddr, "v");
     auto aOpr = builder.newOperand(val, "v");
     (*shfl)(dOpr, addrOpr, aOpr);
-  } else {
-    // This map facilates the butterfly shuffle pattern for a stride less
-    // than 16. The pattern stride is the key of the map.
-    DenseMap<short, unsigned int> masks{
-        {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
-    auto shfl = builder.create("ds_swizzle_b32");
-    auto dOpr = builder.newOperand("=v");
-    auto aOpr = builder.newOperand(val, "v");
-    auto maskOpr =
-        builder.newConstantOperand("offset:" + std::to_string(masks[i]));
-    (*shfl)(dOpr, aOpr, maskOpr);
   }
   auto swait = builder.create("s_waitcnt lgkmcnt(0)");
   (*swait)();
   return builder.launch(rewriter, loc, val.getType(), true);
 #else
   PTXBuilder builder;
-  auto &shfl = builder.create("shfl.sync")->o("bfly").o("b32");
+  auto &shfl = builder.create("shfl.sync")->o(shuffleType).o("b32");
   auto *dOpr = builder.newOperand("=r");
   auto *aOpr = builder.newOperand(val, "r");
   auto *bOpr = builder.newConstantOperand(i);
-  auto *cOpr = builder.newConstantOperand("0x1f");
+  auto *cOpr = builder.newConstantOperand(clamp);
   auto *maskOpr = builder.newConstantOperand("0xffffffff");
   shfl(dOpr, aOpr, bOpr, cOpr, maskOpr);
   return builder.launch(rewriter, loc, val.getType(), false);
 #endif
+}
+
+Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
+               int i) {
+  return commonShflSync(loc, rewriter, val, i, "bfly", "0x1f");
+}
+
+Value shflUpSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
+                 int i, Value laneId) {
+  return commonShflSync(loc, rewriter, val, i, "up", "0x0", laneId);
 }
 
 Value addStringToModule(Location loc, ConversionPatternRewriter &rewriter,

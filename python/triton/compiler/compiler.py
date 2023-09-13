@@ -11,13 +11,12 @@ from collections import namedtuple
 from pathlib import Path
 from typing import Any, Tuple
 
-# import triton
 from .._C.libtriton.triton import (add_external_libs, compile_ptx_to_cubin,
                                    get_shared_memory_size, ir,
                                    translate_llvmir_to_hsaco, translate_llvmir_to_ptx,
                                    translate_triton_gpu_to_llvmir, get_arch_info,
                                    get_warp_size)
-from ..common.backend import get_backend
+from ..common.backend import get_backend, path_to_ptxas
 # from ..runtime import driver, jit, JITFunction
 # TODO: runtime.errors
 from ..runtime.autotuner import OutOfResources
@@ -63,6 +62,7 @@ def optimize_ttir(mod, arch):
     pm.add_inliner_pass()
     pm.add_triton_combine_pass()
     pm.add_canonicalizer_pass()
+    pm.add_reorder_broadcast_pass()
     pm.add_cse_pass()
     pm.add_licm_pass()
     pm.add_symbol_dce_pass()
@@ -86,16 +86,22 @@ def optimize_ttgir(mod, num_stages, arch):
     if _is_cuda(arch):
         pm.add_tritongpu_accelerate_matmul_pass(arch)
     # TODO change interface of accelerate_matmul_pass
-    if is_hip() and gpu_has_mfma():
-        pm.add_tritongpu_accelerate_matmul_pass(80)
+    if is_hip():
+        matrix_core_version = gpu_matrix_core_version()
+        pm.add_tritongpu_accelerate_matmul_pass(matrix_core_version)
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
-    pm.add_tritongpu_pipeline_pass(num_stages)
+    if num_stages == 0 and is_hip() and gpu_matrix_core_version() != 0:
+        pm.add_tritongpu_stream_pipeline_pass()
+        pm.add_canonicalizer_pass()
+    else:
+        pm.add_tritongpu_pipeline_pass(num_stages)
     pm.add_tritongpu_prefetch_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()
-    pm.add_tritongpu_reorder_instructions_pass()
+    if num_stages != 0:
+        pm.add_tritongpu_reorder_instructions_pass()
     pm.add_cse_pass()
     pm.add_symbol_dce_pass()
     pm.run(mod)
@@ -135,25 +141,6 @@ def ptx_get_version(cuda_version) -> int:
     if major == 10:
         return 63 + minor
     raise RuntimeError("Triton only support CUDA 10.0 or higher")
-
-
-@functools.lru_cache()
-def path_to_ptxas():
-    base_dir = os.path.join(os.path.dirname(__file__), os.pardir)
-    paths = [
-        os.environ.get("TRITON_PTXAS_PATH", ""),
-        os.path.join(base_dir, "third_party", "cuda", "bin", "ptxas")
-    ]
-
-    for ptxas in paths:
-        ptxas_bin = ptxas.split(" ")[0]
-        if os.path.exists(ptxas_bin) and os.path.isfile(ptxas_bin):
-            result = subprocess.check_output([ptxas_bin, "--version"], stderr=subprocess.STDOUT)
-            if result is not None:
-                version = re.search(r".*release (\d+\.\d+).*", result.decode("utf-8"), flags=re.MULTILINE)
-                if version is not None:
-                    return ptxas, version.group(1)
-    raise RuntimeError("Cannot find ptxas")
 
 
 def llir_to_ptx(mod: Any, arch: int, ptx_version: int = None) -> str:
@@ -344,7 +331,7 @@ def is_hip():
         raise ImportError("Triton requires PyTorch to be installed")
     return torch.version.hip is not None
 
-from ..language.semantic import gpu_has_mfma
+from ..language.semantic import gpu_matrix_core_version
 
 def get_architecture_descriptor(capability):
     try:
@@ -414,7 +401,7 @@ def compile(fn, **kwargs):
     stages = dict()
     stages["ast"] = (lambda path: fn, None)
     stages["ttir"] = (lambda path: parse_mlir_module(path, context),
-                      lambda src: optimize_ttir(ast_to_ttir(src, signature, configs[0], constants, debug=debug), arch))
+                      lambda src: optimize_ttir(ast_to_ttir(src, signature, configs[0], constants, debug=debug, arch=arch), arch))
     stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
                        lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, warp_size), num_stages, arch))
     stages["llir"] = (lambda path: Path(path).read_text(),

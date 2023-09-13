@@ -22,11 +22,11 @@ mode=$1
 declare -A repA
 
 if [[ $mode == "fwd" ]];then
-    repA[1024]=16000
-    repA[2048]=8000
-    repA[4096]=4000
-    repA[8192]=2000
-    repA[16384]=1000
+    repA[1024]=160000
+    repA[2048]=80000
+    repA[4096]=40000
+    repA[8192]=20000
+    repA[16384]=10000
 else
     repA[1024]=10000
     repA[2048]=10000

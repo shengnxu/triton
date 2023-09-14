@@ -27,3 +27,4 @@ cmake-build-*
 
 # Third-party binaries
 ptxas
+log

@@ -9,6 +9,7 @@ mkdir -p $LOG_DIR
 chmod -R 777 $LOG_DIR
 
 CACHE_DIR=$LOG_DIR/cache
+mkdir -p $CACHE_DIR
 
 
 for file in ${CACHED_FILES[@]}; do
@@ -19,7 +20,7 @@ for file in ${CACHED_FILES[@]}; do
 		echo "Skipping printing .cubin file"
 	else
 		sed -i -e '$a\' $file
-		cat $file
+		# cat $file
 		cp $file $CACHE_DIR
 	fi
 done

@@ -98,6 +98,9 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
           ->addOperand(llvm::MDNode::get(ctx, mdArgs));
     } break;
     case Target::ROCDL: {
+      const int numWarps = 4;
+      const int warpSize = 64;
+      const int threadsPerCTA = numWarps * warpSize;
       func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
       func->addFnAttr("amdgpu-flat-work-group-size",
                       "1, " + std::to_string(threadsPerCTA));
@@ -372,7 +375,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createSymbolDCEPass());
 #ifdef USE_ROCM
   pm.addPass(mlir::createConvertSCFToCFPass());
-  pm.addPass(createConvertControlFlowToLLVMPass());
+  // pm.addPass(createConvertControlFlowToLLVMPass());
 #endif
   if (!::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO"))
     pm.addPass(mlir::createLLVMDIScopePass());

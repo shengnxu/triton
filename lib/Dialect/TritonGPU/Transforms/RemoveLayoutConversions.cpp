@@ -860,7 +860,6 @@ static void rewriteSlice(SetVector<Value> &slice,
         if (slice.count(operand) == 0)
           continue;
         yieldOperands.push_back(mapping.lookup(operand));
->>>>>>> 36fc54b6f28168d3644808bfe299f1ba06a36272
       }
       builder.create<scf::YieldOp>(op->getLoc(), yieldOperands);
       op->erase();

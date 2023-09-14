@@ -147,11 +147,11 @@ compared to 1*64 when the hasLeadingOffset is false.
             int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
             int maxPhase = SIMDWidth / perPhase;
 
-            return $_get(context, vecSize, perPhase, maxPhase, order);
+            return get(context, vecSize, perPhase, maxPhase, order, CTALayout);
           } else {
             // Do not swizzle in case k dimension is not innermost.
             // In this case accesses will go in different banks even without swizzling.
-            return $_get(context, 1, 1, 1, order);
+            return get(context, 1, 1, 1, order, CTALayout);
           }
         }
 #endif

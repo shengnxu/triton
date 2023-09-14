@@ -76,7 +76,7 @@ warpsPerTileV2(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
 }
 
 #ifdef USE_ROCM
-SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
+SmallVector<unsigned, 2> warpsPerTileMI200(tt::DotOp dotOp,
                                            const ArrayRef<int64_t> shape,
                                            int numWarps) {
   // TODO: needs to be updated with appropriate shapePerWarp etc.
@@ -85,7 +85,7 @@ SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
   };
   auto slices = mlir::getSlice(dotOp, filter);
   for (Operation *op : slices)
-    if (isa<triton::DotOp>(op) && (op != dotOp))
+    if (isa<tt::DotOp>(op) && (op != dotOp))
       return {(unsigned)numWarps, 1};
 
   SmallVector<int64_t, 2> tensorShape = {shape[0], shape[1]};
@@ -142,15 +142,15 @@ warpsPerTileV3(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
 class BlockedToMFMA : public mlir::RewritePattern {
 public:
   BlockedToMFMA(mlir::MLIRContext *context)
-      : mlir::RewritePattern(triton::DotOp::getOperationName(), 2, context) {}
+      : mlir::RewritePattern(tt::DotOp::getOperationName(), 2, context) {}
 
-  bool isChainDot(triton::DotOp &dotOp) const {
+  bool isChainDot(tt::DotOp &dotOp) const {
     auto filter = [&dotOp](Operation *op) {
       return op->getParentRegion() == dotOp->getParentRegion();
     };
     auto slices = mlir::getSlice(dotOp, filter);
     for (Operation *op : slices) {
-      if (isa<triton::DotOp>(op) && (op != dotOp))
+      if (isa<tt::DotOp>(op) && (op != dotOp))
         return true;
     }
     return false;
@@ -159,11 +159,11 @@ public:
   mlir::LogicalResult
   matchAndRewrite(mlir::Operation *op,
                   mlir::PatternRewriter &rewriter) const override {
-    auto dotOp = cast<triton::DotOp>(op);
+    auto dotOp = cast<tt::DotOp>(op);
 
     auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
     if (!oldRetType.getEncoding() ||
-        !oldRetType.getEncoding().isa<triton::gpu::BlockedEncodingAttr>())
+        !oldRetType.getEncoding().isa<ttg::BlockedEncodingAttr>())
       return failure();
 
     if (!supportMFMA(dotOp))
@@ -172,7 +172,7 @@ public:
     // get MFMA encoding for the given number of warps
     auto retShape = oldRetType.getShape();
     auto mod = op->getParentOfType<mlir::ModuleOp>();
-    int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+    int numWarps = ttg::TritonGPUDialect::getNumWarps(mod);
 
     // operands
     Value a = dotOp.getA();
@@ -181,14 +181,14 @@ public:
     auto oldBType = b.getType().cast<RankedTensorType>();
     auto ctx = oldAType.getContext();
 
-    triton::gpu::MfmaEncodingAttr mfmaEnc;
+    ttg::MfmaEncodingAttr mfmaEnc;
 
     int64_t nonKDim = 32;
 
     auto warpsPerTile = warpsPerTileMI200(dotOp, retShape, numWarps);
 
     bool isTransposed = isChainDot(dotOp);
-    mfmaEnc = triton::gpu::MfmaEncodingAttr::get(
+    mfmaEnc = ttg::MfmaEncodingAttr::get(
         oldRetType.getContext(), nonKDim, warpsPerTile, isTransposed);
 
     auto newRetType =
@@ -196,31 +196,31 @@ public:
 
     // convert accumulator
     auto oldAcc = dotOp.getOperand(2);
-    auto newAcc = rewriter.create<triton::gpu::ConvertLayoutOp>(
+    auto newAcc = rewriter.create<ttg::ConvertLayoutOp>(
         oldAcc.getLoc(), newRetType, oldAcc);
     auto oldAOrder = oldAType.getEncoding()
-                         .cast<triton::gpu::DotOperandEncodingAttr>()
+                         .cast<ttg::DotOperandEncodingAttr>()
                          .getParent()
-                         .cast<triton::gpu::BlockedEncodingAttr>()
+                         .cast<ttg::BlockedEncodingAttr>()
                          .getOrder();
     auto oldBOrder = oldBType.getEncoding()
-                         .cast<triton::gpu::DotOperandEncodingAttr>()
+                         .cast<ttg::DotOperandEncodingAttr>()
                          .getParent()
-                         .cast<triton::gpu::BlockedEncodingAttr>()
+                         .cast<ttg::BlockedEncodingAttr>()
                          .getOrder();
 
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc));
+        ttg::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc));
     auto newBType = RankedTensorType::get(
         oldBType.getShape(), oldBType.getElementType(),
-        triton::gpu::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc));
-    a = rewriter.create<triton::gpu::ConvertLayoutOp>(a.getLoc(), newAType, a);
-    b = rewriter.create<triton::gpu::ConvertLayoutOp>(b.getLoc(), newBType, b);
-    auto newDot = rewriter.create<triton::DotOp>(
+        ttg::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc));
+    a = rewriter.create<ttg::ConvertLayoutOp>(a.getLoc(), newAType, a);
+    b = rewriter.create<ttg::ConvertLayoutOp>(b.getLoc(), newBType, b);
+    auto newDot = rewriter.create<tt::DotOp>(
         dotOp.getLoc(), newRetType, a, b, newAcc, dotOp.getAllowTF32());
 
-    rewriter.replaceOpWithNewOp<triton::gpu::ConvertLayoutOp>(
+    rewriter.replaceOpWithNewOp<ttg::ConvertLayoutOp>(
         op, oldRetType, newDot.getResult());
     return success();
   }

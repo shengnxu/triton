@@ -748,7 +748,7 @@ public:
     const unsigned elemsPerThreadPerGroup = 4;
     auto warpSize = getWarpSize(mfmaLayout);
     assert(warpSize == 64);
-    auto shapePerCta = getShapePerCTA(mfmaLayout);
+    auto shapePerCta = getShapePerCTATile(mfmaLayout);
     for (unsigned block = 0; block < numGroups; block++) {
       unsigned rowOrColOffset = block * elemsPerThreadPerGroup * warpSize / 32;
       for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
@@ -829,7 +829,7 @@ private:
       const BlockedEncodingAttr &blockedLayout, RankedTensorType type) const {
     auto shape = type.getShape();
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(triton::gpu::getWarpSize(blocked_layout));
+    Value warpSize = i32_val(triton::gpu::getWarpSize(blockedLayout));
     Value laneId = urem(threadId, warpSize);
     Value warpId = udiv(threadId, warpSize);
     auto sizePerThread = blockedLayout.getSizePerThread();
@@ -1189,7 +1189,7 @@ private:
 
     auto tensorShape = type.getShape();
     SmallVector<SmallVector<unsigned>> offsets;
-    auto shapePerCta = getShapePerCTA(mfmaLayout);
+    auto shapePerCta = getShapePerCTA(mfmaLayout, tensorShape);
 
     SmallVector<unsigned> numCTAPerDim(2);
     for (unsigned d = 0; d < 2; ++d) {

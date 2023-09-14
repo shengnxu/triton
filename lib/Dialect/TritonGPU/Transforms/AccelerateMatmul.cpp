@@ -143,7 +143,7 @@ class BlockedToMFMA : public mlir::RewritePattern {
   int mfmaVersion;
 public:
   BlockedToMFMA(mlir::MLIRContext *context, int mfmaVersion)
-      : mlir::RewritePattern(triton::DotOp::getOperationName(), 2, context), mfmaVersion(mfmaVersion) {}
+      : mlir::RewritePattern(tt::DotOp::getOperationName(), 2, context), mfmaVersion(mfmaVersion) {}
 
   bool isChainDot(tt::DotOp &dotOp) const {
     auto filter = [&dotOp](Operation *op) {
@@ -157,7 +157,7 @@ public:
     return false;
   }
 
-  std::pair<int64_t, int64_t> chooseMfmaDimensions(triton::DotOp dot, int mfmaVersion) const {
+  std::pair<int64_t, int64_t> chooseMfmaDimensions(tt::DotOp dot, int mfmaVersion) const {
     int64_t nonKDim = 32;
     int64_t kDim = -1;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
@@ -239,7 +239,7 @@ public:
         ttg::DotOperandEncodingAttr::get(ctx, 1, mfmaEnc, kDim));
     a = rewriter.create<ttg::ConvertLayoutOp>(a.getLoc(), newAType, a);
     b = rewriter.create<ttg::ConvertLayoutOp>(b.getLoc(), newBType, b);
-    auto newDot = rewriter.create<triton::DotOp>(
+    auto newDot = rewriter.create<tt::DotOp>(
         dotOp.getLoc(), newRetType, a, b, newAcc, dotOp.getAllowTF32());
 
     rewriter.replaceOpWithNewOp<ttg::ConvertLayoutOp>(

@@ -2,8 +2,14 @@
 
 CACHED_FILES=$(find /root/.triton/cache/ -type f -name "*.*")
 
-rm -rf triton_cache
-mkdir -p triton_cache
+ROOT_DIR=$(pwd)
+LOG_DIR=$ROOT_DIR/log
+# rm -rf $LOG_DIR
+mkdir -p $LOG_DIR
+chmod -R 777 $LOG_DIR
+
+CACHE_DIR=$LOG_DIR/cache
+
 
 for file in ${CACHED_FILES[@]}; do
 	echo "$file"
@@ -14,9 +20,9 @@ for file in ${CACHED_FILES[@]}; do
 	else
 		sed -i -e '$a\' $file
 		cat $file
-		cp $file triton_cache
+		cp $file $CACHE_DIR
 	fi
 done
 
-cp /tmp/* triton_cache
-chmod -R 777 triton_cache
+cp /tmp/* $CACHE_DIR
+chmod -R 777 $CACHE_DIR

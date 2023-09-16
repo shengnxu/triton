@@ -1023,20 +1023,22 @@ public:
   LogicalResult
   matchAndRewrite(SourceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    // llvm::outs() << "op = " << op << "\n";
     auto resultTy = op.getType();
     auto opType = resultTy;
 
     Location loc = op->getLoc();
     // element type
     auto resultElementTy = getElementTypeOrSelf(resultTy);
-//    llvm::outs() << "===============================opType = " << opType << ", resultElementTy = " << resultElementTy << "\n";
+    // llvm::outs() << "===============================opType = " << opType << ", resultElementTy = " << resultElementTy << "\n";
 
     Type elemTy = this->getTypeConverter()->convertType(resultElementTy);
     // llvm::outs() << "elemTy = " << elemTy << "\n";
     SmallVector<SmallVector<Value>> allOperands;
+    int i = 0;
     for (auto operand : adaptor.getOperands()) {
       auto argTy = op->getOperand(0).getType();
-//      llvm::outs() << "argTy = " << argTy << "\n";
+      // llvm::outs() << "index = " << i++ << ", argTy = " << argTy << ", resultTy = " << resultTy << "\n";
       auto subOperands = this->getTypeConverter()->unpackLLElements(
           loc, operand, rewriter, argTy);
 //      llvm::outs() << "subOperand_size1 = " << subOperands.size() << "\n";
@@ -1280,21 +1282,21 @@ struct FpToFpOpConversion
     auto srcElementType = getElementType(op.getFrom());
     auto dstElementType = getElementType(op.getResult());
 //    llvm::outs() << "operand[0].size = " << operands[0].size() << "\n";
-    std::string type = "fp32";
-    if (srcElementType.isF16()) {
-      type = "fp16";
-    }
-    else if (isF8(srcElementType)) {
-      type = "fp8";
-    }
-    std::string typed = "fp32";
-    if (dstElementType.isF16()) {
-      typed = "fp16";
-    }
-    else if (isF8(dstElementType)) {
-      typed = "fp8";
-    }
-    llvm::outs() << "srcIs: " << srcElementType << ", dstIs: " << dstElementType << "\n";
+    // std::string type = "fp32";
+    // if (srcElementType.isF16()) {
+    //   type = "fp16";
+    // }
+    // else if (isF8(srcElementType)) {
+    //   type = "fp8";
+    // }
+    // std::string typed = "fp32";
+    // if (dstElementType.isF16()) {
+    //   typed = "fp16";
+    // }
+    // else if (isF8(dstElementType)) {
+    //   typed = "fp8";
+    // }
+    // llvm::outs() << "srcIs: " << srcElementType << ", dstIs: " << dstElementType << "\n";
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,

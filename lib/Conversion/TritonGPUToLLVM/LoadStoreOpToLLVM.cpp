@@ -56,6 +56,7 @@ struct LoadOpConversion
   LogicalResult
   matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    llvm::outs() << "loadOp = " << op << "\n";
     auto loc = op->getLoc();
 
     // original values
@@ -286,6 +287,10 @@ struct LoadOpConversion
     Type llvmResultStructTy = getTypeConverter()->convertType(valueTy);
     Value resultStruct = getTypeConverter()->packLLElements(
         loc, loadedVals, rewriter, llvmResultStructTy);
+    // llvm::outs() << "loadResultStruct =======\n";
+    // for (auto& v : loadedVals) {
+    //   llvm::outs() << "v = " << v << "\n";
+    // }
     rewriter.replaceOp(op, {resultStruct});
     return success();
   }

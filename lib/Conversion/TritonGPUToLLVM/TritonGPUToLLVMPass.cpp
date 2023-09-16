@@ -378,9 +378,10 @@ public:
                                     indexCacheInfo, /*benefit=*/1);
     populateConvertLayoutOpToLLVMPatterns(typeConverter, patterns, allocation,
                                           indexCacheInfo, /*benefit=*/1);
-    populateDotOpToLLVMPatterns(typeConverter, patterns, allocation,
+    populateDotOpToLLVMPatterns(typeConverter, patterns, allocation, 
                                 /*benefit=*/1);
     populateElementwiseOpToLLVMPatterns(typeConverter, patterns, /*benefit=*/1);
+
     populateLoadStoreOpToLLVMPatterns(typeConverter, patterns, axisInfoAnalysis,
                                       allocation, indexCacheInfo,
                                       /*benefit=*/1);
@@ -452,7 +453,7 @@ private:
   void decomposeFp8e4b15Convert(ModuleOp mod) const {
     mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
       OpBuilder builder(cvtOp);
-      if (!(getElementTypeOrSelf(cvtOp).isa<mlir::Float8E4M3B11FNUZType>() or getElementTypeOrSelf(cvtOp).isa<mlir::Float8E5M2Type>()))
+      if (!(getElementTypeOrSelf(cvtOp).isa<mlir::Float8E4M3B11FNUZType>()))
         return;
       auto shape = cvtOp.getType().cast<RankedTensorType>().getShape();
       auto argEncoding =

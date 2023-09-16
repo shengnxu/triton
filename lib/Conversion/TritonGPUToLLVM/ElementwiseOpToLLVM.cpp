@@ -62,7 +62,6 @@ static SmallVector<Value>
 Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
-llvm::outs() << "Fp8E5M2_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -80,19 +79,12 @@ llvm::outs() << "Fp8E5M2_to_Fp16\n";
   auto fp16x2VecTy = vec_ty(f16_ty, 2);
   auto fp16x2Vec0 = bitcast(a0, fp16x2VecTy);
   auto fp16x2Vec1 = bitcast(a1, fp16x2VecTy);
-  auto r1 = extract_element(f16_ty, fp16x2Vec0, i32_val(0));
-  auto r2 = extract_element(f16_ty, fp16x2Vec0, i32_val(1));
-  auto r3 = extract_element(f16_ty, fp16x2Vec1, i32_val(0));
-  auto r4 = extract_element(f16_ty, fp16x2Vec1, i32_val(1));
 
-  return {r1, r2, r3, r4};
-
-
-  // return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
-	//    extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
-	//    extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
-	//    extract_element(f16_ty, fp16x2Vec1, i32_val(1))
-	//  };
+  return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
+	   extract_element(f16_ty, fp16x2Vec0, i32_val(1)),
+	   extract_element(f16_ty, fp16x2Vec1, i32_val(0)),
+	   extract_element(f16_ty, fp16x2Vec1, i32_val(1))
+	 };
 }
 #else
 const std::string Fp8E5M2_to_Fp16 = "{                           \n"
@@ -288,7 +280,6 @@ static SmallVector<Value>
 Fp8E4M3B15_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
-llvm::outs() << "Fp8E4M3B15_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -421,7 +412,6 @@ static SmallVector<Value>
 Fp8E4M3B15x4_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
-llvm::outs() << "Fp8E4M3B15X4_to_Fp16\n";
   return {};
 }
 #else
@@ -475,7 +465,6 @@ static SmallVector<Value>
 Fp8E4M3_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const Value &v0, const Value &v1, const Value &v2,
 		   const Value &v3) {
-llvm::outs() << "Fp8E4M3_to_Fp16\n";
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
@@ -798,13 +787,12 @@ static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
   assert(inEncoding == ouEncoding);
   if (!inEncoding)
     return values;
-#ifdef USE_ROCM
-  // TODO Need to check why we need this reorder fuction, and rework this check
-  auto parentEncoding = inEncoding.getParent();
-  if (isa<BlockedEncodingAttr>(parentEncoding) ||
-      isa<MfmaEncodingAttr>(parentEncoding))
+  // If the parent of the dot operand is in block encoding, we don't need to
+  // reorder elements
+  auto parentEncoding =
+      dyn_cast<triton::gpu::MmaEncodingAttr>(ouEncoding.getParent());
+  if (!parentEncoding)
     return values;
-#endif
   size_t inBitWidth = inTensorTy.getElementType().getIntOrFloatBitWidth();
   size_t ouBitWidth = ouTensorTy.getElementType().getIntOrFloatBitWidth();
   auto ouEltTy = ouTensorTy.getElementType();
@@ -1051,14 +1039,6 @@ public:
     }
     if (allOperands.size() == 0)
       allOperands.push_back({});
-
-    // llvm::outs() << "before type conversion\n";
-    // for (auto &vec : allOperands) {
-    //   llvm::outs() << "vec\n";
-    //   for (auto &v : vec) {
-    //     llvm::outs() << "operand = " << v << ", type = " << v.getType() << "\n";
-    //   }
-    // }
 
     SmallVector<Value> resultVals;
     for (auto it = allOperands.begin(), end = allOperands.end(); it != end;) {
@@ -1325,7 +1305,6 @@ struct FpToFpOpConversion
       for (Value &v : outVals)
         v = convertFp16ToFp32(loc, rewriter, v);
     // Pack values
-    // llvm::outs() << "loc4\n";
     return outVals;
   }
 };
@@ -1638,9 +1617,12 @@ S8_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
     auto res = builder.newOperand("=v");
     auto operand = builder.newOperand(i32Val, "v");
     cvt(res, operand);
-    Value f32Val = builder.launch(rewriter, loc, f32_ty, false);
+    auto f32Val = builder.launch(rewriter, loc, f32_ty, false);
 
-    outValues.push_back(FpToFpOpConversion::convertFp32ToBf16(loc, rewriter, f32Val));
+    f32Val = bitcast(f32Val, i32_ty);
+    auto shifted = lshr(i32_ty, f32Val, i32_val(16));
+    auto truncated = trunc(i16_ty, shifted);
+    outValues.push_back(truncated);
   }
   return outValues;
 }

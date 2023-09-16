@@ -1189,6 +1189,62 @@ def test_reduce2d(op, dtype_str, shape, axis, device='cuda'):
             np.testing.assert_equal(z_ref, z_tri)
 
 # ---------------
+# test scan
+# ---------------
+
+
+scan2d_shapes = [(8, 32), (16, 32), (32, 16), (2, 1024), (1024, 2), (32, 32), (1, 1024)]
+
+scan_configs = [
+    (op, type, shape, axis, num_warps)
+    for num_warps in [4, 16]
+    for type in ['int32', 'float32']
+    for axis in [1, 0]
+    for shape in scan2d_shapes
+    for op in ['cumsum', 'cumprod']
+]
+
+
+@pytest.mark.parametrize("op, dtype_str, shape, axis, num_warps", scan_configs)
+def test_scan2d(op, dtype_str, shape, axis, num_warps, device):
+    check_type_supported(dtype_str, device)
+
+    # triton kernel
+    @triton.jit
+    def kernel(X, Z, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, AXIS: tl.constexpr):
+        range_m = tl.arange(0, BLOCK_M)
+        range_n = tl.arange(0, BLOCK_N)
+        x = tl.load(X + range_m[:, None] * BLOCK_N + range_n[None, :])
+        z = GENERATE_TEST_HERE
+        tl.store(Z + range_m[:, None] * BLOCK_N + range_n[None, :], z)
+
+    kernel = patch_kernel(kernel, {'GENERATE_TEST_HERE': f'tl.{op}(x, axis={axis})'})
+    # input
+    rs = RandomState(17)
+    x = numpy_random(shape, dtype_str=dtype_str, rs=rs)
+    z = np.empty_like(x)
+    x_tri = to_triton(x, device=device)
+    numpy_op = {'cumsum': np.cumsum, 'cumprod': np.cumprod}[op]
+    z_dtype_str = dtype_str
+    z_ref = numpy_op(x, axis=axis).astype(getattr(np, z_dtype_str))
+    # triton result
+    z_tri = to_triton(z, device=device)
+    kernel[(1,)](x_tri, z_tri, BLOCK_M=shape[0], BLOCK_N=shape[1], AXIS=axis, num_warps=num_warps)
+    z_tri = to_numpy(z_tri)
+    # compare
+    if dtype_str == 'float32':
+        if op == 'cumprod':
+            np.testing.assert_allclose(z_ref, z_tri, rtol=0.01, atol=1e-3)
+        else:
+            np.testing.assert_allclose(z_ref, z_tri, rtol=0.01)
+    else:
+        np.testing.assert_equal(z_ref, z_tri)
+
+
+
+
+
+# ---------------
 # test permute
 # ---------------
 
@@ -1281,7 +1337,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float16', 'float16'),
                                                       ('float16', 'float32'),
                                                       ('float32', 'float32')]]
-                         if not triton.language.semantic.gpu_has_mfma() else
+                         if triton.language.semantic.gpu_matrix_core_version() == 0 else
                          # MFMA Test Dot tests
                          [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
                           for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
@@ -1588,10 +1644,11 @@ def get_variant_golden(a, b):
     return c_padded[:SIZE_M, :SIZE_N]
 
 
-@pytest.mark.parametrize('SIZE_M,SIZE_N,SIZE_K,NUM_WARPS,BLOCK_SIZE_M,BLOCK_SIZE_N,BLOCK_SIZE_K', [
-    [64, 32, 128, 4, 64, 32, 64],
+@pytest.mark.parametrize('SIZE_M,SIZE_N,SIZE_K,NUM_WARPS,BLOCK_SIZE_M,BLOCK_SIZE_N,BLOCK_SIZE_K,NUM_STAGES', [
+    [64, 32, 128, 4, 64, 32, 64, 0],
+    [64, 32, 128, 4, 64, 32, 64, 2]
 ])
-def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K):
+def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, NUM_STAGES):
     a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float16)
     b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float16)
     c = torch.empty((SIZE_M, SIZE_N), device=a.device, dtype=torch.float32)
@@ -1603,7 +1660,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLO
                         M=a.shape[0], N=b.shape[1], K=a.shape[1],
                         BLOCK_SIZE_M=BLOCK_SIZE_M, BLOCK_SIZE_N=BLOCK_SIZE_N, BLOCK_SIZE_K=BLOCK_SIZE_K,
                         num_warps=NUM_WARPS,
-                        num_stages=2)
+                        num_stages=NUM_STAGES)
     golden = torch.matmul(a, b)
 
     # It's not easy to get a proper error threshold in different size
@@ -2341,11 +2398,11 @@ module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-war
     %17 = tt.addptr %16, %8 : tensor<32x32x!tt.ptr<f16>, #blocked>, tensor<32x32xi32, #blocked>
     %18 = tt.load %9 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<32x32xf16, #blocked>
     %19 = triton_gpu.convert_layout %18 : (tensor<32x32xf16, #blocked>) -> tensor<32x32xf16, #shared1>
-    %20 = triton_gpu.convert_layout %19 : (tensor<32x32xf16, #shared1>) -> tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>}>>
+    %20 = triton_gpu.convert_layout %19 : (tensor<32x32xf16, #shared1>) -> tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>, kWidth=8}>>
     %21 = tt.load %13 {cache = 1 : i32, evict = 1 : i32, isVolatile = false} : tensor<32x32xf16, #blocked>
     %22 = triton_gpu.convert_layout %21 : (tensor<32x32xf16, #blocked>) -> tensor<32x32xf16, #shared2>
-    %23 = triton_gpu.convert_layout %22 : (tensor<32x32xf16, #shared2>) -> tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 1, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>}>>
-    %24 = tt.dot %20, %23, %cst {allowTF32 = false} : tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>}>> * tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 1, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>}>> -> tensor<32x32xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>>
+    %23 = triton_gpu.convert_layout %22 : (tensor<32x32xf16, #shared2>) -> tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 1, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>, kWidth=8}>>
+    %24 = tt.dot %20, %23, %cst {allowTF32 = false} : tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 0, parent = #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>, kWidth=8}>> * tensor<32x32xf16, #triton_gpu.dot_op<{opIdx = 1, parent = #triton_gpu.mfma<{nonKDim = 32, kDim = 8, warpsPerCTA = [4, 1], isTransposed = false}>, kWidth=8}>> -> tensor<32x32xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>>
     %25 = triton_gpu.convert_layout %24 : (tensor<32x32xf32, #triton_gpu.mfma<{nonKDim = 32, warpsPerCTA = [4, 1], isTransposed = false}>>) -> tensor<32x32xf32, #blocked>
     %26 = arith.truncf %25 : tensor<32x32xf32, #blocked> to tensor<32x32xf16, #blocked>
     tt.store %17, %26 {cache = 1 : i32, evict = 1 : i32} : tensor<32x32xf16, #blocked>
@@ -2375,7 +2432,7 @@ module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-war
         kernel = triton.compile(f.name, device_type="hip", cc=capabilities)
 
     import triton.language.semantic as sem
-    if torch.version.hip is not None and sem.gpu_has_mfma():
+    if torch.version.hip is not None and sem.gpu_matrix_core_version() > 0:
         kernel[(1, 1, 1)](x_tri, y_tri, z_tri)
         np.testing.assert_allclose(z_np, to_numpy(z_tri), rtol=0.01, atol=1e-3)
 
@@ -2552,6 +2609,75 @@ def test_reduce_layouts(M, N, src_layout, axis, device='cuda'):
     z_ref = np.max(x, axis=axis, keepdims=True)
 
     np.testing.assert_allclose(z_ref, z_tri.cpu().numpy(), rtol=0.01, atol=1e-3)
+
+
+scan_layouts = [
+    BlockedLayout([1, 4], [4, 16], [4, 1], [0, 1]),
+    BlockedLayout([1, 4], [8, 8], [4, 1], [0, 1]),
+    BlockedLayout([4, 1], [4, 16], [1, 4], [0, 1]),
+    BlockedLayout([2, 2], [4, 16], [2, 2], [0, 1]),
+    BlockedLayout([2, 2], [8, 8], [2, 2], [0, 1]),
+
+    BlockedLayout([1, 4], [4, 16], [4, 1], [1, 0]),
+    BlockedLayout([1, 4], [8, 8], [4, 1], [1, 0]),
+    BlockedLayout([4, 1], [4, 16], [1, 4], [1, 0]),
+    BlockedLayout([2, 2], [4, 16], [2, 2], [1, 0]),
+    BlockedLayout([2, 2], [8, 8], [2, 2], [1, 0]),
+]
+
+
+@pytest.mark.parametrize("M, N", [[32, 32], [32, 64], [64, 32]])
+@pytest.mark.parametrize("src_layout", scan_layouts)
+@pytest.mark.parametrize("axis", [0, 1])
+def test_scan_layouts(M, N, src_layout, axis, device):
+    ir = f"""
+    #blocked = {src_layout}
+    module attributes {{"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32}} {{
+    tt.func public @kernel_0d1d(%arg0: !tt.ptr<i32> {{tt.divisibility = 16 : i32}}, %arg1: !tt.ptr<i32> {{tt.divisibility = 16 : i32}}) {{
+      %cst = arith.constant dense<{N}> : tensor<{M}x1xi32, #blocked>
+      %0 = tt.make_range {{end = {M} : i32, start = 0 : i32}} : tensor<{M}xi32, #triton_gpu.slice<{{dim = 1, parent = #blocked}}>>
+      %1 = tt.expand_dims %0 {{axis = 1 : i32}} : (tensor<{M}xi32, #triton_gpu.slice<{{dim = 1, parent = #blocked}}>>) -> tensor<{M}x1xi32, #blocked>
+      %2 = arith.muli %1, %cst : tensor<{M}x1xi32, #blocked>
+      %3 = tt.splat %arg0 : (!tt.ptr<i32>) -> tensor<{M}x1x!tt.ptr<i32>, #blocked>
+      %4 = tt.addptr %3, %2 : tensor<{M}x1x!tt.ptr<i32>, #blocked>, tensor<{M}x1xi32, #blocked>
+      %5 = tt.make_range {{end = {N} : i32, start = 0 : i32}} : tensor<{N}xi32, #triton_gpu.slice<{{dim = 0, parent = #blocked}}>>
+      %6 = tt.expand_dims %5 {{axis = 0 : i32}} : (tensor<{N}xi32, #triton_gpu.slice<{{dim = 0, parent = #blocked}}>>) -> tensor<1x{N}xi32, #blocked>
+      %7 = tt.broadcast %4 : (tensor<{M}x1x!tt.ptr<i32>, #blocked>) -> tensor<{M}x{N}x!tt.ptr<i32>, #blocked>
+      %8 = tt.broadcast %6 : (tensor<1x{N}xi32, #blocked>) -> tensor<{M}x{N}xi32, #blocked>
+      %9 = tt.addptr %7, %8 : tensor<{M}x{N}x!tt.ptr<i32>, #blocked>, tensor<{M}x{N}xi32, #blocked>
+      %10 = tt.load %9 {{cache = 1 : i32, evict = 1 : i32, isVolatile = false}} : tensor<{M}x{N}xi32, #blocked>
+      %11 = "tt.scan"(%10) <{{axis = {axis} : i32}}> ({{
+      ^bb0(%arg2: i32, %arg3: i32):
+        %16 = arith.addi %arg2, %arg3 : i32
+        tt.scan.return %16 : i32
+      }}) : (tensor<{M}x{N}xi32, #blocked>) -> tensor<{M}x{N}xi32, #blocked>
+      %12 = tt.splat %arg1 : (!tt.ptr<i32>) -> tensor<{M}x1x!tt.ptr<i32>, #blocked>
+      %13 = tt.addptr %12, %2 : tensor<{M}x1x!tt.ptr<i32>, #blocked>, tensor<{M}x1xi32, #blocked>
+      %14 = tt.broadcast %13 : (tensor<{M}x1x!tt.ptr<i32>, #blocked>) -> tensor<{M}x{N}x!tt.ptr<i32>, #blocked>
+      %15 = tt.addptr %14, %8 : tensor<{M}x{N}x!tt.ptr<i32>, #blocked>, tensor<{M}x{N}xi32, #blocked>
+      tt.store %15, %11 {{cache = 1 : i32, evict = 1 : i32}} : tensor<{M}x{N}xi32, #blocked>
+      tt.return
+    }}
+    }}
+    """
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.ttgir') as f:
+        f.write(ir)
+        f.flush()
+        kernel = triton.compile(f.name)
+    rs = RandomState(17)
+    x = rs.randint(-100, 100, (M, N)).astype('int32')
+
+    z = np.zeros((M, N)).astype('int32')
+    x_tri = torch.tensor(x, device=device)
+    z_tri = torch.tensor(z, device=device)
+
+    kernel[(1, 1, 1)](x_tri, z_tri)
+
+    z_ref = np.cumsum(x, axis=axis)
+
+    np.testing.assert_equal(z_ref, z_tri.cpu().numpy())
 
 
 @pytest.mark.parametrize("shape", [(64, 64)])

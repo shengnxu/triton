@@ -79,6 +79,35 @@ Value TritonGPUToLLVMTypeConverter::packLLElements(
   return llvmStruct;
 }
 
+SmallVector<Value> TritonGPUToLLVMTypeConverter::packMfmaOperand(
+    const SmallVector<Value> &inValues, Type srcTy,
+    ConversionPatternRewriter &rewriter, Location loc) {
+  auto tensorTy = srcTy.dyn_cast<RankedTensorType>();
+  if (!tensorTy)
+    return inValues;
+  auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
+  if (!(encoding && encoding.getParent().isa<MfmaEncodingAttr>())) {
+    return inValues;
+  }
+
+  SmallVector<Value> result;
+  auto structType = this->convertType(srcTy).dyn_cast<LLVM::LLVMStructType>();
+  auto elementTypes = structType.getBody();
+  assert(elementTypes.size() > 0);
+  auto vecTy = elementTypes[0];
+  unsigned size = 4;
+  for (int i = 0; i < inValues.size(); i += size) {
+    Value valVec = undef(vecTy);
+    valVec = insert_element(vecTy, valVec, inValues[i], i32_val(0));
+    valVec = insert_element(vecTy, valVec, inValues[i + 1], i32_val(1));
+    valVec = insert_element(vecTy, valVec, inValues[i + 2], i32_val(2));
+    valVec = insert_element(vecTy, valVec, inValues[i + 3], i32_val(3));
+    result.push_back(valVec);
+  }
+
+  return result;
+}
+
 SmallVector<Value> TritonGPUToLLVMTypeConverter::unpackLLElements(
     Location loc, Value llvmStruct, ConversionPatternRewriter &rewriter,
     Type type) {

@@ -69,7 +69,6 @@ Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
   a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
   a0 = insert_element(fp8x4VecTy, a0, v1, i32_val(3));
   a0 = bitcast(a0, i32_ty);
-
   Value a1 = undef(fp8x4VecTy);
   a1 = insert_element(fp8x4VecTy, a1, int_val(8,0), i32_val(0));
   a1 = insert_element(fp8x4VecTy, a1, v2, i32_val(1));
@@ -771,6 +770,10 @@ const std::string S8_to_Bf16 =
     "}";
 #endif
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+}
+
 static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
                                         Type inType, Type ouType) {
   auto inTensorTy = inType.dyn_cast<RankedTensorType>();
@@ -862,8 +865,9 @@ inline SmallVector<Value> unpackI32(const SmallVector<Value> &inValues,
   if (!tensorTy)
     return inValues;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>()))
+  if (!(encoding && (encoding.getParent().isa<MmaEncodingAttr>() or encoding.getParent().isa<MfmaEncodingAttr>()))) {
     return inValues;
+  }
   SmallVector<Value> outValues;
   for (auto v : inValues) {
     // cast i32 to appropriate eltType vector and extract elements
@@ -997,6 +1001,7 @@ public:
     Location loc = op->getLoc();
     // element type
     auto resultElementTy = getElementTypeOrSelf(resultTy);
+
     Type elemTy = this->getTypeConverter()->convertType(resultElementTy);
     SmallVector<SmallVector<Value>> allOperands;
     for (auto operand : adaptor.getOperands()) {
@@ -1025,12 +1030,15 @@ public:
       }
       it += curr.size();
     }
+
     if (op->getNumOperands() > 0) {
       auto argTy = op->getOperand(0).getType();
       resultVals = reorderValues(resultVals, argTy, resultTy);
     }
     resultVals =
         packI32(resultVals, resultTy, rewriter, loc, this->getTypeConverter());
+    resultVals = this->getTypeConverter()->packMfmaOperand(resultVals, resultTy, rewriter, loc);
+
     Value view = this->getTypeConverter()->packLLElements(loc, resultVals,
                                                           rewriter, resultTy);
     rewriter.replaceOp(op, view);

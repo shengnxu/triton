@@ -248,6 +248,10 @@ public:
     return base;
   }
 
+  bool isF8(Type eType) const {
+    return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+  }
+
   DenseMap<unsigned, Value>
   getSwizzledSharedPtrs(Location loc, unsigned inVec, RankedTensorType srcTy,
                         triton::gpu::SharedEncodingAttr resSharedLayout,
@@ -281,6 +285,10 @@ public:
     // then (x + y) XOR z = 0byyyyxxxx XOR 0b00000zzzz = (x XOR z) + y
     // This means that we can use some immediate offsets for shared memory
     // operations.
+    if (this->isF8(resElemTy)) {
+      resElemTy = i8_ty;
+    }
+
     auto dstPtrTy = ptr_ty(resElemTy, 3);
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
     Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);

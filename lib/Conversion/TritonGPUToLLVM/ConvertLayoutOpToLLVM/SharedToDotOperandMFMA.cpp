@@ -10,11 +10,21 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
 
+static bool isF8(Type eType) {
+  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
+}
+
 Type getShemPtrTy(Type elemTy) {
   if (elemTy.isBF16()) {
     auto ctx = elemTy.getContext();
     return ptr_ty(type::i16Ty(ctx), 3);
   }
+
+  if (isF8(elemTy)) {
+    auto ctx = elemTy.getContext();
+    return ptr_ty(type::i8Ty(ctx), 3);
+  }
+
   return ptr_ty(elemTy, 3);
 }
 
@@ -439,6 +449,9 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
       std::max<int>(mfmaInstrM * mfmaInstrK / iWaveSize /*wave size*/, 1);
   unsigned int maxNumWarps = shape[0] / mfmaInstrM;
   int warpsPerGroupM = std::min(warpsPerCTA[0], maxNumWarps);
+  if (isF8(aElemTy)) {
+    aElemTy = i8_ty;
+  }
 
   SmallVector<Value> ha;
 
@@ -585,6 +598,9 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
   unsigned int maxNumWarps = shape[1] / mfmaInstrN;
   int warpsPerGroupN = std::min(warpsPerCTA[1], maxNumWarps);
+  if (isF8(bElemTy)) {
+    bElemTy = i8_ty;
+  }
 
   SmallVector<Value> hb;
 
@@ -653,7 +669,6 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
 
     Type resElemTy = bElemTy.isBF16() ? i16_ty : bElemTy;
-
     Type smemPtrTy = getShemPtrTy(bElemTy);
 
     int loadsPerThread = offsets.size() / (numReps[0] * numReps[1]);

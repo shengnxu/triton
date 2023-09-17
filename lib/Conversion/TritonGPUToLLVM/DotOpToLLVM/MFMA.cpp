@@ -104,10 +104,6 @@ struct DotOpMFMAConversionHelper {
     return MatrixCoreType::NOT_APPLICABLE;
   }
 
-static bool isF8(Type eType) {
-  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
-}
-
   // Conduct the Dot conversion.
   LogicalResult convertDot(DotOp op, DotOpAdaptor adaptor) const {
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();

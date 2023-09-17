@@ -10,10 +10,6 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
 
-static bool isF8(Type eType) {
-  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
-}
-
 Type getShemPtrTy(Type elemTy) {
   if (elemTy.isBF16()) {
     auto ctx = elemTy.getContext();

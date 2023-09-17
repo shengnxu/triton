@@ -770,10 +770,6 @@ const std::string S8_to_Bf16 =
     "}";
 #endif
 
-static bool isF8(Type eType) {
-  return eType.isFloat8E5M2FNUZ() or eType.isFloat8E4M3FNUZ() or eType.isFloat8E5M2() or eType.isFloat8E5M2FNUZ();
-}
-
 static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
                                         Type inType, Type ouType) {
   auto inTensorTy = inType.dyn_cast<RankedTensorType>();

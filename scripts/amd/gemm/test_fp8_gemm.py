@@ -166,6 +166,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
         mask = offsets < n_elements
         input = tl.load(input_ptr + offsets, mask=mask)
         output = input
+        # tl.device_print("output = ", output)
         tl.store(output_ptr + offsets, output, mask=mask)
 
     # a is fp8
@@ -176,6 +177,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
         # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
         all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
         f8_tensor[all_exp_ones] = 0
+        f8_tensor = f8_tensor & 0b00111111
         n_elements = f8_tensor.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
         a_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
@@ -222,7 +224,7 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, c_type):
         golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
 
     torch.set_printoptions(profile="full")
-    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
+    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(1e-2, 10 * golden_rel_err), atol=max(1e-2, 10 * golden_abs_err), check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(

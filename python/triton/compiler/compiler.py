@@ -76,7 +76,10 @@ def optimize_ttir(mod, arch):
 def ttir_to_ttgir(mod, num_warps, warpsize, num_ctas, arch):
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
-    pm.add_convert_triton_to_tritongpu_pass(num_warps, warpsize, num_ctas, arch)
+    if is_hip():
+        pm.add_convert_triton_to_tritongpu_pass(num_warps, warpsize, num_ctas, 0)
+    else:
+        pm.add_convert_triton_to_tritongpu_pass(num_warps, warpsize, num_ctas, arch)
     pm.run(mod)
     return mod
 
@@ -105,15 +108,13 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, arch,
     if num_stages == 0 and is_hip() and gpu_matrix_core_version() != 0:
         pm.add_tritongpu_stream_pipeline_pass()
         pm.add_canonicalizer_pass()
-    else:
-        pm.add_tritongpu_pipeline_pass(num_stages)
     ws_enabled = False
     # `num_warps` does not mean the total number of warps of a CTA when
     # warp specialization is enabled.
     # it's the responsibility of the compiler to figure out the exact
     # `num_warps` to use.
     # TODO: support the case where `num_warps` from user is not 4.
-    if arch // 10 >= 9 and enable_warp_specialization and num_warps == 4:
+    if _is_cuda(arch) and arch // 10 >= 9 and enable_warp_specialization and num_warps == 4:
         pm.add_tritongpu_ws_feasibility_checking_pass(arch)
         pm.run(mod)
         ws_enabled = ir.is_ws_supported(mod)
@@ -127,10 +128,19 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, arch,
         pm.add_tritongpu_wsmaterialization_pass(arch)
         pm.add_cse_pass()
     else:
-        pm.add_tritongpu_pipeline_pass(
-            num_stages, num_warps, num_ctas, arch)
-    pm.add_tritongpu_materialize_load_store_pass(num_warps, arch)
-    if arch // 10 <= 8:
+        if is_hip():
+            pm.add_tritongpu_pipeline_pass(
+                num_stages, num_warps, num_ctas, 0)
+        else:
+            pm.add_tritongpu_pipeline_pass(
+                num_stages, num_warps, num_ctas, arch)
+    
+    if is_hip():
+        pm.add_tritongpu_materialize_load_store_pass(num_warps, 0)
+    else:
+        pm.add_tritongpu_materialize_load_store_pass(num_warps, arch)
+    
+    if _is_cuda(arch) and arch // 10 <= 8:
         pm.add_tritongpu_prefetch_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
@@ -140,7 +150,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, arch,
         pm.add_tritongpu_reorder_instructions_pass()
     pm.add_cse_pass()
     pm.add_symbol_dce_pass()
-    if arch // 10 >= 9:
+    if _is_cuda(arch) and arch // 10 >= 9:
         pm.add_tritongpu_fence_insertion_pass()
     pm.add_tritongpu_ws_fixup_missing_attrs_pass()
     pm.run(mod)

@@ -1,5 +1,6 @@
 #include "triton/Target/LLVMIR/LLVMIRTranslation.h"
 
+#include "mlir/Conversion/Passes.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
@@ -367,7 +368,9 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createConvertIndexToLLVMPass());
   pm.addPass(
       createConvertTritonGPUToLLVMPass({computeCapability, &tmaInfos, target}));
+#ifndef USE_ROCM
   pm.addPass(createConvertNVGPUToLLVMPass());
+#endif
   pm.addPass(mlir::createArithToLLVMConversionPass());
   pm.addPass(mlir::createCanonicalizerPass());
   // Simplify the IR
@@ -375,7 +378,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createSymbolDCEPass());
 #ifdef USE_ROCM
   pm.addPass(mlir::createConvertSCFToCFPass());
-  // pm.addPass(createConvertControlFlowToLLVMPass());
+  pm.addPass(createConvertControlFlowToLLVMPass());
 #endif
   if (!::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO"))
     pm.addPass(mlir::createLLVMDIScopePass());

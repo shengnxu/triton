@@ -443,9 +443,20 @@ struct GetProgramIdOpConversion
   using ConvertTritonGPUOpToLLVMPattern<
       triton::GetProgramIdOp>::ConvertTritonGPUOpToLLVMPattern;
 
+ 
   LogicalResult
   matchAndRewrite(triton::GetProgramIdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+#ifdef USE_ROCM
+    Location loc = op->getLoc();
+    assert(op.getAxisAsInt() < 3);
+
+    Value blockId =
+        rewriter.create<::mlir::gpu::BlockIdOp>(loc, dims[op.getAxisAsInt()]);
+    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, i32_ty, blockId);
+    return success();
+#else
     // It is not easy to get the compute capability here, so we use numCTAs to
     // decide the semantic of GetProgramIdOp. If numCTAs = 1, then
     // GetProgramIdOp is converted to "%ctaid", otherwise it is converted to
@@ -462,7 +473,11 @@ struct GetProgramIdOpConversion
     Value programId = getSRegValue(rewriter, loc, sreg);
     rewriter.replaceOp(op, programId);
     return success();
+#endif
   }
+  static constexpr mlir::gpu::Dimension dims[] = {mlir::gpu::Dimension::x,
+                                                  mlir::gpu::Dimension::y,
+                                                  mlir::gpu::Dimension::z};
 };
 
 struct GetNumProgramsOpConversion
@@ -473,6 +488,26 @@ struct GetNumProgramsOpConversion
   LogicalResult
   matchAndRewrite(triton::GetNumProgramsOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+#ifdef USE_ROCM
+
+    Location loc = op->getLoc();
+    assert(op.getAxis() < 3);
+    // Seem like GridDimOp returns the number of threads (not the number of 
+    // workgroups) in a kernel (a bug in llvm https://reviews.llvm.org/D156009), 
+    // so as a workaround here, we divide by the number of threads 
+    // per workgroup to get the number of workgroups in a kernel.
+    // TODO: when we do upstream to include llvm fix, we can remove this workaround
+    // The unit test added in this PR can guarantee that.
+    Value threadsPerGrid =
+        rewriter.create<::mlir::gpu::GridDimOp>(loc, dims[op.getAxis()]);
+    Value threadsPerBlock =
+        rewriter.create<::mlir::gpu::BlockDimOp>(loc, dims[op.getAxis()]);
+    Value threadNumPerGrid = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerGrid);
+    Value threadNumPerBlock = rewriter.create<arith::TruncIOp>(loc, i32_ty, threadsPerBlock);    
+    rewriter.replaceOpWithNewOp<LLVM::UDivOp>(op, threadNumPerGrid, threadNumPerBlock);
+    return success();
+#else
     // It is not easy to get the compute capability here, so we use numCTAs to
     // decide the semantic of GetNumProgramsOp. If numCTAs = 1, then
     // GetNumProgramsOp is converted to "%nctaid", otherwise it is converted to
@@ -489,7 +524,13 @@ struct GetNumProgramsOpConversion
     Value numPrograms = getSRegValue(rewriter, loc, sreg);
     rewriter.replaceOp(op, numPrograms);
     return success();
+
+#endif
   }
+
+  static constexpr mlir::gpu::Dimension dims[] = {mlir::gpu::Dimension::x,
+                                                  mlir::gpu::Dimension::y,
+                                                  mlir::gpu::Dimension::z};
 };
 
 // TODO[goostavz]: GetThreadIdOp/GetClusterCTAIdOp is a temporary solution

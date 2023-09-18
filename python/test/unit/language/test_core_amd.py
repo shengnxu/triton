@@ -1170,14 +1170,14 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
             copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
         return input, input_f16
 
-    a, a_f16 = gen_input(M, K, a_type, 2, device=device)
-    b, b_f16 = gen_input(K, N, b_type, 3, device=device)
+    a, a_f16 = gen_input(M, K, a_type, 11, device=device)
+    b, b_f16 = gen_input(K, N, b_type, 22, device=device)
 
     # call torch function to compute gold
     golden = torch.matmul(a_f16, b_f16)
 
     c = matmul(a, b, out_dtype)
-    torch.testing.assert_close(c.to(torch.float32), golden.to(torch.float32), rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=1e-2)
 
 
 # ---------------

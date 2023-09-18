@@ -381,7 +381,6 @@ public:
     populateDotOpToLLVMPatterns(typeConverter, patterns, allocation,
                                 /*benefit=*/1);
     populateElementwiseOpToLLVMPatterns(typeConverter, patterns, /*benefit=*/1);
-
     populateLoadStoreOpToLLVMPatterns(typeConverter, patterns, axisInfoAnalysis,
                                       allocation, indexCacheInfo,
                                       /*benefit=*/1);

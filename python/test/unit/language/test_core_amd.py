@@ -1056,8 +1056,10 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                                         [32, 32, 128],
                                         [128, 128, 64],
                                         [64, 128, 128]]
-                          for ab_type in [[tl.float8e4, tl.float16],
+                          for ab_type in [[tl.float8e4b15, tl.float16],
+                                           [tl.float8e4, tl.float16],
                                            [tl.float8e5, tl.float16],
+                                           [tl.float16, tl.float8e4b15],
                                            [tl.float16, tl.float8e4],
                                            [tl.float16, tl.float8e5]]
                           for out_dtype in [torch.float16, torch.float32]

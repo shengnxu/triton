@@ -316,7 +316,6 @@ public:
     int threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
 
     // Preprocess
-    decomposeFp8e4b15Convert(mod);
     decomposeMmaToDotOperand(mod, numWarps, threadsPerWarp);
 #ifdef USE_ROCM
     decomposeMfmaToDotOperand(mod, numWarps, threadsPerWarp);

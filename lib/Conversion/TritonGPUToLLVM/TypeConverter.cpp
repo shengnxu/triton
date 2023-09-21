@@ -90,18 +90,20 @@ SmallVector<Value> TritonGPUToLLVMTypeConverter::packMfmaOperand(
     return inValues;
   }
 
-  SmallVector<Value> result;
   auto structType = this->convertType(srcTy).dyn_cast<LLVM::LLVMStructType>();
   auto elementTypes = structType.getBody();
   assert(elementTypes.size() > 0);
-  auto vecTy = elementTypes[0];
-  unsigned size = 4;
+  mlir::VectorType vecTy = elementTypes[0].dyn_cast<mlir::VectorType>();
+  if (!vecTy) return inValues;
+
+  unsigned size = vecTy.getNumElements();
+
+  SmallVector<Value> result;
   for (int i = 0; i < inValues.size(); i += size) {
     Value valVec = undef(vecTy);
-    valVec = insert_element(vecTy, valVec, inValues[i], i32_val(0));
-    valVec = insert_element(vecTy, valVec, inValues[i + 1], i32_val(1));
-    valVec = insert_element(vecTy, valVec, inValues[i + 2], i32_val(2));
-    valVec = insert_element(vecTy, valVec, inValues[i + 3], i32_val(3));
+    for (unsigned j = 0; j < size; ++j) {
+      valVec = insert_element(vecTy, valVec, inValues[i + j], i32_val(j));
+    }
     result.push_back(valVec);
   }
 

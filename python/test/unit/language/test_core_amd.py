@@ -1074,12 +1074,6 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
         output = input
         tl.store(output_ptr + offsets, output, mask=mask)
 
-    @triton.autotune(
-        configs=[
-            triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1}, num_stages=1, num_warps=2),
-        ],
-        key=['M', 'N', 'K'],
-    )
     @triton.jit
     def matmul_kernel(
         a_ptr, b_ptr, c_ptr,
@@ -1149,9 +1143,16 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
             b.stride(0), b.stride(1),
             c.stride(0), c.stride(1),
             compute_type = comp_type,
+            BLOCK_SIZE_M=32, 
+            BLOCK_SIZE_N=64,
+            BLOCK_SIZE_K=64,
+            GROUP_SIZE_M=4,
+            num_stages=1,
+            num_warps=2,
         )
 
         return c
+
 
     def gen_input(M, N, d_type, seed, device='cuda'):
         torch.cuda.manual_seed(seed)

@@ -49,18 +49,21 @@ def get_full_tuning_space(use_split_k):
     block_k_range = [32, 64]
     split_k_range = [1, 2, 4, 5, 8, 10]
     num_warps_range = [1, 2, 4, 8]
+    num_stages_range = [0, 1]
     group_m_range = [1, 4, 8]
+
 
     for block_m in block_mn_range:
         for block_n in block_mn_range:
             for block_k in block_k_range:
                 for num_warps in num_warps_range:
-                    for group_m in group_m_range:
-                        if use_split_k:
-                            for split_k in split_k_range:
-                                configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k}, num_stages=1, num_warps=num_warps))
-                        else:
-                            configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m}, num_stages=1, num_warps=num_warps))
+                    for num_stages in num_stages_range:
+                        for group_m in group_m_range:
+                            if use_split_k:
+                                for split_k in split_k_range:
+                                    configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k}, num_stages=num_stages, num_warps=num_warps))
+                            else:
+                                configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m}, num_stages=num_stages, num_warps=num_warps))
 
     return configs
 

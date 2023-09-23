@@ -1155,6 +1155,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
 
 
     def gen_input(M, N, d_type, seed, device='cuda'):
+        torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         if d_type == tl.float16:
             input = torch.randn((M, K), dtype=torch.float16, device=device)

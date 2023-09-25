@@ -191,6 +191,8 @@ public:
     if (!supportMFMA(dotOp))
       return failure();
 
+    auto CTALayout = ttg::getCTALayout(oldRetType.getEncoding());
+
     // get MFMA encoding for the given number of warps
     auto retShape = oldRetType.getShape();
     auto mod = op->getParentOfType<mlir::ModuleOp>();
@@ -211,7 +213,7 @@ public:
 
     bool isTransposed = isChainDot(dotOp);
     mfmaEnc = ttg::MfmaEncodingAttr::get(
-        oldRetType.getContext(), nonKDim, warpsPerTile, isTransposed);
+        oldRetType.getContext(), nonKDim, warpsPerTile, isTransposed, CTALayout);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);

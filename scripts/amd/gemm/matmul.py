@@ -15,7 +15,7 @@ import subprocess
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = True
+tuning_full_space = False
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -193,13 +193,13 @@ def matmul_kernel_splitK(
 @triton.autotune(
     configs= get_full_tuning_space(False) if tuning_full_space else [
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
+        # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
+        # triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=1, num_warps=2),
     ],
     key=['M', 'N', 'K'],
     prune_configs_by={
@@ -306,19 +306,29 @@ def leaky_relu(x):
     return tl.where(x >= 0, x, 0.01 * x)
 
 
+# convert fp8 to fp16 for testing
+@triton.jit
+def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    input = tl.load(input_ptr + offsets, mask=mask)
+    output = input
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, activation=""):
+def matmul(a, b, output_type, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
-    assert a.is_contiguous(), "Matrix A must be contiguous"
-    assert b.is_contiguous(), "Matrix B must be contiguous"
+    # assert a.is_contiguous(), "Matrix A must be contiguous"
+    # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.empty((M, N), device=a.device, dtype=output_type)
     # 1D launch kernel where each block gets its own program.
 
     if need_split_k(M, N, K):
@@ -350,6 +360,7 @@ def matmul(a, b, activation=""):
 
     return c
 
+
 def get_best_config(M, N, K):
     if need_split_k(M, N, K):
         best_config = matmul_kernel_splitK.get_best_config(M = M, N = N, K = K)
@@ -358,11 +369,32 @@ def get_best_config(M, N, K):
     return best_config
 
 
-def test_correctness(M, N, K, datatype = torch.float16):
+def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    if isFp8: # convert fp8 to fp16 for ref input
+        fp8_type = tl.float8e4
+        f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
+        f8_tensor = f8_tensor.to(torch.int8)
+        # keep only two bits of exponent to avoid overflow
+        f8_tensor = f8_tensor & 0b00111111
+        input = triton.reinterpret(f8_tensor, fp8_type)
+        input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        n_elements = f8_tensor.numel()
+        copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
+    else: # other data type
+        input = torch.randn((M, N), dtype=d_type, device=device)
+        input_f16 = input
+    return input, input_f16
+
+
+def test_correctness(M, N, K, datatype, fp8a, fp8b):
     torch.manual_seed(0)
-    a = torch.randn((M, K), device='cuda', dtype=datatype)
-    b = torch.randn((K, N), device='cuda', dtype=datatype)
-    triton_output = matmul(a, b)
+    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+
+    triton_output = matmul(a, b, output_type=datatype)
     torch_output = torch.matmul(a, b)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
@@ -374,14 +406,16 @@ def test_correctness(M, N, K, datatype = torch.float16):
         print(f'❌ Triton and Torch differ for {size_str}')
 
 
-def run_speed(M, N, K, datatype, use_rocprof, provider):
-    a = torch.randn((M, K), device='cuda', dtype=datatype)
-    b = torch.randn((K, N), device='cuda', dtype=datatype)
+def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
+    print(f'fp8a = {fp8a}, fp8b = {fp8b}')
+    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, output_type=datatype), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):
@@ -412,9 +446,17 @@ def parse_args():
 
 def main():
     args = parse_args()
+    fp8a = False
+    fp8b = False
     dtype = torch.float16
     if args.specify_type:
-        if args.dtype == 'fp16':
+        if args.dtype == "fp8a":
+            fp8a = True
+            dtype = torch.float16
+        elif args.dtype == 'fp8b':
+            fp8b = True
+            dtype = torch.float16
+        elif args.dtype == 'fp16':
             dtype = torch.float16
         elif args.dtype == 'fp32':
             dtype = torch.float32
@@ -449,15 +491,15 @@ def main():
             K = sizes['K']
             mnks.append((M, N, K))
 
-
+    print(f"loc1, fp8a = {fp8a}, fp8b = {fp8b}")
     for (m, n, k) in mnks:
-        min_ms = run_speed(m, n, k, dtype, use_rocprof, 'triton')
+        min_ms = run_speed(m, n, k, dtype, fp8a, fp8b, 'triton')
 
         # function to compute flops
         perf_flops = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
 
         if args.compare:
-            test_correctness(m, n, k, dtype)
+            test_correctness(m, n, k, dtype, fp8a, fp8b)
         best_config = get_best_config(m, n, k)
 
         if use_rocprof:

@@ -15,7 +15,7 @@ import subprocess
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = False
+tuning_full_space = True
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -112,6 +112,7 @@ def matmul_kernel_splitK(
     SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr,
+    output_datatype: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -175,7 +176,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    c = accumulator.to(output_datatype)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -227,6 +228,7 @@ def matmul_kernel(
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr, EVEN_K: tl.constexpr,
     ACTIVATION: tl.constexpr,
+    output_datatype: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -288,7 +290,7 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    c = accumulator.to(output_datatype)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -330,6 +332,11 @@ def matmul(a, b, output_type, activation=""):
     # Allocates output.
     c = torch.empty((M, N), device=a.device, dtype=output_type)
     # 1D launch kernel where each block gets its own program.
+    otype = tl.float32
+    if output_type == torch.float16:
+        otype = tl.float16
+    elif output_type == torch.bfloat16:
+        otype = tl.bfloat16
 
     if need_split_k(M, N, K):
         grid_splitK = lambda META: (
@@ -342,7 +349,8 @@ def matmul(a, b, output_type, activation=""):
             a.stride(0), a.stride(1),
             b.stride(0), b.stride(1),
             c.stride(0), c.stride(1),
-            ACTIVATION=activation
+            ACTIVATION=activation,
+            output_datatype=otype,
         )
 
     else:
@@ -355,7 +363,8 @@ def matmul(a, b, output_type, activation=""):
             a.stride(0), a.stride(1),
             b.stride(0), b.stride(1),
             c.stride(0), c.stride(1),
-            ACTIVATION=activation
+            ACTIVATION=activation,
+            output_datatype=otype,
         )
 
     return c
@@ -407,7 +416,6 @@ def test_correctness(M, N, K, datatype, fp8a, fp8b):
 
 
 def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
-    print(f'fp8a = {fp8a}, fp8b = {fp8b}')
     a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
     b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
 
@@ -491,7 +499,6 @@ def main():
             K = sizes['K']
             mnks.append((M, N, K))
 
-    print(f"loc1, fp8a = {fp8a}, fp8b = {fp8b}")
     for (m, n, k) in mnks:
         min_ms = run_speed(m, n, k, dtype, fp8a, fp8b, 'triton')
 

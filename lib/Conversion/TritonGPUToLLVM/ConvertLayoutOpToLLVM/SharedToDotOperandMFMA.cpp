@@ -445,12 +445,9 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
       std::max<int>(mfmaInstrM * mfmaInstrK / iWaveSize /*wave size*/, 1);
   unsigned int maxNumWarps = shape[0] / mfmaInstrM;
   int warpsPerGroupM = std::min(warpsPerCTA[0], maxNumWarps);
-  if (isF8(aElemTy)) {
-    aElemTy = i8_ty;
-  }
+  aElemTy = typeConverter->convertType(aElemTy);
 
   SmallVector<Value> ha;
-
   if (fastPathAvailable(smemObj, sharedLayout, mfmaLayout)) {
     Value cSwizzleOffset = smemObj.getCSwizzleOffset(order[0]);
     SmallVector<Value> offsets;
@@ -468,7 +465,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
-    Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
+    Type resElemTy = typeConverter->convertType(aElemTy);
 
     int loadsPerThread = offsets.size() / (numRepM * numRepK);
     const int elemsPerLoad = numOfElems / loadsPerThread;
@@ -509,7 +506,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
         numReps, smemObj, sharedLayout);
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
-    Type resElemTy = aElemTy.isBF16() ? i16_ty : aElemTy;
+    Type resElemTy = typeConverter->convertType(aElemTy);
 
     Type smemPtrTy = getShemPtrTy(aElemTy);
 
@@ -594,12 +591,9 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
   unsigned int maxNumWarps = shape[1] / mfmaInstrN;
   int warpsPerGroupN = std::min(warpsPerCTA[1], maxNumWarps);
-  if (isF8(bElemTy)) {
-    bElemTy = i8_ty;
-  }
+  bElemTy = typeConverter->convertType(bElemTy);
 
   SmallVector<Value> hb;
-
   if (fastPathAvailable(smemObj, sharedLayout, mfmaLayout)) {
     Value cSwizzleOffset = smemObj.getCSwizzleOffset(order[0]);
 
@@ -620,8 +614,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
-    Type resElemTy = bElemTy.isBF16() ? i16_ty : bElemTy;
-
+    Type resElemTy = typeConverter->convertType(bElemTy);
     Type smemPtrTy = getShemPtrTy(bElemTy);
 
     const int loadsPerThread = offsets.size() / (numRepN * numRepK);
@@ -663,8 +656,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
         numReps, smemObj, sharedLayout);
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
-
-    Type resElemTy = bElemTy.isBF16() ? i16_ty : bElemTy;
+    Type resElemTy = typeConverter->convertType(bElemTy);
     Type smemPtrTy = getShemPtrTy(bElemTy);
 
     int loadsPerThread = offsets.size() / (numReps[0] * numReps[1]);

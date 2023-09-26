@@ -73,7 +73,6 @@ SmallVector<unsigned, 2> warpsPerTileV2(triton::DotOp dotOp,
   return ret;
 }
 
-#ifdef USE_ROCM
 SmallVector<unsigned, 2> warpsPerTileMI200(triton::DotOp dotOp,
                                            const ArrayRef<int64_t> shape,
                                            int numWarps) {
@@ -221,7 +220,6 @@ public:
     return success();
   }
 };
-#endif
 
 class BlockedToMMA : public mlir::RewritePattern {
   int computeCapability;
@@ -375,14 +373,12 @@ public:
     ModuleOp m = getOperation();
 
     mlir::RewritePatternSet patterns(context);
-#ifdef USE_ROCM
+
     if (computeCapability == 1 || computeCapability == 2) {
       int mfmaVersion = computeCapability;
       patterns.add<::BlockedToMFMA>(context, mfmaVersion);
     }
-#else
-    patterns.add<::BlockedToMMA>(context, computeCapability);
-#endif
+    
     if (applyPatternsAndFoldGreedily(m, std::move(patterns)).failed()) {
       signalPassFailure();
     }

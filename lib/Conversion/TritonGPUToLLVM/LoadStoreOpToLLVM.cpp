@@ -448,7 +448,6 @@ struct AtomicCASOpConversion
             converter, allocation, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
-#ifdef USE_ROCM
   LogicalResult
   matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
@@ -517,68 +516,6 @@ struct AtomicCASOpConversion
     return success();
   }
 
-#else // USE_ROCM
-
-  LogicalResult
-  matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    MLIRContext *ctx = rewriter.getContext();
-
-    Value llPtr = adaptor.getPtr();
-    Value llCmp = adaptor.getCmp();
-    Value llVal = adaptor.getVal();
-
-    auto ptrElements = getTypeConverter()->unpackLLElements(
-        loc, llPtr, rewriter, op.getPtr().getType());
-    auto cmpElements = getTypeConverter()->unpackLLElements(
-        loc, llCmp, rewriter, op.getCmp().getType());
-    auto valElements = getTypeConverter()->unpackLLElements(
-        loc, llVal, rewriter, op.getVal().getType());
-
-    auto valueTy = op.getResult().getType();
-    auto TensorTy = valueTy.dyn_cast<RankedTensorType>();
-    Type valueElemTy =
-        TensorTy ? getTypeConverter()->convertType(TensorTy.getElementType())
-                 : valueTy;
-    auto valueElemNBits = valueElemTy.getIntOrFloatBitWidth();
-    Value mask = getMask(valueTy, rewriter, loc);
-
-    Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
-    atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
-    Value casPtr = ptrElements[0];
-    Value casCmp = cmpElements[0];
-    Value casVal = valElements[0];
-
-    PTXBuilder ptxBuilderAtomicCAS;
-    auto *dstOpr = ptxBuilderAtomicCAS.newOperand("=r", /*init=*/true);
-    auto *ptrOpr = ptxBuilderAtomicCAS.newAddrOperand(casPtr, "l");
-    auto *cmpOpr = ptxBuilderAtomicCAS.newOperand(casCmp, "r");
-    auto *valOpr = ptxBuilderAtomicCAS.newOperand(casVal, "r");
-    auto &atom = *ptxBuilderAtomicCAS.create<PTXInstr>("atom");
-    std::string semStr;
-    llvm::raw_string_ostream os(semStr);
-    os << op.getSem();
-    atom.global().o(semStr).o("cas").o("b32");
-    atom(dstOpr, ptrOpr, cmpOpr, valOpr).predicate(mask);
-    auto old = ptxBuilderAtomicCAS.launch(rewriter, loc, valueElemTy);
-    barrier();
-
-    PTXBuilder ptxBuilderStore;
-    auto *dstOprStore = ptxBuilderStore.newAddrOperand(atomPtr, "r");
-    auto *valOprStore = ptxBuilderStore.newOperand(old, "r");
-    auto &st = *ptxBuilderStore.create<PTXInstr>("st");
-    st.shared().o("b32");
-    st(dstOprStore, valOprStore).predicate(mask);
-    auto ASMReturnTy = void_ty(ctx);
-    ptxBuilderStore.launch(rewriter, loc, ASMReturnTy);
-    barrier();
-    Value ret = load(atomPtr);
-    barrier();
-    rewriter.replaceOp(op, {ret});
-    return success();
-  }
-#endif // USE_ROCM
 };
 
 struct AtomicRMWOpConversion
@@ -595,7 +532,6 @@ struct AtomicRMWOpConversion
             converter, allocation, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
-#ifdef USE_ROCM
   /// Try to match the mlir::triton::RMWOp to LLVM::AtomicBinOp.
   static Optional<LLVM::AtomicBinOp> matchAtomicOp(RMWOp atomicOp) {
     switch (atomicOp) {
@@ -737,159 +673,6 @@ struct AtomicRMWOpConversion
     return success();
   }
 
-#else  // USE_ROCM
-
-  LogicalResult
-  matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    MLIRContext *ctx = rewriter.getContext();
-    //
-    auto atomicRmwAttr = op.getAtomicRmwOp();
-
-    Value val = op.getVal();
-    Value ptr = op.getPtr();
-
-    Value llPtr = adaptor.getPtr();
-    Value llVal = adaptor.getVal();
-    Value llMask = adaptor.getMask();
-
-    auto valElements = getTypeConverter()->unpackLLElements(
-        loc, llVal, rewriter, val.getType());
-    auto ptrElements = getTypeConverter()->unpackLLElements(
-        loc, llPtr, rewriter, ptr.getType());
-    SmallVector<Value> maskElements;
-    if (llMask)
-      maskElements = getTypeConverter()->unpackLLElements(
-          loc, llMask, rewriter, op.getMask().getType());
-
-    auto valueTy = op.getResult().getType();
-    auto tensorTy = valueTy.dyn_cast<RankedTensorType>();
-    Type valueElemTy =
-        tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
-                 : valueTy;
-    const size_t valueElemNBits = valueElemTy.getIntOrFloatBitWidth();
-    auto elemsPerThread = getTotalElemsPerThread(val.getType());
-    // vec = 1, numElements = 1 for scalar
-    auto vec = getVectorSize(ptr);
-    int numElems = 1;
-    // tensor
-    if (tensorTy) {
-      auto valTy = val.getType().cast<RankedTensorType>();
-      vec = std::min<unsigned>(vec, valTy.getElementType().isF16() ? 2 : 1);
-      // mask
-      numElems = tensorTy.getNumElements();
-    }
-    Value mask = getMask(valueTy, rewriter, loc);
-
-    auto vecTy = vec_ty(valueElemTy, vec);
-    SmallVector<Value> resultVals(elemsPerThread);
-    for (size_t i = 0; i < elemsPerThread; i += vec) {
-      Value rmwVal = undef(vecTy);
-      for (int ii = 0; ii < vec; ++ii) {
-        Value iiVal = createIndexAttrConstant(
-            rewriter, loc, getTypeConverter()->getIndexType(), ii);
-        rmwVal = insert_element(vecTy, rmwVal, valElements[i + ii], iiVal);
-      }
-
-      Value rmwPtr = ptrElements[i];
-      Value rmwMask = llMask ? and_(mask, maskElements[i]) : mask;
-      std::string sTy;
-      PTXBuilder ptxBuilderAtomicRMW;
-      std::string tyId = valueElemNBits * vec == 64
-                             ? "l"
-                             : (valueElemNBits * vec == 32 ? "r" : "h");
-      auto *dstOpr = ptxBuilderAtomicRMW.newOperand("=" + tyId, /*init=*/true);
-      auto *ptrOpr = ptxBuilderAtomicRMW.newAddrOperand(rmwPtr, "l");
-      auto *valOpr = ptxBuilderAtomicRMW.newOperand(rmwVal, tyId);
-
-      auto &atom = ptxBuilderAtomicRMW.create<>("atom")->global().o("gpu");
-      auto rmwOp = stringifyRMWOp(atomicRmwAttr).str();
-      auto sBits = std::to_string(valueElemNBits);
-      switch (atomicRmwAttr) {
-      case RMWOp::AND:
-        sTy = "b" + sBits;
-        break;
-      case RMWOp::OR:
-        sTy = "b" + sBits;
-        break;
-      case RMWOp::XOR:
-        sTy = "b" + sBits;
-        break;
-      case RMWOp::ADD:
-        sTy = "s" + sBits;
-        break;
-      case RMWOp::FADD:
-        rmwOp = "add";
-        rmwOp += (valueElemNBits == 16 ? ".noftz" : "");
-        sTy = "f" + sBits;
-        sTy += (vec == 2 && valueElemNBits == 16) ? "x2" : "";
-        break;
-      case RMWOp::MAX:
-        sTy = "s" + sBits;
-        break;
-      case RMWOp::MIN:
-        sTy = "s" + sBits;
-        break;
-      case RMWOp::UMAX:
-        rmwOp = "max";
-        sTy = "u" + sBits;
-        break;
-      case RMWOp::UMIN:
-        rmwOp = "min";
-        sTy = "u" + sBits;
-        break;
-      case RMWOp::XCHG:
-        sTy = "b" + sBits;
-        break;
-      default:
-        return failure();
-      }
-      std::string semStr;
-      llvm::raw_string_ostream os(semStr);
-      os << op.getSem();
-      atom.o(semStr).o(rmwOp).o(sTy);
-      if (tensorTy) {
-        atom(dstOpr, ptrOpr, valOpr).predicate(rmwMask);
-        auto retType = vec == 1 ? valueElemTy : vecTy;
-        auto ret = ptxBuilderAtomicRMW.launch(rewriter, loc, retType);
-        for (int ii = 0; ii < vec; ++ii) {
-          resultVals[i + ii] =
-              vec == 1 ? ret : extract_element(valueElemTy, ret, i32_val(ii));
-        }
-      } else {
-        auto ASMReturnTy = void_ty(ctx);
-        atom(dstOpr, ptrOpr, valOpr).predicate(rmwMask);
-        auto old = ptxBuilderAtomicRMW.launch(rewriter, loc, valueElemTy);
-        if (op->user_begin() == op->user_end()) {
-          rewriter.replaceOp(op, {old});
-          return success();
-        }
-        Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
-        atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
-        // Only threads with rmwMask = True store the result
-        PTXBuilder ptxBuilderStore;
-        auto &storeShared =
-            ptxBuilderStore.create<>("st")->shared().o("b" + sBits);
-        auto *ptrOpr = ptxBuilderStore.newAddrOperand(atomPtr, "r");
-        auto *valOpr = ptxBuilderStore.newOperand(old, tyId);
-        storeShared(ptrOpr, valOpr).predicate(rmwMask);
-        ptxBuilderStore.launch(rewriter, loc, void_ty(ctx));
-        barrier();
-        Value ret = load(atomPtr);
-        barrier();
-        rewriter.replaceOp(op, {ret});
-      }
-    }
-    if (tensorTy) {
-      Type structTy = getTypeConverter()->convertType(tensorTy);
-      Value resultStruct = getTypeConverter()->packLLElements(
-          loc, resultVals, rewriter, structTy);
-      rewriter.replaceOp(op, {resultStruct});
-    }
-    return success();
-  }
-#endif // USE_ROCM
 };
 
 struct InsertSliceOpConversion

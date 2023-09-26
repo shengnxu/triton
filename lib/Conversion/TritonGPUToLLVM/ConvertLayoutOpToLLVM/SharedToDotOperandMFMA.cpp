@@ -16,11 +16,6 @@ Type getShemPtrTy(Type elemTy) {
     return ptr_ty(type::i16Ty(ctx), 3);
   }
 
-  if (isF8(elemTy)) {
-    auto ctx = elemTy.getContext();
-    return ptr_ty(type::i8Ty(ctx), 3);
-  }
-
   return ptr_ty(elemTy, 3);
 }
 

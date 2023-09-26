@@ -281,10 +281,7 @@ public:
     // then (x + y) XOR z = 0byyyyxxxx XOR 0b00000zzzz = (x XOR z) + y
     // This means that we can use some immediate offsets for shared memory
     // operations.
-    if (isF8(resElemTy)) {
-      resElemTy = i8_ty;
-    }
-
+    resElemTy = getTypeConverter()->convertType(resElemTy);
     auto dstPtrTy = ptr_ty(resElemTy, 3);
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
     Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);

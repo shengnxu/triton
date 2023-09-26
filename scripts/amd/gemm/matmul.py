@@ -35,6 +35,11 @@ def prune_configs(configs, named_args):
             continue
         if SIZE_N <=32 and BLOCK_SIZE_N != 32:
             continue
+        if BLOCK_SIZE_M * BLOCK_SIZE_K / config.num_warps / 64 <= 2:
+            continue
+        if BLOCK_SIZE_N * BLOCK_SIZE_K / config.num_warps / 64 <= 2:
+            continue
+
         pruned_configs.append(config)
 
     return pruned_configs

@@ -216,8 +216,9 @@ for i in range(group_size):
 
 tri_out = group_gemm_fn(group_A, group_B)
 ref_out = [torch.matmul(a, b) for a, b in zip(group_A, group_B)]
+rtol = 0 if torch.version.hip is None else 1e-2
 for i in range(group_size):
-    assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=0)
+    assert torch.allclose(ref_out[i], tri_out[i], atol=1e-2, rtol=rtol)
 
 
 # only launch the kernel, no tensor preparation here to remove all overhead

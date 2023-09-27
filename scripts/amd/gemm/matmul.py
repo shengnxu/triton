@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Matrix Multiplication Tuning Scripts, Changed from the tutorial example "python/tutorials/03-matrix-multiplication.py"
 """
@@ -11,6 +12,7 @@ import sys
 import yaml
 import os
 import subprocess
+import pdb
 
 
 
@@ -63,9 +65,9 @@ def get_full_tuning_space(use_split_k):
                     for group_m in group_m_range:
                         if use_split_k:
                             for split_k in split_k_range:
-                                configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k}, num_stages=1, num_warps=num_warps))
+                                configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k}, num_stages=0, num_warps=num_warps))
                         else:
-                            configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m}, num_stages=1, num_warps=num_warps))
+                            configs.append(triton.Config({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m}, num_stages=0, num_warps=num_warps))
 
     return configs
 
@@ -387,6 +389,7 @@ def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     if isFp8: # convert fp8 to fp16 for ref input
+        print("fp8 is used---------")
         fp8_type = tl.float8e4
         f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
         f8_tensor = f8_tensor.to(torch.int8)
@@ -437,7 +440,7 @@ def run_bash_command(commandstring):
     return proc.stdout.splitlines()
 
 
-def parse_args():
+def parse_args(print_help_info = False):
     parser = argparse.ArgumentParser(
         prog="tune a specific gemm size",
         allow_abbrev=False,
@@ -448,17 +451,34 @@ def parse_args():
     parser.add_argument("-k", type=int, default=0)
     parser.add_argument("-dtype", type=str, default='fp16', help="Input data type, default is fp16")
     parser.add_argument("--specify_type", action='store_true', default=False, help="Whether user specify data type, default false")
-    parser.add_argument("--specify_size", action='store_true', default=False, help="Whether user specify input matrix size, default false")
+    parser.add_argument("--use_size_file", action='store_true', default=False, help="Whether user specify input matrix size")
     parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
-    parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
+    parser.add_argument("-gemm_size_file", type=str, help='yaml file to indicate matrix size')
     parser.add_argument("--rocprof", action='store_true', default=False, help='Use rocprof to measure kernel time, default uses do_bench()!')
     parser.add_argument("-v", action='store_true', default=False, help="Print out the best tuning config")
+    if print_help_info:
+        parser.print_help()
+
     args = parser.parse_args()
 
     return args
 
+
+def print_usage():
+    print("Usage: matrix size can be specified in two ways:")
+    print("     1) With \"--use_size_file\" option set, use --gemm_size_file for file of matrix sizes")
+    print("     2) Without \"--use_size_file\" option,  use -m, -n, and -k to specify matrix size (default mode)")
+    parse_args(True)
+
+
 def main():
     args = parse_args()
+
+    if ((args.use_size_file) and args.gemm_size_file is None) or \
+       (not args.use_size_file and (args.m is None or args.n is None or args.k is None)):
+        print_usage()
+        sys.exit(1)
+
     fp8a = False
     fp8b = False
     dtype = torch.float16
@@ -482,17 +502,11 @@ def main():
     verbose = args.v
 
     mnks = []
-    if args.specify_size:
-        M = args.m
-        N = args.n
-        K = args.k
-        if M == 0 or N == 0 or K == 0:
-            print(f"Input matrix size: (M {M}, N {N}, K {K}) contains dim size 0!")
-        mnks = [(M, N, K)]
-    else:
+    if args.use_size_file:
         matrix_size_file = args.gemm_size_file
         if matrix_size_file == "" or not os.path.isfile(matrix_size_file):
             print(f"Matrix size file: {matrix_size_file} does not exist!")
+            print_usage()
             sys.exit(1)
 
         with open(matrix_size_file) as file:
@@ -503,6 +517,14 @@ def main():
             N = sizes['N']
             K = sizes['K']
             mnks.append((M, N, K))
+    else:
+        M = args.m
+        N = args.n
+        K = args.k
+        if M == 0 or N == 0 or K == 0:
+            print(f"Input matrix size: (M {M}, N {N}, K {K}) contains dim size 0!")
+            print_usage()
+        mnks = [(M, N, K)]
 
     for (m, n, k) in mnks:
         min_ms = run_speed(m, n, k, dtype, fp8a, fp8b, 'triton')

@@ -59,7 +59,7 @@ struct NVVMMetadata {
 
 // Add the nvvm related metadata to LLVM IR.
 static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
-                          Target target) {
+                          Target target, const int threadsPerCTA) {
   auto *module = func->getParent();
   auto &ctx = func->getContext();
 
@@ -99,9 +99,6 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
           ->addOperand(llvm::MDNode::get(ctx, mdArgs));
     } break;
     case Target::ROCDL: {
-      const int numWarps = 4;
-      const int warpSize = 64;
-      const int threadsPerCTA = numWarps * warpSize;
       func->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
       func->addFnAttr("amdgpu-flat-work-group-size",
                       "1, " + std::to_string(threadsPerCTA));
@@ -334,7 +331,7 @@ translateLLVMToLLVMIR(llvm::LLVMContext *llvmContext, mlir::ModuleOp module,
   for (auto &func : llvmModule->functions()) {
     auto it = nvvmMetadata.find(func.getName());
     if (it != nvvmMetadata.end())
-      amendLLVMFunc(&func, it->second, target);
+      amendLLVMFunc(&func, it->second, target, threadsPerCTA);
   }
 
   return llvmModule;

@@ -17,7 +17,7 @@ import pdb
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = False
+tuning_full_space = True
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -389,7 +389,6 @@ def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     if isFp8: # convert fp8 to fp16 for ref input
-        print("fp8 is used---------")
         fp8_type = tl.float8e4
         f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
         f8_tensor = f8_tensor.to(torch.int8)

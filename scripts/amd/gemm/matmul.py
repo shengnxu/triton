@@ -17,7 +17,7 @@ import pdb
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = True
+tuning_full_space = False
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -407,7 +407,6 @@ def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
 
 
 def test_correctness(M, N, K, datatype, fp8a, fp8b):
-    torch.manual_seed(0)
     a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
     b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
 

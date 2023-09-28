@@ -613,13 +613,17 @@ MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   auto nonKDim = getNonKDim();
   auto elemsPerThreadPerTile = (nonKDim == 16 ? 4 : 16);
   if (getIsTransposed()) {
-    unsigned elemsCol = ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]) * elemsPerThreadPerTile;
+    unsigned elemsCol =
+        ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]) *
+        elemsPerThreadPerTile;
     unsigned elemsRow = ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]);
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
   } else {
     unsigned elemsCol = ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]);
-    unsigned elemsRow = ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]) * elemsPerThreadPerTile;
+    unsigned elemsRow =
+        ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]) *
+        elemsPerThreadPerTile;
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
   }

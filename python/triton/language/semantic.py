@@ -1281,6 +1281,11 @@ def gpu_matrix_core_version() -> int:
 def mfma_supported_granularity(m, n, k) -> bool:
     granularity_mn = 32
     granularity_k = 8
+    import os
+    if "MFMA_TYPE" in os.environ and os.environ["MFMA_TYPE"] == "16":
+        granularity_mn = 16
+        granularity_k = 16
+
     if m % granularity_mn != 0 or n % granularity_mn != 0:
         return False
     if k % granularity_k != 0:

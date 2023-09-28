@@ -433,7 +433,7 @@ def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
     return min_ms
 
 def run_bash_command(commandstring):
-    #print( commandstring )
+    # print( commandstring )
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout = subprocess.PIPE)
     return proc.stdout.splitlines()
 
@@ -541,7 +541,7 @@ def main():
             block_k = best_config.kwargs['BLOCK_SIZE_K']
             group_m = best_config.kwargs['GROUP_SIZE_M']
             split_k = best_config.kwargs['SPLIT_K'] if 'SPLIT_K' in best_config.kwargs.keys() else 1
-            # num_warps = best_config['num_warps']
+            num_stages = best_config.num_stages
             num_warps = best_config.num_warps
             driver = 'rocprof_gemm.py'
             TRITON_DIR = os.getenv('TRITON_DIR')
@@ -549,8 +549,8 @@ def main():
                 driver = os.path.join(TRITON_DIR, 'scripts/amd/gemm', driver)
             run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
-                        -group_m {group_m} -split_k {split_k} -num_warps {num_warps} \
-                        -dtype {dtype_str}'
+                        -group_m {group_m} -split_k {split_k} -num_stages {num_stages} \
+                        -num_warps {num_warps} -dtype {dtype_str}'
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 

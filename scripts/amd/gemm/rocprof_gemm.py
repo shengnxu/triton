@@ -219,7 +219,7 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_warps, activation=""):
+def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -253,7 +253,7 @@ def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_w
             GROUP_SIZE_M = group_m,
             SPLIT_K = split_k,
             num_warps = num_warps,
-            num_stages = 1,
+            num_stages = num_stages,
             ACTIVATION=activation,
             output_datatype=otype,
         )
@@ -273,7 +273,7 @@ def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_w
             BLOCK_SIZE_K = block_k,
             GROUP_SIZE_M = group_m,
             num_warps = num_warps,
-            num_stages = 1,
+            num_stages = num_stages,
             ACTIVATION=activation,
             output_datatype=otype,
         )
@@ -301,10 +301,10 @@ def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
     return input, input_f16
 
 
-def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_warps, dtype, fp8a, fp8b):
+def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype, fp8a, fp8b):
     a, a_f16 = gen_input(M, K, d_type=dtype, isFp8=fp8a, seed=10, device='cuda')
     b, b_f16 = gen_input(K, N, d_type=dtype, isFp8=fp8b, seed=11, device='cuda')
-    c = matmul(a, b, dtype, block_m, block_n, block_k, group_m, split_k, num_warps)
+    c = matmul(a, b, dtype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
 
     return c
 
@@ -328,6 +328,7 @@ def main(args=None):
     parser.add_argument("-group_m", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-split_k", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-num_warps", type=int, default=argparse.SUPPRESS)
+    parser.add_argument("-num_stages", type=int, default=argparse.SUPPRESS)
     parser.add_argument("-dtype", type=str, default='fp16', help="Input/output data type")
     parsed_args = parser.parse_args(args)
 
@@ -358,8 +359,9 @@ def main(args=None):
     block_k = parsed_args.block_k
     group_m = parsed_args.group_m
     split_k = parsed_args.split_k
+    num_stages = parsed_args.num_stages
     num_warps = parsed_args.num_warps
-    test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_warps, dtype, fp8a, fp8b)
+    test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype, fp8a, fp8b)
 
 
 if __name__ == '__main__':

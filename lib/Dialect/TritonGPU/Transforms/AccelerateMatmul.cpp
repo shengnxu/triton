@@ -160,10 +160,11 @@ public:
   /// @brief Choose MFMA instruction parameters
   /// @param dot target dot operation
   /// @param mfmaVersion
+  /// @param nonKDim
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
   std::pair<int64_t, int64_t> chooseMfmaDimensions(tt::DotOp dot,
-                                                   int mfmaVersion) const {
-    int64_t nonKDim = 16;
+                                                   int mfmaVersion,
+                                                   int64_t nonKDim) const {
     // number of matrix elements along k dim per one MFMA intruction
     int64_t kDim = -1;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
@@ -209,9 +210,6 @@ public:
         !oldRetType.getEncoding().isa<ttg::BlockedEncodingAttr>())
       return failure();
 
-<<<<<<< HEAD
-    if (!supportMFMA(dotOp))
-=======
     // TODO replace with nonKDim with some heuristic in chooseMfmaDimensions
     // function
     int64_t externalNonKDim = 32;
@@ -223,7 +221,6 @@ public:
     }
 
     if (!supportMFMA(dotOp, externalNonKDim))
->>>>>>> 75b418b85... fix format
       return failure();
 
     auto CTALayout = ttg::getCTALayout(oldRetType.getEncoding());
@@ -242,12 +239,8 @@ public:
 
     ttg::MfmaEncodingAttr mfmaEnc;
 
-<<<<<<< HEAD
-    auto [nonKDim, kDim] = chooseMfmaDimensions(dotOp, mfmaVersion);
-=======
     auto [nonKDim, kDim] =
         chooseMfmaDimensions(dotOp, mfmaVersion, externalNonKDim);
->>>>>>> 75b418b85... fix format
 
     auto warpsPerTile = warpsPerTileMI200(dotOp, retShape, numWarps);
 

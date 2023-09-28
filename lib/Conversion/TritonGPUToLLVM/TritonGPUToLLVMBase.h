@@ -610,7 +610,8 @@ public:
     assert(warpSize == 64);
     auto shapePerCta = getShapePerCTA(mfmaLayout);
     for (unsigned block = 0; block < numGroups; block++) {
-      unsigned rowOrColOffset = block * elemsPerThreadPerGroup * warpSize / nonKDim;
+      unsigned rowOrColOffset =
+          block * elemsPerThreadPerGroup * warpSize / nonKDim;
       for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
         if (mfmaLayout.getIsTransposed()) {
           offsets.push_back(

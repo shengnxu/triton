@@ -136,7 +136,9 @@ public:
   /// @param mfmaVersion
   /// @param nonKDim
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
-  std::pair<int64_t, int64_t> chooseMfmaDimensions(triton::DotOp dot, int mfmaVersion, int64_t nonKDim) const {
+  std::pair<int64_t, int64_t> chooseMfmaDimensions(triton::DotOp dot,
+                                                   int mfmaVersion,
+                                                   int64_t nonKDim) const {
     // number of matrix elements along k dim per one MFMA intruction
     int64_t kDim = -1;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
@@ -182,7 +184,8 @@ public:
         !oldRetType.getEncoding().isa<triton::gpu::BlockedEncodingAttr>())
       return failure();
 
-    // TODO replace with nonKDim with some heuristic in chooseMfmaDimensions function
+    // TODO replace with nonKDim with some heuristic in chooseMfmaDimensions
+    // function
     int64_t externalNonKDim = 32;
 
     const char *mfmaType = std::getenv("MFMA_TYPE");
@@ -208,7 +211,8 @@ public:
 
     triton::gpu::MfmaEncodingAttr mfmaEnc;
 
-    auto [nonKDim, kDim] = chooseMfmaDimensions(dotOp, mfmaVersion, externalNonKDim);
+    auto [nonKDim, kDim] =
+        chooseMfmaDimensions(dotOp, mfmaVersion, externalNonKDim);
 
     auto warpsPerTile = warpsPerTileMI200(dotOp, retShape, numWarps);
 
@@ -238,7 +242,7 @@ public:
     auto kWidth = kDim;
     // in mfma 32x32 case argument matrix groups elements in 2 groups
     // in mfma 16x16 case argument matrix groups elements in 4 groups
-    if (nonKDim == 32){
+    if (nonKDim == 32) {
       kWidth /= 2;
     } else {
       assert(nonKDim == 16);

@@ -136,7 +136,8 @@ struct DotOpMFMAConversionHelper {
       if ((nonKDim == 32 && kWidth == 4) || (nonKDim == 16 && kWidth == 4)) {
         return MatrixCoreType::FP32_BF16_BF16_FP32_1K;
       } else {
-        assert((nonKDim == 32 && kWidth == 2) || (nonKDim == 16 && kWidth == 2));
+        assert((nonKDim == 32 && kWidth == 2) ||
+               (nonKDim == 16 && kWidth == 2));
         return MatrixCoreType::FP32_BF16_BF16_FP32;
       }
     }
@@ -211,9 +212,10 @@ struct DotOpMFMAConversionHelper {
         }
 
         for (size_t k = 0; k < numRepK; k++) {
-          acc = mfmaLayout.getIsTransposed()
-                    ? generateMFMAOp(mfmaInstrDescr, hb[{n, k}], ha[{m, k}], acc)
-                    : generateMFMAOp(mfmaInstrDescr, ha[{m, k}], hb[{n, k}], acc);
+          acc =
+              mfmaLayout.getIsTransposed()
+                  ? generateMFMAOp(mfmaInstrDescr, hb[{n, k}], ha[{m, k}], acc)
+                  : generateMFMAOp(mfmaInstrDescr, ha[{m, k}], hb[{n, k}], acc);
         }
         for (unsigned v = 0; v < elemsPerVec; ++v) {
           fc[m * numRepN * elemsPerVec + n * elemsPerVec + v] =

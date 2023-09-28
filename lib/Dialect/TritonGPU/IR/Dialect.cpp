@@ -704,11 +704,13 @@ SmallVector<int64_t>
 DotOperandEncodingAttr::getMFMAElemsPerInstr() const {
   auto mfmaEncoding = getParent().cast<MfmaEncodingAttr>();
   int64_t nonKDim = mfmaEncoding.getNonKDim();
-  int64_t kDim = getKWidth();
+  assert(nonKDim == 32 || nonKDim == 16);
+  int64_t kWidth = getKWidth();
+  int64_t kDim = kWidth * (nonKDim == 32 ? 2 : 4);
   if (getOpIdx() == 0)
-    return {nonKDim, kDim*2};
+    return {nonKDim, kDim};
   else
-    return {kDim*2, nonKDim};
+    return {kDim, nonKDim};
 }
 
 SmallVector<int64_t>

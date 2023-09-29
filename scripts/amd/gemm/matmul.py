@@ -297,7 +297,7 @@ def test_correctness(M, N, K, datatype, fp8a, fp8b):
     torch_output = torch.matmul(a_f16, b_f16)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
-    rtol = 0 if torch.version.hip is None else 2e-2
+    rtol = 0 if torch.version.hip is None else 1e-2
     size_str = f'size, (M: {M}, N: {N}, K: {K})'
     if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
         print(f'✅ Triton and Torch match for {size_str}')

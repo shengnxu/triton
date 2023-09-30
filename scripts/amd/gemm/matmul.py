@@ -11,11 +11,12 @@ import sys
 import yaml
 import os
 import subprocess
+from torch.testing import assert_close
 
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = False
+tuning_full_space = True
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -33,12 +34,16 @@ def prune_configs(configs, named_args):
         BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K =\
             kw["BLOCK_SIZE_M"], kw["BLOCK_SIZE_N"], kw["BLOCK_SIZE_K"]
         SPLIT_K = kw["SPLIT_K"]
-        if SIZE_M <=32 and BLOCK_SIZE_M != 32:
+        GROUP_M = kw["GROUP_SIZE_M"]
+        if SIZE_M < BLOCK_SIZE_M and BLOCK_SIZE_M != 16:
             continue
-        if SIZE_N <=32 and BLOCK_SIZE_N != 32:
+        if SIZE_N < BLOCK_SIZE_N and BLOCK_SIZE_N != 16:
             continue
         # skip large split_k when not necessary
         if SPLIT_K != 1 and not need_split_k(SIZE_M, SIZE_N, SIZE_K):
+            continue
+        # skip large GROUP_M
+        if GROUP_M * BLOCK_SIZE_M > SIZE_M:
             continue
         pruned_configs.append(config)
 
@@ -50,9 +55,9 @@ def get_full_tuning_space(use_split_k):
     if not tuning_full_space:
         return configs
 
-    block_mn_range = [32, 64, 128]
-    block_k_range = [32, 64]
-    split_k_range = [1, 2, 4, 5, 8, 10]
+    block_mn_range = [16, 32, 64]
+    block_k_range = [16, 32, 64, 128]
+    split_k_range = [1, 2, 4, 6, 8, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8]
     # For now we see better perf with num_stages=0 for all gemm configs we care
@@ -214,7 +219,7 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, activation=""):
+def matmul(a, b, c, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -222,7 +227,6 @@ def matmul(a, b, activation=""):
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -244,18 +248,40 @@ def get_best_config(M, N, K):
     best_config = matmul_kernel_splitK.get_best_config(M = M, N = N, K = K)
     return best_config
 
+def get_variant_golden(a, b):
+    SIZE_M = a.shape[0]
+    SIZE_K = a.shape[1]
+    SIZE_N = b.shape[1]
+    assert a.shape[1] == b.shape[0]
+    zero_M_K = torch.zeros((SIZE_M, SIZE_K)).cuda()
+    zero_3M_K = torch.zeros((3 * SIZE_M, SIZE_K)).cuda()
+    zero_K_N = torch.zeros((SIZE_K, SIZE_N)).cuda()
+    zero_3K_N = torch.zeros((3 * SIZE_K, SIZE_N)).cuda()
+    a_padded = torch.cat((a, zero_M_K, zero_M_K), 0)
+    a_padded = torch.cat((a_padded, zero_3M_K, zero_3M_K), 1)
+    b_padded = torch.cat((b, zero_K_N, zero_K_N), 0)
+    b_padded = torch.cat((b_padded, zero_3K_N, zero_3K_N), 1)
+    c_padded = torch.matmul(a_padded, b_padded)
+    return c_padded[:SIZE_M, :SIZE_N]
 
 def test_correctness(M, N, K, datatype = torch.float16):
     torch.manual_seed(0)
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
-    triton_output = matmul(a, b)
-    torch_output = torch.matmul(a, b)
-    print(f"triton_output={triton_output}")
-    print(f"torch_output={torch_output}")
-    rtol = 0 if torch.version.hip is None else 1e-2
-    size_str = f'size, (M: {M}, N: {N}, K: {K})'
-    if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
+    c = torch.zeros((M, N), device=a.device, dtype=torch.float32)
+    triton_output = matmul(a, b, c)
+    golden = torch.matmul(a, b)
+    # It's not easy to get a proper error threshold in different size
+    # Here the gemm calculation is padded to a different size in order to get
+    # a variant version of the golden result. And the error between golden and
+    # golden_variant provide reference on selecting the proper rtol / atol.
+    golden_variant = get_variant_golden(a, b)
+    golden_diff = golden - golden_variant
+    golden_abs_err = torch.max(torch.abs(golden_diff)).item()
+    golden_rel_err = torch.max(torch.abs(golden_diff / golden)).item()
+
+    torch.set_printoptions(profile="full")
+    if assert_close(c, golden, rtol=max(1e-4, 1.5 * golden_rel_err), atol=max(1e-4, 1.5 * golden_abs_err), check_dtype=False):
         print(f'✅ Triton and Torch match for {size_str}')
     else:
         print(f'❌ Triton and Torch differ for {size_str}')
@@ -264,11 +290,12 @@ def test_correctness(M, N, K, datatype = torch.float16):
 def run_speed(M, N, K, datatype, use_rocprof, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
+    c = torch.zeros((M, N), device=a.device, dtype=torch.float32)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):

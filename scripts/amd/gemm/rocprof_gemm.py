@@ -39,12 +39,16 @@ def matmul_kernel_splitK(
     pid_z = tl.program_id(1)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    if GROUP_SIZE_M == 1:
+        pid_m = pid // num_pid_n
+        pid_n = pid % num_pid_n
+    else:
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + (pid % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
 
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
@@ -53,7 +57,10 @@ def matmul_kernel_splitK(
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
     # See above `Pointer Arithmetics` section for details
-    offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+    if SPLIT_K == 1:
+        offs_k = tl.arange(0, BLOCK_SIZE_K)
+    else:
+        offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
     if torch.version.hip is None:
         offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
         offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
@@ -215,7 +222,7 @@ def matmul(a, b, block_m, block_n, block_k, group_m, split_k, num_warps, activat
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.empty((M, N), device=a.device, dtype=torch.float32)
     # 1D launch kernel where each block gets its own program.
 
     if need_split_k(M, N, K):

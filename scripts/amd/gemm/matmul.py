@@ -257,7 +257,7 @@ def test_correctness(M, N, K, datatype = torch.float16):
         print(f'❌ Triton and Torch differ for {size_str}')
 
 
-def run_speed(M, N, K, datatype, use_rocprof, provider):
+def run_speed(M, N, K, datatype, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     quantiles = [0.5, 0.2, 0.8]
@@ -334,7 +334,7 @@ def main():
 
 
     for (m, n, k) in mnks:
-        min_ms = run_speed(m, n, k, dtype, use_rocprof, 'triton')
+        min_ms = run_speed(m, n, k, dtype, 'triton')
 
         # function to compute flops
         perf_flops = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
@@ -352,6 +352,7 @@ def main():
             split_k = best_config.kwargs['SPLIT_K']
             # num_warps = best_config['num_warps']
             num_warps = best_config.num_warps
+            num_stages = best_config.num_stages
             driver = 'rocprof_gemm.py'
             TRITON_DIR = os.getenv('TRITON_DIR')
             if TRITON_DIR is not None:
@@ -359,7 +360,7 @@ def main():
             run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
                         -group_m {group_m} -split_k {split_k} -num_warps {num_warps} \
-                        -dtype {dtype_str}'
+                        -num_stages {num_stages} -dtype {dtype_str}'
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 

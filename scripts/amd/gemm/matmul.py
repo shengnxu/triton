@@ -56,7 +56,7 @@ def get_full_tuning_space(use_split_k):
 
     block_mn_range = [32, 64, 128]
     block_k_range = [32, 64]
-    split_k_range = [1, 2, 4, 5, 8, 10]
+    split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8]
     # For now we see better perf with num_stages=0 for all gemm configs we care

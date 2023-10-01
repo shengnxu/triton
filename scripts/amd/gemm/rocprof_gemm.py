@@ -122,15 +122,13 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, activation=""):
+def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -160,9 +158,9 @@ def matmul(a, b, block_m, block_n, block_k, group_m, split_k, num_warps, num_sta
 def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, dtype):
     a = torch.randn((M, K), device='cuda', dtype=dtype)
     b = torch.randn((K, N), device='cuda', dtype=dtype)
-    c = matmul(a, b, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages)
-
-    return c
+    # Allocates output.
+    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    return matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages)
 
 
 def main(args=None):

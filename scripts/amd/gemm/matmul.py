@@ -42,7 +42,7 @@ def prune_configs(configs, named_args):
         if SPLIT_K != 1 and not need_split_k(SIZE_M, SIZE_N, SIZE_K):
             continue
         # skip large GROUP_M
-        if GROUP_M * BLOCK_SIZE_M > SIZE_M:
+        if GROUP_M * BLOCK_SIZE_M > SIZE_M and GROUP_M != 1:
             continue
         pruned_configs.append(config)
 
@@ -218,15 +218,13 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, activation=""):
+def matmul(a, b, c, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -253,7 +251,9 @@ def test_correctness(M, N, K, datatype = torch.float16):
     torch.manual_seed(0)
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
-    triton_output = matmul(a, b)
+    # Allocates output.
+    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    triton_output = matmul(a, b, c)
     torch_output = torch.matmul(a, b)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
@@ -268,11 +268,13 @@ def test_correctness(M, N, K, datatype = torch.float16):
 def run_speed(M, N, K, datatype, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
+    # Allocates output.
+    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):

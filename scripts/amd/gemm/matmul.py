@@ -41,6 +41,11 @@ def prune_configs(configs, named_args):
         # skip large split_k when not necessary
         if SPLIT_K != 1 and not need_split_k(SIZE_M, SIZE_N, SIZE_K):
             continue
+        # skip split_k that leads to EVEN_K = false
+        leap = SPLIT_K * BLOCK_SIZE_K
+        modv = SIZE_K % leap
+        if modv != 0:
+            continue
         # skip large GROUP_M
         if GROUP_M * BLOCK_SIZE_M > SIZE_M and GROUP_M != 1:
             continue
@@ -252,7 +257,7 @@ def test_correctness(M, N, K, datatype = torch.float16):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     triton_output = matmul(a, b, c)
     torch_output = torch.matmul(a, b)
     print(f"triton_output={triton_output}")
@@ -269,7 +274,7 @@ def run_speed(M, N, K, datatype, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)

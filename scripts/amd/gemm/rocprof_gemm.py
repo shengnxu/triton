@@ -159,7 +159,7 @@ def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_warps, n
     a = torch.randn((M, K), device='cuda', dtype=dtype)
     b = torch.randn((K, N), device='cuda', dtype=dtype)
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     return matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages)
 
 

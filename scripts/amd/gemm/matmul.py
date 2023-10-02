@@ -379,7 +379,7 @@ def main():
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 
-            parse_result_cmd = f'sed -n \'/matmul_kernel/p\' results.stats.csv | awk -F \',\' \'{{print $4}}\''
+            parse_result_cmd = f'sed -n \'/matmul_kernel/p\' results.csv | awk -F \',\' \'{{print $NF}}\' | tail -n1'
             parse_outputs = run_bash_command(parse_result_cmd)
             min_ms = int(parse_outputs[0]) / 1000000
 

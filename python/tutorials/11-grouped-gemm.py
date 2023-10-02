@@ -35,7 +35,7 @@ import triton.language as tl
                 'BLOCK_SIZE_M': 128,
                 'BLOCK_SIZE_N': 128,
                 'BLOCK_SIZE_K': 32,
-                'NUM_SM': 84,
+                'NUM_SM': 110,
             }
         ),
         triton.Config(
@@ -43,7 +43,7 @@ import triton.language as tl
                 'BLOCK_SIZE_M': 128,
                 'BLOCK_SIZE_N': 128,
                 'BLOCK_SIZE_K': 32,
-                'NUM_SM': 128,
+                'NUM_SM': 220,
             }
         ),
         triton.Config(
@@ -51,7 +51,7 @@ import triton.language as tl
                 'BLOCK_SIZE_M': 64,
                 'BLOCK_SIZE_N': 64,
                 'BLOCK_SIZE_K': 32,
-                'NUM_SM': 84,
+                'NUM_SM': 110,
             }
         ),
         triton.Config(
@@ -59,7 +59,15 @@ import triton.language as tl
                 'BLOCK_SIZE_M': 64,
                 'BLOCK_SIZE_N': 64,
                 'BLOCK_SIZE_K': 32,
-                'NUM_SM': 128,
+                'NUM_SM': 220,
+            }
+        ),
+        triton.Config(
+            {
+                'BLOCK_SIZE_M': 32,
+                'BLOCK_SIZE_N': 32,
+                'BLOCK_SIZE_K': 32,
+                'NUM_SM': 330,
             }
         ),
     ],

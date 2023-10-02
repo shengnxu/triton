@@ -9,8 +9,8 @@ import subprocess
 def get_full_tuning_space():
     configs = []
 
-    block_mn_range = [32, 64, 128]
-    block_k_range = [32, 64]
+    block_mn_range = [16, 32, 64, 128]
+    block_k_range = [16, 32, 64, 128]
     split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8]
@@ -30,6 +30,7 @@ def get_full_tuning_space():
 
     return configs
 
+
 def prune_configs(M, N, K, configs):
 
     pruned_configs = []
@@ -38,9 +39,9 @@ def prune_configs(M, N, K, configs):
             config.get("BLOCK_SIZE_M"), config.get("BLOCK_SIZE_N"), config.get("BLOCK_SIZE_K")
         SPLIT_K = config.get("SPLIT_K")
         GROUP_M = config.get("GROUP_SIZE_M")
-        if M <=32 and BLOCK_SIZE_M != 32:
+        if M <= 16 and BLOCK_SIZE_M != 16:
             continue
-        if N <=32 and BLOCK_SIZE_N != 32:
+        if N <= 16 and BLOCK_SIZE_N != 16:
             continue
         # skip large split_k when not necessary
         if SPLIT_K != 1 and not need_split_k(M, N, K):
@@ -57,8 +58,10 @@ def prune_configs(M, N, K, configs):
 
     return pruned_configs
 
+
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
+
 
 def run_bash_command(commandstring):
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout = subprocess.PIPE)
@@ -102,9 +105,25 @@ def tune_gemm_config(M, N, K):
     return minTime, bestConfig
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        prog="tune a specific gemm size",
+        allow_abbrev=False,
+    )
+
+    parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
+    args = parser.parse_args()
+
+    return args
+
 def main():
+    args = parse_args()
+    matrix_size_file = args.gemm_size_file
+    if matrix_size_file == "" or not os.path.isfile(matrix_size_file):
+        print(f"Matrix size file: {matrix_size_file} does not exist!")
+        sys.exit(1)
     mnks = []
-    with open('toy-gemm-sizes.yaml') as file:
+    with open(matrix_size_file) as file:
         matrix_sizes = yaml.safe_load(file)
     for sizes in matrix_sizes:
         M = sizes['M']

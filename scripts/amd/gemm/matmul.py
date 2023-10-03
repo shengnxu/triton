@@ -317,7 +317,6 @@ def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
     return min_ms
 
 def run_bash_command(commandstring):
-    # print( commandstring )
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout = subprocess.PIPE)
     return proc.stdout.splitlines()
 

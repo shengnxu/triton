@@ -68,8 +68,7 @@ def run_bash_command(commandstring):
     return proc.stdout.splitlines()
 
 
-def tune_gemm_config(M, N, K):
-    configs = get_full_tuning_space()
+def tune_gemm_config(M, N, K, configs):
     #print(len(configs))
     pruned_configs = prune_configs(M, N, K, configs)
     #print(f"Tuning GEMM (M: {M}, N: {N}, K: {K}) with {len(pruned_configs)} configs")
@@ -100,7 +99,7 @@ def tune_gemm_config(M, N, K):
         if min_us < minTime:
             minTime = min_us
             bestConfig = config
-        #print(f"index {index}/{len(pruned_configs)}: time: {min_us}, bestTime: {minTime}")
+        print(f"index {index}/{len(pruned_configs)}: time: {min_us}, bestTime: {minTime}")
         index = index + 1
     return minTime, bestConfig
 
@@ -125,6 +124,8 @@ def main():
     mnks = []
     with open(matrix_size_file) as file:
         matrix_sizes = yaml.safe_load(file)
+
+    configs_full = get_full_tuning_space()
     for sizes in matrix_sizes:
         M = sizes['M']
         N = sizes['N']
@@ -132,7 +133,7 @@ def main():
         mnks.append((M, N, K))
 
     for (M, N, K) in mnks:
-        minTime, bestConfig = tune_gemm_config(M, N, K)
+        minTime, bestConfig = tune_gemm_config(M, N, K, configs_full)
         perf_flops = lambda us: 2 * M * N * K * 1e-12 / (us)
         out_str = f'SIZE: {M},{N},{K} '
         print(f'{out_str} TFLOPS: {perf_flops(minTime)} time(us): {minTime} {bestConfig}')

@@ -285,7 +285,7 @@ def main():
         minTime, bestConfig = tune_gemm_config(M, N, K, pruned_configs)
 
         ## post processing the numbers
-        perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us)
+        perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us * 1e-6)
         tri_tflops = perf_tflops(minTime)
         if tri_tflops < 0.0001:
             formatted_tflops = "{:.3e}".format(tri_tflops)

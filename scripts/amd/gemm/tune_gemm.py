@@ -5,6 +5,12 @@ import os
 import glob
 import subprocess
 
+import torch
+import triton
+import triton.language as tl
+
+from matmul_kernel import matmul_kernel
+
 
 def get_full_tuning_space():
     configs = []
@@ -84,7 +90,7 @@ def run_bash_command(commandstring):
     return proc.stdout.splitlines()
 
 
-def gen_kernel_and_configStr_from_config(M, N, K, config):
+def read_config(config):
     block_m = config.get('BLOCK_SIZE_M')
     block_n = config.get('BLOCK_SIZE_N')
     block_k = config.get('BLOCK_SIZE_K')
@@ -92,6 +98,11 @@ def gen_kernel_and_configStr_from_config(M, N, K, config):
     split_k = config.get('SPLIT_K')
     num_warps = config.get('num_warps')
     num_stages = config.get('num_stages')
+    return block_m, block_n, block_k, group_m, split_k, num_warps, num_stages
+
+
+def gen_kernel_and_configStr_from_config(M, N, K, config):
+    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages = read_config(config)
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}"
 
     matmul_def_str = f"""
@@ -149,12 +160,14 @@ import multiprocessing
 
     ### write definitions of matmul_kernel_xxx
     ### and matmul_xxx and try_config
-    with open("matmul.kernel") as file:
+    with open("matmul_kernel.py") as file:
         matmul_kernel_code = file.read();
     for config in configs:
         configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, config)
         ## Copy the matmul_kernel with name replaced
         matmul_kernel_config = matmul_kernel_code.replace("matmul_kernel", f"matmul_kernel_{configStr}")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton.language as tl", "")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton", "")
         f_kernel.write(matmul_kernel_config + "\n\n")
         f_kernel.write(matmul_def_str + "\n")
 
@@ -235,6 +248,58 @@ def tune_gemm_config(M, N, K, configs):
     return minTime, bestConfig
 
 
+def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages):
+    # Check constraints.
+    assert a.shape[1] == b.shape[0], "Incompatible dimensions"
+    assert a.is_contiguous(), "Matrix A must be contiguous"
+    assert b.is_contiguous(), "Matrix B must be contiguous"
+    M, K = a.shape
+    K, N = b.shape
+    # 1D launch kernel where each block gets its own program.
+
+    grid = lambda META: (
+        triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
+        META['SPLIT_K']
+    )
+    matmul_kernel[grid](
+        a, b, c,
+        M, N, K,
+        a.stride(0), a.stride(1),
+        b.stride(0), b.stride(1),
+        c.stride(0), c.stride(1),
+        BLOCK_SIZE_M = block_m,
+        BLOCK_SIZE_N = block_n,
+        BLOCK_SIZE_K = block_k,
+        GROUP_SIZE_M = group_m,
+        SPLIT_K = split_k,
+        num_warps = num_warps,
+        num_stages = num_stages,
+    )
+    return c
+
+
+def test_correctness(M, N, K, config, verbose, datatype = torch.float16):
+    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages = read_config(config)
+
+    torch.manual_seed(0)
+    a = torch.randn((M, K), device='cuda', dtype=datatype)
+    b = torch.randn((K, N), device='cuda', dtype=datatype)
+    # Allocates output.
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
+    triton_output = matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages)
+    torch_output = torch.matmul(a, b)
+    #print(f"triton_output={triton_output}")
+    #print(f"torch_output={torch_output}")
+    rtol = 0 if torch.version.hip is None else 1e-2
+    size_str = ''
+    if verbose:
+        size_str = f'SIZE M: {M}, N: {N}, K: {K} '
+    if torch.allclose(triton_output, torch_output, atol=1e-1, rtol=rtol):
+        print(f'{size_str}✅')
+    else:
+        print(f'{size_str}❌')
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="tune a specific gemm size",
@@ -245,7 +310,10 @@ def parse_args():
     parser.add_argument("-n", type=int, default=0)
     parser.add_argument("-k", type=int, default=0)
     parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
-    parser.add_argument("--clean", action='store_true', default=False, help='remove generated files')
+    parser.add_argument("--tuning_results_file", type=str, default="tuning_results.yaml", help='yaml file to store tuning results')
+    parser.add_argument("--keep", action='store_true', default=False, help='keep generated files')
+    parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
+    parser.add_argument("--compare_wo_tuning", action='store_true', default=False, help="Whether check result correctness")
     args = parser.parse_args()
 
     return args
@@ -254,7 +322,8 @@ def parse_args():
 def main():
     args = parse_args()
     matrix_size_file = args.gemm_size_file
-    needClean = args.clean
+    tuning_output_file = args.tuning_results_file
+    keepTmp = args.keep
 
     mnks = []
     ## TODO: make it more robust to get user input
@@ -272,8 +341,21 @@ def main():
             K = sizes['K']
             mnks.append((M, N, K))
 
+    ## Check correctness from given configs
+    if args.compare_wo_tuning:
+        for item in matrix_sizes:
+            M = item['M']
+            N = item['N']
+            K = item['K']
+            del item['M']
+            del item['N']
+            del item['K']
+            test_correctness(M, N, K, item, True)
+        return
+
     configs_full = get_full_tuning_space()
 
+    f_results = open(tuning_output_file, 'w')
     for (M, N, K) in mnks:
         ## Obtain a pruned tuning space according to gemm size
         pruned_configs = prune_configs(M, N, K, configs_full)
@@ -294,13 +376,28 @@ def main():
         print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ")
 
         bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, bestConfig)
-        print(f'best_config: {bestConfig_compact_str}')
+        print(f'best_config: {bestConfig_compact_str}', end=" ")
+
+        ## write best config to tuning_results.yaml
+        sizeDict = {'M': M, 'N': N, 'K': K}
+        sizeDict.update(bestConfig)
+        f_results.write("- " + str(sizeDict) + " ")
+        f_results.write(f'# TFLOPS: {formatted_tflops} time(us): {minTime:.2f}\n')
 
         ## remove generated files if asked to
-        if needClean:
+        if not keepTmp:
             os.remove(f"generated_kernel{M}{N}{K}.py")
             for f in glob.glob("results.*"):
                 os.remove(f)
+
+        ## Check correctness if asked to
+        if args.compare:
+            print("correctness: ", end=" ")
+            test_correctness(M, N, K, bestConfig, False)
+        else:
+            print("")
+
+    f_results.close()
 
 
 if __name__ == '__main__':

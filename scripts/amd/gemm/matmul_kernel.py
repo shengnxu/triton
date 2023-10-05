@@ -1,3 +1,6 @@
+import triton
+import triton.language as tl
+
 @triton.jit
 def matmul_kernel(
     a_ptr, b_ptr, c_ptr,

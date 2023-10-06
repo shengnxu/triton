@@ -70,12 +70,16 @@ public:
     if (!cvtOp)
       return mlir::failure();
 
-    if (!cvtOp.getSrc()
-             .getType()
-             .cast<RankedTensorType>()
-             .getEncoding()
-             .isa<triton::gpu::MmaEncodingAttr>())
+    auto encoding =
+        cvtOp.getSrc().getType().cast<RankedTensorType>().getEncoding();
+
+#ifdef USE_ROCM
+    if (!encoding.isa<triton::gpu::MfmaEncodingAttr>())
       return mlir::failure();
+#else
+    if (!encoding.isa<triton::gpu::MmaEncodingAttr>())
+      return mlir::failure();
+#endif
 
     if (!cvtOp.getResult().hasOneUse())
       return mlir::failure();

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Matrix Multiplication Tuning Scripts, Changed from the tutorial example "python/tutorials/03-matrix-multiplication.py"
 """
@@ -11,6 +12,7 @@ import sys
 import yaml
 import os
 import subprocess
+import pdb
 
 
 
@@ -37,15 +39,21 @@ def prune_configs(configs, named_args):
             continue
         if SIZE_N <=32 and BLOCK_SIZE_N != 32:
             continue
+        if BLOCK_SIZE_M * BLOCK_SIZE_K / config.num_warps / 64 <= 2:
+            continue
+        if BLOCK_SIZE_N * BLOCK_SIZE_K / config.num_warps / 64 <= 2:
+            continue
+
         # skip large split_k when not necessary
         if SPLIT_K != 1 and not need_split_k(SIZE_M, SIZE_N, SIZE_K):
             continue
+
         pruned_configs.append(config)
 
     return pruned_configs
 
 
-def get_full_tuning_space(use_split_k):
+def get_full_tuning_space():
     configs = []
     if not tuning_full_space:
         return configs
@@ -78,19 +86,20 @@ def get_full_tuning_space(use_split_k):
 #   - An auto-tuning *key* whose change in values will trigger evaluation of all the
 #       provided configs
 @triton.autotune(
-    configs= get_full_tuning_space(True) if tuning_full_space else [
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=4),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=1),
+    configs= get_full_tuning_space() if tuning_full_space else [
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=0, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 1}, num_stages=0, num_warps=1),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=0, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=0, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=0, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=0, num_warps=1),
     ],
     key=['M', 'N', 'K'],
     prune_configs_by={
@@ -103,7 +112,7 @@ def get_full_tuning_space(use_split_k):
     'EVEN_K': lambda args: args['K'] % (args['BLOCK_SIZE_K'] * args['SPLIT_K']) == 0,
 })
 @triton.jit
-def matmul_kernel_splitK(
+def matmul_kernel(
     # Pointers to matrices
     a_ptr, b_ptr, c_ptr,
     # Matrix dimensions
@@ -114,11 +123,12 @@ def matmul_kernel_splitK(
     stride_am, stride_ak,
     stride_bk, stride_bn,
     stride_cm, stride_cn,
+    ACTIVATION: tl.constexpr,
+    output_datatype: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    ACTIVATION: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -149,6 +159,7 @@ def matmul_kernel_splitK(
         offs_k = tl.arange(0, BLOCK_SIZE_K)
     else:
         offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+
     if torch.version.hip is None:
         offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
         offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
@@ -185,7 +196,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    c = accumulator.to(output_datatype)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -206,47 +217,84 @@ def leaky_relu(x):
     return tl.where(x >= 0, x, 0.01 * x)
 
 
+# convert fp8 to fp16 for testing
+@triton.jit
+def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    input = tl.load(input_ptr + offsets, mask=mask)
+    output = input
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, activation=""):
+def matmul(a, b, output_type, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
-    assert a.is_contiguous(), "Matrix A must be contiguous"
-    assert b.is_contiguous(), "Matrix B must be contiguous"
+    # assert a.is_contiguous(), "Matrix A must be contiguous"
+    # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=output_type)
     # 1D launch kernel where each block gets its own program.
+    otype = tl.float32
+    if output_type == torch.float16:
+        otype = tl.float16
+    elif output_type == torch.bfloat16:
+        otype = tl.bfloat16
 
-    grid_splitK = lambda META: (
+    grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
-    matmul_kernel_splitK[grid_splitK](
+    matmul_kernel[grid](
         a, b, c,
         M, N, K,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
-        ACTIVATION=activation
+        ACTIVATION=activation,
+        output_datatype=otype,
     )
 
     return c
 
+
 def get_best_config(M, N, K):
-    best_config = matmul_kernel_splitK.get_best_config(M = M, N = N, K = K)
+    best_config = matmul_kernel.get_best_config(M = M, N = N, K = K)
     return best_config
 
 
-def test_correctness(M, N, K, datatype = torch.float16):
-    torch.manual_seed(0)
-    a = torch.randn((M, K), device='cuda', dtype=datatype)
-    b = torch.randn((K, N), device='cuda', dtype=datatype)
-    triton_output = matmul(a, b)
-    torch_output = torch.matmul(a, b)
+def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    if isFp8: # convert fp8 to fp16 for ref input
+        fp8_type = tl.float8e4
+        f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
+        f8_tensor = f8_tensor.to(torch.int8)
+        # keep only two bits of exponent to avoid overflow
+        f8_tensor = f8_tensor & 0b00111111
+        input = triton.reinterpret(f8_tensor, fp8_type)
+        input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        n_elements = f8_tensor.numel()
+        copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
+    else: # other data type
+        input = torch.randn((M, N), dtype=d_type, device=device)
+        input_f16 = input
+    return input, input_f16
+
+
+def test_correctness(M, N, K, datatype, fp8a, fp8b):
+    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+
+    triton_output = matmul(a, b, output_type=datatype)
+    torch_output = torch.matmul(a_f16, b_f16)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
@@ -257,23 +305,23 @@ def test_correctness(M, N, K, datatype = torch.float16):
         print(f'❌ Triton and Torch differ for {size_str}')
 
 
-def run_speed(M, N, K, datatype, use_rocprof, provider):
-    a = torch.randn((M, K), device='cuda', dtype=datatype)
-    b = torch.randn((K, N), device='cuda', dtype=datatype)
+def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
+    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, output_type=datatype), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):
-    #print( commandstring )
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout = subprocess.PIPE)
     return proc.stdout.splitlines()
 
 
-def parse_args():
+def parse_args(print_help_info = False):
     parser = argparse.ArgumentParser(
         prog="tune a specific gemm size",
         allow_abbrev=False,
@@ -284,20 +332,45 @@ def parse_args():
     parser.add_argument("-k", type=int, default=0)
     parser.add_argument("-dtype", type=str, default='fp16', help="Input data type, default is fp16")
     parser.add_argument("--specify_type", action='store_true', default=False, help="Whether user specify data type, default false")
-    parser.add_argument("--specify_size", action='store_true', default=False, help="Whether user specify input matrix size, default false")
+    parser.add_argument("--use_size_file", action='store_true', default=False, help="Whether user specify input matrix size")
     parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
-    parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
+    parser.add_argument("-gemm_size_file", type=str, help='yaml file to indicate matrix size')
     parser.add_argument("--rocprof", action='store_true', default=False, help='Use rocprof to measure kernel time, default uses do_bench()!')
     parser.add_argument("-v", action='store_true', default=False, help="Print out the best tuning config")
+    if print_help_info:
+        parser.print_help()
+
     args = parser.parse_args()
 
     return args
 
+
+def print_usage():
+    print("Usage: matrix size can be specified in two ways:")
+    print("     1) With \"--use_size_file\" option set, use --gemm_size_file for file of matrix sizes")
+    print("     2) Without \"--use_size_file\" option,  use -m, -n, and -k to specify matrix size (default mode)")
+    parse_args(True)
+
+
 def main():
     args = parse_args()
+
+    if ((args.use_size_file) and args.gemm_size_file is None) or \
+       (not args.use_size_file and (args.m is None or args.n is None or args.k is None)):
+        print_usage()
+        sys.exit(1)
+
+    fp8a = False
+    fp8b = False
     dtype = torch.float16
     if args.specify_type:
-        if args.dtype == 'fp16':
+        if args.dtype == "fp8a":
+            fp8a = True
+            dtype = torch.float16
+        elif args.dtype == 'fp8b':
+            fp8b = True
+            dtype = torch.float16
+        elif args.dtype == 'fp16':
             dtype = torch.float16
         elif args.dtype == 'fp32':
             dtype = torch.float32
@@ -310,17 +383,11 @@ def main():
     verbose = args.v
 
     mnks = []
-    if args.specify_size:
-        M = args.m
-        N = args.n
-        K = args.k
-        if M == 0 or N == 0 or K == 0:
-            print(f"Input matrix size: (M {M}, N {N}, K {K}) contains dim size 0!")
-        mnks = [(M, N, K)]
-    else:
+    if args.use_size_file:
         matrix_size_file = args.gemm_size_file
         if matrix_size_file == "" or not os.path.isfile(matrix_size_file):
             print(f"Matrix size file: {matrix_size_file} does not exist!")
+            print_usage()
             sys.exit(1)
 
         with open(matrix_size_file) as file:
@@ -331,16 +398,23 @@ def main():
             N = sizes['N']
             K = sizes['K']
             mnks.append((M, N, K))
-
+    else:
+        M = args.m
+        N = args.n
+        K = args.k
+        if M == 0 or N == 0 or K == 0:
+            print(f"Input matrix size: (M {M}, N {N}, K {K}) contains dim size 0!")
+            print_usage()
+        mnks = [(M, N, K)]
 
     for (m, n, k) in mnks:
-        min_ms = run_speed(m, n, k, dtype, use_rocprof, 'triton')
+        min_ms = run_speed(m, n, k, dtype, fp8a, fp8b, 'triton')
 
         # function to compute flops
         perf_flops = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
 
         if args.compare:
-            test_correctness(m, n, k, dtype)
+            test_correctness(m, n, k, dtype, fp8a, fp8b)
         best_config = get_best_config(m, n, k)
 
         if use_rocprof:
@@ -349,8 +423,8 @@ def main():
             block_n = best_config.kwargs['BLOCK_SIZE_N']
             block_k = best_config.kwargs['BLOCK_SIZE_K']
             group_m = best_config.kwargs['GROUP_SIZE_M']
+            num_stages = best_config.num_stages
             split_k = best_config.kwargs['SPLIT_K']
-            # num_warps = best_config['num_warps']
             num_warps = best_config.num_warps
             driver = 'rocprof_gemm.py'
             TRITON_DIR = os.getenv('TRITON_DIR')
@@ -358,8 +432,8 @@ def main():
                 driver = os.path.join(TRITON_DIR, 'scripts/amd/gemm', driver)
             run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
-                        -group_m {group_m} -split_k {split_k} -num_warps {num_warps} \
-                        -dtype {dtype_str}'
+                        -group_m {group_m} -split_k {split_k} -num_stages {num_stages} \
+                        -num_warps {num_warps} -dtype {dtype_str}'
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 

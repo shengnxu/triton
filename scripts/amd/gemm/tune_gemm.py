@@ -15,8 +15,8 @@ from matmul_kernel import matmul_kernel
 def get_full_tuning_space():
     configs = []
 
-    block_mn_range = [16, 32, 64, 128]
-    block_k_range = [16, 32, 64, 128]
+    block_mn_range = [16, 32, 64, 128, 256]
+    block_k_range = [16, 32, 64, 128, 256]
     split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8]
@@ -72,8 +72,8 @@ def prune_configs(M, N, K, configs):
         if GROUP_M * BLOCK_SIZE_M > M and GROUP_M != 1:
             continue
         ## out of shared memory resource
-        ## TODO: figure out why these configs use so much LDS
-        if BLOCK_SIZE_K == 128 and (BLOCK_SIZE_M == 128 or BLOCK_SIZE_N == 128):
+        LDS = BLOCK_SIZE_K * BLOCK_SIZE_M + BLOCK_SIZE_K * BLOCK_SIZE_N
+        if LDS * 2 > 65536:
             continue
 
         pruned_configs.append(config)

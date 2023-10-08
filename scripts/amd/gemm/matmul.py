@@ -58,8 +58,8 @@ def get_full_tuning_space():
     if not tuning_full_space:
         return configs
 
-    block_mn_range = [32, 64, 128]
-    block_k_range = [32, 64]
+    block_mn_range = [16, 32, 64, 128]
+    block_k_range = [16, 32, 64]
     split_k_range = [1, 2, 4, 5, 8, 10]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8]
@@ -231,15 +231,13 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, output_type, activation=""):
+def matmul(a, b, c, output_type, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
     # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=output_type)
     # 1D launch kernel where each block gets its own program.
     otype = tl.float32
     if output_type == torch.float16:
@@ -308,12 +306,14 @@ def test_correctness(M, N, K, datatype, fp8a, fp8b):
 def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
     a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
     b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+    # Allocates output.
+    c = torch.zeros((M, N), device=a.device, dtype=datatype)
 
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, output_type=datatype), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, output_type=datatype), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):
@@ -434,10 +434,12 @@ def main():
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
                         -group_m {group_m} -split_k {split_k} -num_stages {num_stages} \
                         -num_warps {num_warps} -dtype {dtype_str}'
+            # print(f'run_cmd = {run_cmd}')
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 
             parse_result_cmd = f'sed -n \'/matmul_kernel/p\' results.stats.csv | awk -F \',\' \'{{print $4}}\''
+            # print(f'sed_cmd = {parse_result_cmd}')
             parse_outputs = run_bash_command(parse_result_cmd)
             min_ms = int(parse_outputs[0]) / 1000000
 

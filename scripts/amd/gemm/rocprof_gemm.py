@@ -130,15 +130,13 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, activation=""):
+def matmul(a, b, c, output_type, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
     # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=output_type)
     # 1D launch kernel where each block gets its own program.
 
     otype = tl.float32
@@ -151,22 +149,23 @@ def matmul(a, b, output_type, block_m, block_n, block_k, group_m, split_k, num_s
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
-    matmul_kernel[grid](
-        a, b, c,
-        M, N, K,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        BLOCK_SIZE_M = block_m, 
-        BLOCK_SIZE_N = block_n, 
-        BLOCK_SIZE_K = block_k,
-        GROUP_SIZE_M = group_m,
-        SPLIT_K = split_k,
-        num_warps = num_warps,
-        num_stages = num_stages,
-        ACTIVATION=activation,
-        output_datatype=otype,
-    )
+    for _ in range(10):
+        matmul_kernel[grid](
+            a, b, c,
+            M, N, K,
+            a.stride(0), a.stride(1),
+            b.stride(0), b.stride(1),
+            c.stride(0), c.stride(1),
+            BLOCK_SIZE_M = block_m, 
+            BLOCK_SIZE_N = block_n, 
+            BLOCK_SIZE_K = block_k,
+            GROUP_SIZE_M = group_m,
+            SPLIT_K = split_k,
+            num_warps = num_warps,
+            num_stages = num_stages,
+            ACTIVATION=activation,
+            output_datatype=otype,
+        )
 
     return c
 
@@ -194,9 +193,10 @@ def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
 def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype, fp8a, fp8b):
     a, a_f16 = gen_input(M, K, d_type=dtype, isFp8=fp8a, seed=10, device='cuda')
     b, b_f16 = gen_input(K, N, d_type=dtype, isFp8=fp8b, seed=11, device='cuda')
-    c = matmul(a, b, dtype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
 
-    return c
+    # Allocates output.
+    c = torch.zeros((M, N), device=a.device, dtype=dtype)
+    matmul(a, b, c, dtype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
 
 
 def main(args=None):

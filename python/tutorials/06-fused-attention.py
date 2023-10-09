@@ -77,6 +77,30 @@ def _attn_fwd_inner(
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
 
+
+@triton.autotune(
+   configs=[
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 5}, num_stages=1, num_warps=4),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
+   ],
+   key=['N_CTX', 'STAGE'], verbose=True
+)
+
+
 @triton.jit
 def _attn_fwd(
     Q, K, V, sm_scale, M, Out,
@@ -86,10 +110,10 @@ def _attn_fwd(
     stride_oz, stride_oh, stride_om, stride_on,
     Z, H,
     N_CTX: tl.constexpr,
+    STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    STAGE: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -558,13 +582,14 @@ class _attention(torch.autograd.Function):
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1],
             N_CTX=q.shape[2],
-            BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
+            #BLOCK_M=BLOCK_M,
+            #BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=Lk,
             STAGE=stage,
-            num_warps=num_warps,
-            num_stages=num_stages,
-            waves_per_eu=waves_per_eu)
+            #num_warps=num_warps,
+            #num_stages=num_stages,
+            #waves_per_eu=waves_per_eu
+        )
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid

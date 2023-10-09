@@ -97,7 +97,7 @@ def _attn_fwd_inner(
        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64}, num_stages=1, num_warps=4, waves_per_eu=),
    ],
-   key=['N_CTX', 'STAGE'], verbose=True
+   key=['N_CTX', 'STAGE'],
 )
 
 

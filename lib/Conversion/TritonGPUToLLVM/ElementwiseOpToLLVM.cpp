@@ -527,7 +527,7 @@ Fp8E4M3_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 
   b0 = lshr(i32_ty, b0, i32_val(1));
 
-  b0 = add(i32_ty, b0, i32_val(0x20002000));
+  b0 = add(i32_ty, b0, i32_val(0x1C001C00));
 
   b0 = or_( i32_ty, b0, and_(i32_ty, a0, i32_val(0x80008000)) );
 

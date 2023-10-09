@@ -146,8 +146,8 @@ class dtype:
     def is_fp8e4m3nv(self):
         return self.name == 'fp8e4m3nv'
 
-    def is_fp8e4fnuz(self):
-        return self.name == 'fp8e4fnuz'
+    def is_fp8e4m3fnuz(self):
+        return self.name == 'fp8e4m3fnuz'
 
     def is_fp8e4b15(self):
         return self.name == 'fp8e4b15'
@@ -264,12 +264,12 @@ class dtype:
             return builder.get_int64_ty()
         elif self.name == 'fp8e5':
             return builder.get_fp8e5_ty()
-        elif self.name == 'fp8e5fnuz':
-            return builder.get_fp8e5fnuz_ty()
+        elif self.name == 'fp8e5m2fnuz':
+            return builder.get_fp8e5m2fnuz_ty()
         elif self.name == 'fp8e4nv':
             return builder.get_fp8e4nv_ty()
-        elif self.name == 'fp8e4fnuz':
-            return builder.get_fp8e4fnuz_ty()
+        elif self.name == 'fp8e4m3fnuz':
+            return builder.get_fp8e4m3fnuz_ty()
         elif self.name == 'fp8e4b15':
             return builder.get_fp8e4b15_ty()
         elif self.name == 'fp8e4b15x4':

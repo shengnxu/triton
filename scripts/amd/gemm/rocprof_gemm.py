@@ -40,10 +40,6 @@ def matmul_kernel(
     pid_z = tl.program_id(1)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    # if GROUP_SIZE_M == 1:
-    #     pid_m = pid // num_pid_n
-    #     pid_n = pid % num_pid_n
-    # else:
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
     group_id = pid // num_pid_in_group
     first_pid_m = group_id * GROUP_SIZE_M
@@ -198,10 +194,7 @@ def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, 
 
     # Allocates output.
     c = torch.zeros((M, N), device=a.device, dtype=dtype)
-
     matmul(a, b, c, dtype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
-
-    return c
 
 
 def main(args=None):

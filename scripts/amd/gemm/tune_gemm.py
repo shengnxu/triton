@@ -11,6 +11,8 @@ import triton.language as tl
 
 from matmul_kernel import matmul_kernel
 
+from datetime import datetime
+
 
 def get_full_tuning_space():
     configs = []
@@ -300,6 +302,17 @@ def test_correctness(M, N, K, config, verbose, datatype = torch.float16):
         print(f'{size_str}❌')
 
 
+def get_default_tuning_result_filename():
+    git_branch_name = run_bash_command("git rev-parse --abbrev-ref HEAD")
+    git_branch_name = git_branch_name[0].decode()
+    git_commit_hash = run_bash_command("git rev-parse --short HEAD")
+    git_commit_hash = git_commit_hash[0].decode()
+
+    dt_string = datetime.now().strftime("%m-%d-%Y-%H:%M:%S")
+    defaultName = f"tuning_results_{git_branch_name}@{git_commit_hash}_{dt_string}.yaml"
+    return defaultName
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="tune a specific gemm size",
@@ -310,7 +323,7 @@ def parse_args():
     parser.add_argument("-n", type=int, default=0)
     parser.add_argument("-k", type=int, default=0)
     parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
-    parser.add_argument("--tuning_results_file", type=str, default="tuning_results.yaml", help='yaml file to store tuning results')
+    parser.add_argument("--tuning_results_file", type=str, default=get_default_tuning_result_filename(), help='yaml file to store tuning results')
     parser.add_argument("--keep", action='store_true', default=False, help='keep generated files')
     parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
     parser.add_argument("--compare_wo_tuning", action='store_true', default=False, help="Whether check result correctness")
@@ -355,6 +368,8 @@ def main():
 
     configs_full = get_full_tuning_space()
 
+    start_time = datetime.now()
+
     f_results = open(tuning_output_file, 'w')
     for (M, N, K) in mnks:
         ## Obtain a pruned tuning space according to gemm size
@@ -398,6 +413,10 @@ def main():
             print("")
 
     f_results.close()
+
+    end_time = datetime.now()
+    tuning_time = end_time - start_time
+    print(f"Tuning time (h:m:s): {tuning_time}")
 
 
 if __name__ == '__main__':

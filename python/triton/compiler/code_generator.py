@@ -1070,7 +1070,9 @@ def str_to_ty(name):
         return language.pointer_type(ty)
     tys = {
         "fp8e4nv": language.float8e4nv,
+        "fp8e4m3fnuz": language.float8e4m3fnuz,
         "fp8e5": language.float8e5,
+        "fp8e5m2fnuz": language.float8e5m2fnuz,
         "fp8e4b15": language.float8e4b15,
         "fp8e4b15x4": language.float8e4b15x4,
         "fp16": language.float16,

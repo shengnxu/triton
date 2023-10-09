@@ -141,12 +141,16 @@ def matmul_kernel(
     pid_z = tl.program_id(1)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    if GROUP_SIZE_M == 1:
+        pid_m = pid // num_pid_n
+        pid_n = pid % num_pid_n
+    else:
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + (pid % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
 
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
@@ -435,7 +439,7 @@ def main():
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 
-            parse_result_cmd = f'sed -n \'/matmul_kernel/p\' results.stats.csv | awk -F \',\' \'{{print $4}}\''
+            parse_result_cmd = f'sed -n \'/matmul_kernel/p\' results.csv | awk -F \',\' \'{{print $NF}}\' | tail -n1'
             parse_outputs = run_bash_command(parse_result_cmd)
             min_ms = int(parse_outputs[0]) / 1000000
 

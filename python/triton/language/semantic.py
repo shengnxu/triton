@@ -1346,7 +1346,7 @@ def dot(lhs: tl.tensor,
     if is_hip():
         if lhs.type.scalar.is_fp8():
             lhs = cast(lhs, tl.float16, builder)
-        elif rhs.type.scalar.is_fp8():
+        if rhs.type.scalar.is_fp8():
             rhs = cast(rhs, tl.float16, builder)
 
     if lhs.type.scalar.is_int():

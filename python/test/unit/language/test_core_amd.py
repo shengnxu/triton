@@ -1206,7 +1206,9 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                         [128, 128, 64],
                                         [64, 128, 128]]
                           for ab_type in [[tl.float8e5, tl.float16],
-                                           [tl.float16, tl.float8e5]]
+                                          [tl.float8e5, tl.float8e5],
+                                          [tl.float16, tl.float8e5]]
+                        #   for ab_type in [[tl.float8e5, tl.float8e5]]
                           for out_dtype in [torch.float16, torch.float32]
                         ])
 def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
@@ -1292,18 +1294,19 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
 
         return c
 
-
     def gen_input(M, N, d_type, seed, device='cuda'):
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         if d_type == tl.float16:
             input = torch.randn((M, N), dtype=torch.float16, device=device)
             input_f16 = input
+            # input_f16 = input.to(torch.float8_e5m2)
         else: # d_type is float8
             raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
             torch_f8 = raw_data.to(torch.float8_e5m2)
             input = triton.reinterpret(torch_f8, d_type)
             input_f16 = torch_f8.to(torch.float16)
+            # input_f16 = torch_f8
         return input, input_f16
 
     a, a_f16 = gen_input(M, K, a_type, 11, device=device)

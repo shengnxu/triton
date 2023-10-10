@@ -26,14 +26,15 @@ def max_fn(x, y):
 def _attn_fwd_inner(
     acc, l_i, m_i, q,
     K_block_ptr, V_block_ptr,
-    start_m, qk_scale,
+    start_m,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     STAGE: tl.constexpr,
     offs_m: tl.constexpr,
     offs_n: tl.constexpr,
-    N_CTX: tl.constexpr,
+    N_CTX,
+    pre_load_v: tl.constexpr,
 ):
     # range of values handled by this stage
     if STAGE == 1:
@@ -41,36 +42,35 @@ def _attn_fwd_inner(
     elif STAGE == 2:
         lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
         lo = tl.multiple_of(lo, BLOCK_M)
+        K_block_ptr = tl.advance(K_block_ptr, (0, lo))
+        V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
     # causal = False
     else:
         lo, hi = 0, N_CTX
-    K_block_ptr = tl.advance(K_block_ptr, (0, lo))
-    V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl.load(K_block_ptr)
+        if pre_load_v:
+            v = tl.load(V_block_ptr)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk += tl.dot(q, k)
         if STAGE == 2:
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
-            m_ij = tl.maximum(m_i, tl.max(qk, 1))
-            qk -= m_ij[:, None]
-        else:
-            m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-            qk = qk * qk_scale - m_ij[:, None]
+            qk = tl.where(mask, qk, float("-inf"))
+        qk += tl.dot(q, k)
+        m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
-        l_ij = tl.sum(p, 1)
-        # -- update m_i and l_i
-        alpha = tl.math.exp2(m_i - m_ij)
-        l_i = l_i * alpha + l_ij
         # -- update output accumulator --
+        alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
-        # update acc
-        v = tl.load(V_block_ptr)
+        if not pre_load_v:
+            v = tl.load(V_block_ptr)
         acc += tl.dot(p.to(tl.float16), v)
+        # -- update m_i and l_i
+        l_ij = tl.sum(p, 1)
+        l_i = l_i * alpha + l_ij
         # update m_i and l_i
         m_i = m_ij
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -80,18 +80,28 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0}, num_stages=0, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1}, num_stages=0, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=0, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3}, num_stages=0, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': True}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4, 'pre_load_v': True}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': False}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=0, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4, 'pre_load_v': False}, num_stages=0, num_warps=4),
    ],
-   key=['N_CTX', 'STAGE'], verbose=True
+   key=['N_CTX', 'STAGE'],
 )
 
 
@@ -103,16 +113,16 @@ def _attn_fwd(
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     Z, H,
-    N_CTX: tl.constexpr,
+    N_CTX,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    pre_load_v: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     qkv_offset = off_hz * stride_qh
-    #kv_offset = off_hz * stride_kh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + qkv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
@@ -150,15 +160,17 @@ def _attn_fwd(
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
     q = tl.load(Q_block_ptr)
+    q = (q * qk_scale).to(tl.float16)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     if STAGE & 1:
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, qk_scale,
+            start_m,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
-            4 - STAGE, offs_m, offs_n, N_CTX,
+            4 - STAGE, offs_m, offs_n,
+            N_CTX, pre_load_v,
         )
     # stage 2: on-band
     if STAGE & 2:
@@ -167,9 +179,10 @@ def _attn_fwd(
         tl.debug_barrier()
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, qk_scale,
+            start_m,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
-            2, offs_m, offs_n, N_CTX,
+            2, offs_m, offs_n,
+            N_CTX, pre_load_v,
         )
     # epilogue
     # write back m
@@ -186,37 +199,6 @@ def _attn_fwd(
         order=(1, 0)
     )
     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
-
-
-
-    #q = (q * qk_scale).to(tl.float16)
-    ## loop over k, v and update accumulator
-    #lo = 0
-    #hi = P_SEQ + (start_m + 1) * BLOCK_M if IS_CAUSAL else N_CTX + P_SEQ
-    #for start_n in range(lo, hi, BLOCK_N):
-    #    # -- load k, v --
-    #    k = tl.load(K_block_ptr)
-    #    v = tl.load(V_block_ptr)
-    #    # -- compute qk ---
-    #    qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float16)
-    #    if IS_CAUSAL:
-    #        qk = tl.where(P_SEQ + offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
-    #    qk += tl.dot(q, k)
-    #    # -- compute scaling constant ---
-    #    m_i_new = tl.maximum(m_i, tl.max(qk, 1))
-    #    alpha = tl.math.exp2(m_i - m_i_new)
-    #    p = tl.math.exp2(qk - m_i_new[:, None])
-    #    # -- scale and update acc --
-    #    acc_scale = l_i * 0 + alpha  # workaround some compiler bug
-    #    acc *= acc_scale[:, None]
-    #    acc += tl.dot(p.to(tl.float16), v)
-    #    # -- update m_i and l_i --
-    #    l_i = l_i * alpha + tl.sum(p, 1)
-    #    m_i = m_i_new
-    #    # update pointers
-    #    K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-    #    V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-
 
 
 @triton.jit
@@ -553,16 +535,11 @@ class _attention(torch.autograd.Function):
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
         o = torch.empty_like(q)
-        BLOCK_M = 128
         if torch.version.hip is None:
+            BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
             num_stages = 4 if Lk <= 64 else 3
             num_warps = 4 if Lk <= 64 else 8
-        #else:
-        #    BLOCK_N = 64
-        #    num_warps = 4
-        #    num_stages = 1
-        #    waves_per_eu = 2 if causal else 3
 
         stage = 3 if causal else 1
         grid = lambda META: (triton.cdiv(q.shape[2], META['BLOCK_M']), q.shape[0] * q.shape[1], 1)
@@ -576,13 +553,8 @@ class _attention(torch.autograd.Function):
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1],
             N_CTX=q.shape[2],
-            #BLOCK_M=BLOCK_M,
-            #BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=Lk,
             STAGE=stage,
-            #num_warps=num_warps,
-            #num_stages=num_stages,
-            #waves_per_eu=waves_per_eu
         )
 
         ctx.save_for_backward(q, k, v, o, M)

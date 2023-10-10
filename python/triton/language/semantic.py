@@ -1262,6 +1262,7 @@ def gpu_matrix_core_version() -> int:
         0 means no tensor cores are available
         1 corresponds to MFMA in CDNA 1 architecture
         2 corresponds to MFMA in CDNA 2 architecture
+        3 corresponds to MFMA in CDNA 3 architecture
     """
 
     if not is_hip():
@@ -1274,8 +1275,10 @@ def gpu_matrix_core_version() -> int:
     gpu_name = gfx_arch_details[1].split(':')[0]
     if gpu_name in ['gfx908']:
         return 1
-    if gpu_name in ['gfx90a', 'gfx940', 'gfx941', 'gfx942']:
+    if gpu_name in ['gfx90a']:
         return 2
+    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
+        return 3
     return 0
 
 def mfma_supported_granularity(m, n, k) -> bool:
@@ -1294,7 +1297,7 @@ def mfma_supported_granularity(m, n, k) -> bool:
 
 def mfma_supported(M, N, K, allow_tf32, ret_scalar_ty) -> bool:
     matrix_core_version = gpu_matrix_core_version()
-    if matrix_core_version not in [1, 2]:
+    if matrix_core_version not in [1, 2, 3]:
         return False
     if not mfma_supported_granularity(M, N ,K):
         return False

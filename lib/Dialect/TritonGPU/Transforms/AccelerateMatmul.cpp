@@ -177,8 +177,12 @@ public:
       if (elemType.isBF16()) {
         if (mfmaVersion == 1)
           kDim = 4;
-        if (mfmaVersion == 2)
+        if (mfmaVersion >= 2)
           kDim = 8;
+      }
+      if (elemType.isFloat8E4M3B11FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim == 16;
       }
       if (elemType.isInteger(8))
         kDim = 8;
@@ -190,8 +194,12 @@ public:
       if (elemType.isBF16()) {
         if (mfmaVersion == 1)
           kDim = 8;
-        if (mfmaVersion == 2)
+        if (mfmaVersion >= 2)
           kDim = 16;
+      }
+      if (elemType.isFloat8E4M3B11FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim == 32;
       }
       if (elemType.isInteger(8))
         kDim = 16;
@@ -536,7 +544,8 @@ public:
 
     mlir::RewritePatternSet patterns(context);
 #ifdef USE_ROCM
-    if (computeCapability == 1 || computeCapability == 2) {
+    if (computeCapability == 1 || computeCapability == 2 ||
+        computeCapability == 3) {
       int mfmaVersion = computeCapability;
       patterns.add<::BlockedToMFMA>(context, mfmaVersion);
     }

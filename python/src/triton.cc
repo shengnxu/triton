@@ -811,7 +811,7 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self) -> mlir::Type {
              return self.getBuilder().getType<mlir::Float8E4M3FNUZType>();
            })
-      .def("get_fp8e4m3fnuz_ty",
+      .def("get_fp8e4b8_ty",
            [](TritonOpBuilder &self) -> mlir::Type {
              return self.getBuilder().getType<mlir::Float8E4M3FNUZType>();
            })
@@ -831,7 +831,7 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self) -> mlir::Type {
              return self.getBuilder().getType<mlir::Float8E5M2Type>();
            })
-      .def("get_fp8e5m2fnuz_ty",
+      .def("get_fp8e5b16_ty",
            [](TritonOpBuilder &self) -> mlir::Type {
              return self.getBuilder().getType<mlir::Float8E5M2FNUZType>();
            })

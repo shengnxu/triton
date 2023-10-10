@@ -1206,7 +1206,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                         [128, 128, 64],
                                         [64, 128, 128]]
                           for ab_type in [[tl.float8e5, tl.float16],
-                                          [tl.float8e4m3fnuz, tl.float16],
+                                          [tl.float8e4b8, tl.float16],
                                           [tl.float8e5, tl.float8e5],
                                           [tl.float16, tl.float8e5]]
                         #   for ab_type in [[tl.float8e4m3fnuz, tl.float16]]
@@ -1299,9 +1299,9 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
 
         tl_to_torch_fp8_types = {
             tl.float8e5 : torch.float8_e5m2,
-            tl.float8e5m2fnuz : torch.float8_e5m2fnuz,
+            tl.float8e5b16 : torch.float8_e5m2fnuz,
             tl.float8e4nv : torch.float8_e4m3fn,
-            tl.float8e4m3fnuz : torch.float8_e4m3fnuz
+            tl.float8e4b8 : torch.float8_e4m3fnuz
         }
 
         torch.manual_seed(seed)

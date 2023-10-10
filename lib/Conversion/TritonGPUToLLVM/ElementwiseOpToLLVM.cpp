@@ -73,15 +73,14 @@ Fp16_to_Fp8E5M2FNUZ(Location loc, ConversionPatternRewriter &rewriter,
 
   a0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
   a1 = and_(i32_ty, a1, i32_val(0x7fff7fff));
-  a0 = add(i32_ty, a0, i32_val(0x00800080));
-  a1 = add(i32_ty, a1, i32_val(0x00800080));
-
-  a0 = or_(i32_ty, a0, sign0);
-  a1 = or_(i32_ty, a1, sign1);
 
   // adjust expoment bias from 15 to 16  
   a0 = add(i32_ty, a0, i32_val(0x04000400));
   a1 = add(i32_ty, a1, i32_val(0x04000400));
+
+  a0 = or_(i32_ty, a0, sign0);
+  a1 = or_(i32_ty, a1, sign1);
+
 
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   a0 = bitcast(a0, fp8x4VecTy); 
@@ -158,9 +157,18 @@ Fp8E5M2FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
   a1 = insert_element(fp8x4VecTy, a1, v[3], i32_val(3));
   a1 = bitcast(a1, i32_ty);
 
+  Value sign0 = and_(i32_ty, a0, i32_val(0x80008000));
+  Value sign1 = and_(i32_ty, a1, i32_val(0x80008000));
+
+  a0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
+  a1 = and_(i32_ty, a1, i32_val(0x7fff7fff));
+
   // adjust exponent bias from 16 to 15
   a0 = sub(i32_ty, a0, i32_val(0x04000400));
   a1 = sub(i32_ty, a1, i32_val(0x04000400));
+
+  a0 = or_(i32_ty, a0, sign0);
+  a1 = or_(i32_ty, a1, sign1);
 
   auto fp16x2VecTy = vec_ty(f16_ty, 2);
   auto fp16x2Vec0 = bitcast(a0, fp16x2VecTy);

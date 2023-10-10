@@ -118,7 +118,6 @@ def matmul(a, b, c, c_type=torch.float32):
         compute_type = comp_type,
     )
 
-    return c
 
 def get_variant_golden(a, b):
     SIZE_M = a.shape[0]
@@ -143,7 +142,7 @@ def gen_input(M, N, d_type, seed, device='cuda'):
         torch.float8_e5m2 : tl.float8e5,
         torch.float8_e5m2fnuz : tl.float8e5b16,
         torch.float8_e4m3fn : tl.float8e4nv,
-         torch.float8_e4m3fnuz : tl.float8e4b8
+        torch.float8_e4m3fnuz : tl.float8e4b8
     }
 
     torch.manual_seed(seed)
@@ -153,29 +152,32 @@ def gen_input(M, N, d_type, seed, device='cuda'):
         input_f16 = input
     else: # d_type is float8
         assert d_type in torch_to_tl_fp8_types
-        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
+        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') /2.0
         torch_f8 = raw_data.to(d_type)
+        # input = torch_f8
         input = triton.reinterpret(torch_f8, torch_to_tl_fp8_types[d_type])
         input_f16 = torch_f8.to(torch.float16)
+        print(f'f8 = {torch_f8[71]}, f16 = {input_f16[71]}')
     return input, input_f16
 
 
 def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
     print(f"testing sizes: M: {SIZE_M}, N: {SIZE_N}, K: {SIZE_K}, a_type: {a_type}, b_type: {b_type}, c_type: {c_type}")
     a, a_f16 = gen_input(SIZE_M, SIZE_K, a_type, 10, device='cuda')
-    b, b_f16 = gen_input(SIZE_K, SIZE_N, b_type, 10, device='cuda')
+    b, b_f16 = gen_input(SIZE_K, SIZE_N, b_type, 11, device='cuda')
     c = torch.empty((SIZE_M, SIZE_N), device=a.device, dtype=c_type)
     golden = torch.matmul(a_f16, b_f16)
-    c = matmul(a, b, c, c_type)
+    matmul(a, b, c, c_type)
 
     print(f'gold = {golden}')
     print(f'c = {c}')
 
-    golden_abs_err = 0.2
-    golden_rel_err = 0.0
+    golden_abs_err = 0.01
+    golden_rel_err = 0.01
 
     torch.set_printoptions(profile="full")
-    assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
+    torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
+    # assert torch.allclose(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err))
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -201,10 +203,14 @@ def main():
     K = args.k
     a_type = torch.float16
     b_type = torch.float16
+    fp8_type = torch.float8_e4m3fnuz
+    # fp8_type = torch.float8_e5m2fnuz
+    # fp8_type = torch.float8_e5m2
+    # fp8_type = torch.float8_e4m3fn
     if args.fp8a:
-        a_type = torch.float8_e4m3fnuz
+        a_type = fp8_type
     if args.fp8b:
-        b_type = torch.float8_e4m3fnuz
+        b_type = fp8_type
     c_type = torch.float16
 
     try:

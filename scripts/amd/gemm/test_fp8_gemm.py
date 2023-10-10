@@ -139,26 +139,24 @@ def get_variant_golden(a, b):
 
 def gen_input(M, N, d_type, seed, device='cuda'):
 
-    tl_to_torch_fp8_types = {
-        tl.float8e5 : torch.float8_e5m2,
-        tl.float8e5b16 : torch.float8_e5m2fnuz,
-        tl.float8e4nv : torch.float8_e4m3fn,
-        tl.float8e4b8 : torch.float8_e4m3fnuz
+    torch_to_tl_fp8_types = {
+        torch.float8_e5m2 : tl.float8e5,
+        torch.float8_e5m2fnuz : tl.float8e5b16,
+        torch.float8_e4m3fn : tl.float8e4nv,
+         torch.float8_e4m3fnuz : tl.float8e4b8
     }
 
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    if d_type == tl.float16:
-        input = torch.randn((M, N), dtype=torch.float16, device=device)
+    if d_type == torch.float16:
+        input = torch.randn((M, N), dtype=d_type, device=device)
         input_f16 = input
-        # input_f16 = input.to(torch.float8_e5m2)
     else: # d_type is float8
-        assert d_type in tl_to_torch_fp8_types
+        assert d_type in torch_to_tl_fp8_types
         raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
-        torch_f8 = raw_data.to(tl_to_torch_fp8_types[d_type])
-        input = triton.reinterpret(torch_f8, d_type)
+        torch_f8 = raw_data.to(d_type)
+        input = triton.reinterpret(torch_f8, torch_to_tl_fp8_types[d_type])
         input_f16 = torch_f8.to(torch.float16)
-        # input_f16 = torch_f8
     return input, input_f16
 
 

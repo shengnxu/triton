@@ -26,54 +26,57 @@ import triton.language as tl
 
 # This group gemm kernel launches a fixed number of CTA to compute a group
 # of gemms. The scheduling is static and we do it on device
-
-
 @triton.autotune(
-    configs=[
+    configs= [
         triton.Config(
             {
-                'BLOCK_SIZE_M': 128,
-                'BLOCK_SIZE_N': 128,
-                'BLOCK_SIZE_K': 32,
+                'BLOCK_SIZE_M': 32,
+                'BLOCK_SIZE_N': 32,
+                'BLOCK_SIZE_K': 64,
                 'NUM_SM': 110,
             },
             num_stages = 0,
+            num_warps = 2,
         ),
         triton.Config(
             {
-                'BLOCK_SIZE_M': 128,
+                'BLOCK_SIZE_M': 32,
                 'BLOCK_SIZE_N': 128,
-                'BLOCK_SIZE_K': 32,
-                'NUM_SM': 220,
+                'BLOCK_SIZE_K': 64,
+                'NUM_SM': 440,
             },
             num_stages = 0,
+            num_warps = 4,
         ),
         triton.Config(
             {
                 'BLOCK_SIZE_M': 64,
-                'BLOCK_SIZE_N': 64,
-                'BLOCK_SIZE_K': 32,
-                'NUM_SM': 110,
+                'BLOCK_SIZE_N': 32,
+                'BLOCK_SIZE_K': 64,
+                'NUM_SM': 440,
             },
             num_stages = 0,
+            num_warps = 4,
         ),
         triton.Config(
             {
                 'BLOCK_SIZE_M': 64,
-                'BLOCK_SIZE_N': 64,
-                'BLOCK_SIZE_K': 32,
+                'BLOCK_SIZE_N': 128,
+                'BLOCK_SIZE_K': 64,
                 'NUM_SM': 220,
             },
             num_stages = 0,
+            num_warps = 4,
         ),
         triton.Config(
             {
                 'BLOCK_SIZE_M': 32,
                 'BLOCK_SIZE_N': 32,
-                'BLOCK_SIZE_K': 32,
+                'BLOCK_SIZE_K': 64,
                 'NUM_SM': 330,
             },
             num_stages = 0,
+            num_warps = 2,
         ),
     ],
     key=['SUM_M', 'SUM_N', 'SUM_K'],

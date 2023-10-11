@@ -149,7 +149,6 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
         pm.add_tritongpu_wsmaterialization_pass(capability)
         pm.add_cse_pass()
     else:
-<<<<<<< HEAD
         if is_hip():
             pm.add_tritongpu_pipeline_pass(
                 num_stages, num_warps, num_ctas, 0)
@@ -159,13 +158,8 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
     if is_hip():
         pm.add_tritongpu_materialize_load_store_pass(num_warps, 0)
     else:
-        pm.add_tritongpu_materialize_load_store_pass(num_warps, arch)
-    if _is_cuda(arch) and arch // 10 <= 8:
-=======
-        pm.add_tritongpu_pipeline_pass(num_stages, num_warps, num_ctas, capability)
-    pm.add_tritongpu_materialize_load_store_pass(num_warps, capability)
-    if capability // 10 <= 8:
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+        pm.add_tritongpu_materialize_load_store_pass(num_warps, capability)
+    if _is_cuda(arch) and capability // 10 <= 8:
         pm.add_tritongpu_prefetch_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
@@ -175,11 +169,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
         pm.add_tritongpu_reorder_instructions_pass()
     pm.add_cse_pass()
     pm.add_symbol_dce_pass()
-<<<<<<< HEAD
-    if _is_cuda(arch) and arch // 10 >= 9:
-=======
-    if capability // 10 >= 9:
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+    if _is_cuda(arch) and capability // 10 >= 9:
         pm.add_tritongpu_fence_insertion_pass()
     pm.add_tritongpu_ws_fixup_missing_attrs_pass()
     pm.run(mod)
@@ -241,8 +231,7 @@ def ptx_to_cubin(ptx: str, target: CudaTargetDescriptor):
     :return: str
     '''
     ptxas, _ = path_to_ptxas()
-<<<<<<< HEAD
-    return compile_ptx_to_cubin(ptx, ptxas, arch)
+    return compile_ptx_to_cubin(ptx, ptxas, target.capability)
 
 
 # AMDGCN translation
@@ -307,9 +296,6 @@ def llir_to_amdgcn_and_hsaco(mod: Any, gfx_arch: str, gfx_triple: str, gfx_featu
         - Path to HSACO object
     '''
     return translate_llvmir_to_hsaco(mod, gfx_arch, gfx_triple, gfx_features)
-=======
-    return compile_ptx_to_cubin(ptx, ptxas, target.capability)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
 
 
 # ------------------------------------------------------------------------------
@@ -477,12 +463,9 @@ def compile(fn, **kwargs):
     if is_hip():
         is_cuda = False
 
-<<<<<<< HEAD
     is_cuda = device_type == "cuda" and _is_cuda(arch)
     is_hip = device_type in ["cuda", "hip"] and not is_cuda
     warp_size = CUDA_DEFAULT_WARP_SIZE if _is_cuda(arch) else arch[3]
-=======
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     context = ir.context()
     constants = kwargs.get("constants", dict())
     num_warps = kwargs.get("num_warps", get_arch_default_num_warps(device_type))
@@ -520,20 +503,12 @@ def compile(fn, **kwargs):
     stages = dict()
     stages["ast"] = (lambda path: fn, None)
     stages["ttir"] = (lambda path: parse_mlir_module(path, context),
-<<<<<<< HEAD
-                      lambda src: optimize_ttir(ast_to_ttir(src, signature, configs[0], constants, debug=debug, arch=arch), arch))
-    stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
-                       lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, warp_size, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue))
-    stages["llir"] = (lambda path: Path(path).read_text(),
-                      lambda src: ttgir_to_llir(src, extern_libs, arch, tma_infos))
-=======
                       lambda src: optimize_ttir(ast_to_ttir(src, signature, configs[0], constants, debug=debug, target=target), target))
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+    stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
+                       lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, num_ctas, target), num_stages, num_warps, num_ctas, target, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue))
+    stages["llir"] = (lambda path: Path(path).read_text(),
+                      lambda src: ttgir_to_llir(src, extern_libs, target, tma_infos))
     if is_cuda:
-        stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
-                           lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, num_ctas, target), num_stages, num_warps, num_ctas, target, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue))
-        stages["llir"] = (lambda path: Path(path).read_text(),
-                          lambda src: ttgir_to_llir(src, extern_libs, target, tma_infos))
         add_cuda_stages(target, extern_libs, stages)
     elif device_type == "hip":
         _device_backend.add_stages(target, extern_libs, stages, num_warps=num_warps, num_stages=num_stages)

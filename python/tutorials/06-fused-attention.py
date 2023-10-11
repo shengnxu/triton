@@ -639,6 +639,9 @@ attention = _attention.apply
                          [(4, 48, 1024, 64),
                           (4, 48, 2048, 64),
                           (4, 48, 4096, 64),
+                          (4, 48, 1024, 128),
+                          (4, 48, 2048, 128),
+                          (4, 48, 4096, 128),
                           #(4, 48, 8192, 64),
                           #(4, 48, 16384, 64)
                           ])
@@ -808,4 +811,7 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path='.', print_data=True)
+#bench_flash_attention.run(save_path='.', print_data=True)
+
+
+test_op_fwd(4, 48, 4096, )

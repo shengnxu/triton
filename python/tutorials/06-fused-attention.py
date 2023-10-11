@@ -194,16 +194,10 @@ def _attn_fwd(
 
 
 @triton.jit
-<<<<<<< HEAD
-def _bwd_preprocess(
-    Out, DO,
-    NewDO, Delta,
-=======
 def _attn_bwd_preprocess(
     O, DO,
-    Delta,
+    NewDo, Delta,
     Z, H, N_CTX,
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     BLOCK_M: tl.constexpr, D_HEAD: tl.constexpr,
 ):
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -214,12 +208,8 @@ def _attn_bwd_preprocess(
     do = tl.load(DO + off_hz * D_HEAD * N_CTX + off_m[:, None] * D_HEAD + off_n[None, :]).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
-<<<<<<< HEAD
     tl.store(NewDO + off_m[:, None] * D_HEAD + off_n[None, :], do)
-    tl.store(Delta + off_m, delta)
-=======
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
 
 
 # The main inner-loop logic for computing dK and dV.
@@ -770,19 +760,10 @@ class _attention(torch.autograd.Function):
             num_stages = 1
 
         grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
-<<<<<<< HEAD
-        L = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
-        P_SEQ = 0 if q.shape[-2] == k.shape[-2] else k.shape[-2] - q.shape[-2]
-
-        _fwd_kernel[grid](
-            q, k, v, sm_scale,
-            L,
-            o,
-=======
         M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        P_SEQ = 0 if q.shape[-2] == k.shape[-2] else k.shape[-2] - q.shape[-2]
         _attn_fwd[grid](
             q, k, v, sm_scale, M, o,
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
             q.stride(0), q.stride(1), q.stride(2), q.stride(3),
             k.stride(0), k.stride(1), k.stride(2), k.stride(3),
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),
@@ -802,11 +783,8 @@ class _attention(torch.autograd.Function):
         ctx.sm_scale = sm_scale
         ctx.BLOCK_DMODEL = Lk
         ctx.causal = causal
-<<<<<<< HEAD
         ctx.split_kernel = split_kernel
         ctx.P_SEQ = P_SEQ
-=======
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
         return o
 
     @staticmethod
@@ -1074,13 +1052,8 @@ def bench_flash_attention(
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         sm_scale = 1.3
-<<<<<<< HEAD
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':
-=======
-        fn = lambda: attention(q, k, v, causal, sm_scale)
-        if mode == "bwd":
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
             o = fn()
             do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)

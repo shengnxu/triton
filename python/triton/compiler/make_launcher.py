@@ -99,10 +99,9 @@ def generate_launcher(constants, signature, ids):
     format = "iiiiiiiiiKKOOO" + ''.join([format_of(_extracted_type(ty)) for ty in signature.values()])
 
     # generate glue code
-<<<<<<< HEAD
     if is_hip():
       folded_without_constexprs = [c for c in ids['ids_of_folded_args'] if c not in ids['ids_of_const_exprs']]
-      params = [i for i in signature.keys() if i >= start_desc or (i not in constants and i not in folded_without_constexprs)]
+      params = [i for i in signature.keys() if i >= desc_start_idx or (i not in constants and i not in folded_without_constexprs)]
       src = f"""
 #define __HIP_PLATFORM_AMD__
 #include <hip/hip_runtime.h>
@@ -242,13 +241,8 @@ PyMODINIT_FUNC PyInit___triton_launcher(void) {{
 """
     else:
         folded_without_constexprs = [c for c in ids['ids_of_folded_args'] if c not in ids['ids_of_const_exprs']]
-        params = [i for i in signature.keys() if i >= start_desc or (i not in constants and i not in folded_without_constexprs)]
+        params = [i for i in signature.keys() if i >= desc_start_idx or (i not in constants and i not in folded_without_constexprs)]
         src = f"""
-=======
-    folded_without_constexprs = [c for c in ids['ids_of_folded_args'] if c not in ids['ids_of_const_exprs']]
-    params = [i for i in signature.keys() if i >= desc_start_idx or (i not in constants and i not in folded_without_constexprs)]
-    src = f"""
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
 #include \"cuda.h\"
 #include <stdbool.h>
 #include <Python.h>

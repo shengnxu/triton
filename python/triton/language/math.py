@@ -11,12 +11,8 @@ def libdevice_path():
     if is_hip():
         default = os.path.join(third_party_dir, "hip", "lib", "bitcode", "cuda2gcn.bc")
     else:
-<<<<<<< HEAD
-        default = os.path.join(third_party_dir, "rocm", "lib", "bitcode", "cuda2gcn.bc")
-=======
         default = os.path.join(third_party_dir, "cuda", "lib", "libdevice.10.bc")
 
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     return os.getenv("TRITON_LIBDEVICE_PATH", default)
 
 

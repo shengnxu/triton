@@ -14,14 +14,9 @@ from dataclasses import dataclass
 from .._C.libtriton.triton import (ClusterInfo, TMAInfos, add_external_libs,
                                    compile_ptx_to_cubin, get_env_vars, get_num_warps,
                                    get_shared_memory_size, ir, runtime,
-<<<<<<< HEAD
                                    translate_llvmir_to_hsaco, translate_llvmir_to_ptx,
                                    translate_triton_gpu_to_llvmir, get_arch_info,
                                    get_warp_size)
-=======
-                                   translate_llvmir_to_ptx,
-                                   translate_triton_gpu_to_llvmir)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
 from ..common.backend import get_backend, path_to_ptxas
 from ..common.build import is_hip
 # from ..runtime import driver, jit, JITFunction
@@ -70,18 +65,13 @@ def ttir_compute_capability_rewrite(mod, target):
     # with block (tensor) pointers into tensors of pointers
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
-<<<<<<< HEAD
-    if _is_cuda(arch):
-        pm.add_rewrite_tensor_pointer_pass(arch, False)
+    if _is_cuda(target):
+        pm.add_rewrite_tensor_pointer_pass(target.capability)
     elif is_hip():
         capability = 90
         pm.add_rewrite_tensor_pointer_pass(capability, True)
     else:
         assert(False, "unsupported target")
-=======
-    if _is_cuda(target):
-        pm.add_rewrite_tensor_pointer_pass(target.capability)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     pm.run(mod)
     return mod
 
@@ -102,20 +92,13 @@ def optimize_ttir(mod, target):
     return mod
 
 
-<<<<<<< HEAD
-def ttir_to_ttgir(mod, num_warps, warpsize, num_ctas, arch):
+def ttir_to_ttgir(mod, num_warps, num_ctas, target):
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
     if is_hip():
         pm.add_convert_triton_to_tritongpu_pass(num_warps, warpsize, num_ctas, 0)
     else:
-        pm.add_convert_triton_to_tritongpu_pass(num_warps, warpsize, num_ctas, arch)
-=======
-def ttir_to_ttgir(mod, num_warps, num_ctas, target):
-    pm = ir.pass_manager(mod.context)
-    pm.enable_debug()
-    pm.add_convert_triton_to_tritongpu_pass(num_warps, 32, num_ctas, target.capability)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+        pm.add_convert_triton_to_tritongpu_pass(num_warps, 32, num_ctas, target.capability)
     pm.run(mod)
     return mod
 
@@ -134,17 +117,12 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
         pm.add_tritongpu_rewrite_tensor_pointer_pass(capability)
         pm.add_plan_cta_pass(cluster_info)
     pm.add_tritongpu_remove_layout_conversions_pass()
-<<<<<<< HEAD
-    if _is_cuda(arch):
-        pm.add_tritongpu_accelerate_matmul_pass(arch)
+    if is_cuda:
+        pm.add_tritongpu_accelerate_matmul_pass(capability)
     # TODO change interface of accelerate_matmul_pass
     if is_hip():
         matrix_core_version = gpu_matrix_core_version()
         pm.add_tritongpu_accelerate_matmul_pass(matrix_core_version)
-=======
-    if is_cuda:
-        pm.add_tritongpu_accelerate_matmul_pass(capability)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     pm.add_tritongpu_remove_layout_conversions_pass()
     if optimize_epilogue:
         pm.add_tritongpu_optimize_epilogue_pass()
@@ -158,13 +136,8 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
     # it's the responsibility of the compiler to figure out the exact
     # `num_warps` to use.
     # TODO: support the case where `num_warps` from user is not 4.
-<<<<<<< HEAD
-    if _is_cuda(arch) and arch // 10 >= 9 and enable_warp_specialization and num_warps == 4:
-        pm.add_tritongpu_ws_feasibility_checking_pass(arch)
-=======
-    if capability // 10 >= 9 and enable_warp_specialization and num_warps == 4:
+    if _is_cuda(arch) and capability // 10 >= 9 and enable_warp_specialization and num_warps == 4:
         pm.add_tritongpu_ws_feasibility_checking_pass(capability)
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
         pm.run(mod)
         ws_enabled = ir.is_ws_supported(mod)
         pm = ir.pass_manager(mod.context)
@@ -445,11 +418,6 @@ def parse_mlir_module(path, context):
 instance_descriptor = namedtuple("instance_descriptor", ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"], defaults=[set(), set(), set(), set()])
 
 
-<<<<<<< HEAD
-# TODO: architecture descriptor class
-def _is_cuda(arch):
-    return isinstance(arch, int)
-
 def is_hip():
     try:
         import torch
@@ -459,14 +427,7 @@ def is_hip():
 
 from ..language.semantic import gpu_matrix_core_version
 
-def get_architecture_descriptor(capability):
-    try:
-        import torch
-    except ImportError:
-        raise ImportError("Triton requires PyTorch to be installed")
-=======
 def get_cuda_capability(capability):
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     if capability is None:
         device = get_current_device()
         capability = get_device_capability(device)

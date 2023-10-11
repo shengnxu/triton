@@ -1,6 +1,5 @@
 from __future__ import annotations  # remove after python 3.11
 
-import warnings
 from functools import wraps
 from typing import List, Optional, Sequence, Tuple, TypeVar
 
@@ -136,6 +135,8 @@ def add(input: tl.tensor,
     # ptr + offset
     if other_scalar_ty.is_ptr() and not input_scalar_ty.is_ptr():
         input, other = other, input
+        input_scalar_ty = input.type.scalar
+        other_scalar_ty = other.type.scalar
     if input_scalar_ty.is_ptr():
         return tl.tensor(builder.create_addptr(input.handle, other.handle), input.type)
     # float + float
@@ -195,7 +196,7 @@ def truediv(input: tl.tensor,
     elif input_scalar_ty.is_int() and other_scalar_ty.is_int():
         input = cast(input, tl.float32, builder)
         other = cast(other, tl.float32, builder)
-    # float / float (cast to highest exponent type)
+    # float / float (cast to the highest exponent type)
     elif input_scalar_ty.is_floating() and other_scalar_ty.is_floating():
         if input_scalar_ty.fp_mantissa_width > other_scalar_ty.fp_mantissa_width:
             other = cast(other, input_scalar_ty, builder)
@@ -692,9 +693,8 @@ def cast(input: tl.tensor,
     dst_sca_ty = dst_ty.scalar
 
     if _is_cuda(builder.arch) and builder.arch < 89 and \
-       (src_sca_ty.is_fp8e4() or dst_sca_ty.is_fp8e4()):
-        warnings.warn("Standard tl.float8e4 format will be deprecated on SM < 89. "
-                      "Please use tl.float8e4b15.", DeprecationWarning)
+       (src_sca_ty.is_fp8e4nv() or dst_sca_ty.is_fp8e4nv()):
+        assert False, "fp8e4nv data type is not supported on CUDA arch < 89"
 
     # Casting with customized floating types involved: fp8 <=> bf16, fp16, fp32, fp64
     if (src_sca_ty.is_fp8() and dst_sca_ty.is_floating()) or \
@@ -988,8 +988,8 @@ def _store_block_pointer(ptr, val, mask, boundary_check, cache, eviction, builde
     if not val.type.is_block():
         val = broadcast_impl_shape(val, block_shape, builder)
     assert val.type.is_block(), "Value argument must be block type or a scalar"
-    assert block_shape == val.type.get_block_shapes(), "Block shape and value shape mismatch"
-    assert ptr.type.element_ty.element_ty == val.type.element_ty, "Block element type and value element type mismatch"
+    assert block_shape == val.type.get_block_shapes(), f"Block shape({block_shape}) and value shape({val.type.get_block_shapes()}) mismatch"
+    assert ptr.type.element_ty.element_ty == val.type.element_ty, f"Block element type({ptr.type.element_ty.element_ty}) and value element type({val.type.element_ty}) mismatch"
 
     elt_ty = ptr.type.element_ty.element_ty
     assert elt_ty != tl.int1, "`tl.int1` should be rewrited in `tl.make_block_ptr`"
@@ -1274,13 +1274,18 @@ def gpu_matrix_core_version() -> int:
     gpu_name = gfx_arch_details[1].split(':')[0]
     if gpu_name in ['gfx908']:
         return 1
-    if gpu_name in ['gfx90a', 'gfx940', 'gfx941']:
+    if gpu_name in ['gfx90a', 'gfx940', 'gfx941', 'gfx942']:
         return 2
     return 0
 
 def mfma_supported_granularity(m, n, k) -> bool:
     granularity_mn = 32
     granularity_k = 8
+    import os
+    if "MFMA_TYPE" in os.environ and os.environ["MFMA_TYPE"] == "16":
+        granularity_mn = 16
+        granularity_k = 16
+
     if m % granularity_mn != 0 or n % granularity_mn != 0:
         return False
     if k % granularity_k != 0:
@@ -1300,18 +1305,59 @@ def dot(lhs: tl.tensor,
         allow_tf32: bool,
         out_dtype: tl.dtype,
         builder: ir.builder) -> tl.tensor:
+    def assert_dtypes_valid(lhs_dtype, rhs_dtype, arch):
+        if is_hip():
+            assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or \
+                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), \
+                f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
+
+            return
+
+        # Checks for non-cuda archs
+        if _is_cuda(builder.arch):
+            # Checks for cuda arch
+            if arch < 90:
+                assert not lhs_dtype.is_fp8e4nv() and not rhs_dtype.is_fp8e4nv(), "Dot op does not support fp8e4nv on CUDA arch < 90"
+                assert lhs_dtype == rhs_dtype, f"First input ({lhs_dtype}) and second input ({rhs_dtype}) must have the same dtype!"
+            else:
+                assert not lhs_dtype.is_fp8e4b15() and not rhs_dtype.is_fp8e4b15(), "Dot op does not support fp8e4b15 on CUDA arch >= 90"
+                assert not lhs_dtype.is_fp8e4b15x4() and not rhs_dtype.is_fp8e4b15x4(), "Dot op does not support fp8e4b15x4 on CUDA arch >= 90"
+                if lhs_dtype.is_int() or rhs_dtype.is_int():
+                    assert lhs_dtype == rhs_dtype, f"Both operands must be same type. First operand ({lhs_dtype}) and second operand ({rhs_dtype})"
+                    assert lhs_dtype.is_int8() or lhs_dtype.is_uint8(), f"Both operands must be either int8 or uint8. Operand type ({lhs_dtype})"
+                elif lhs_dtype.is_fp8() or rhs_dtype.is_fp8():
+                    assert lhs_dtype.is_fp8e4nv() or lhs_dtype.is_fp8e5(), f"Only supports fp8e4nv or fp8e5. First operand ({lhs_dtype})"
+                    assert rhs_dtype.is_fp8e4nv() or rhs_dtype.is_fp8e5(), f"Only supports fp8e4nv or fp8e5. Second operand ({rhs_dtype})"
+                else:
+                    assert lhs_dtype.is_fp16() or lhs_dtype.is_bf16() or lhs_dtype.is_fp32() or lhs_dtype.is_int1(), f"Unsupported dtype {lhs_dtype}"
+                    assert rhs_dtype.is_fp16() or rhs_dtype.is_bf16() or rhs_dtype.is_fp32() or rhs_dtype.is_int1(), f"Unsupported dtype {rhs_dtype}"
+                    assert lhs_dtype == rhs_dtype, f"First input ({lhs_dtype}) and second input ({rhs_dtype}) must have the same dtype!"
+            return
+
+        assert lhs_dtype == rhs_dtype, f"First input ({lhs_dtype}) and second input ({rhs_dtype}) must have the same dtype!"
+        return
+
     assert lhs.type.is_block() and rhs.type.is_block()
-    assert lhs.dtype == rhs.dtype, f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
+    assert_dtypes_valid(lhs.dtype, rhs.dtype, builder.arch)
+
     assert len(lhs.shape) == 2, f"First input shape ({lhs.shape}) is not two dimensional!"
     assert len(rhs.shape) == 2, f"Second input shape ({rhs.shape}) is not two dimensional!"
     assert lhs.shape[1].value == rhs.shape[0].value, f"First input shape ({lhs.shape}) and second input shape {rhs.shape} are not compatible for matmul (second index of first shape ({lhs.shape[1].value}) must be equal to first index of second shape ({rhs.shape[0].value})"
     assert lhs.shape[0].value >= 16 and lhs.shape[1].value >= 16 \
-        and rhs.shape[1].value >= 16,\
+        and rhs.shape[1].value >= 16, \
         f"All values in both first input shape ({lhs.shape}) and second input shape ({rhs.shape}) must be >= 16!"
+
+    # hip for now converts fp8 to fp16 for mixed input
+    if is_hip():
+        if lhs.type.scalar.is_fp8():
+            lhs = cast(lhs, tl.float16, builder)
+        elif rhs.type.scalar.is_fp8():
+            rhs = cast(rhs, tl.float16, builder)
+
     if lhs.type.scalar.is_int():
         assert lhs.type.scalar == tl.int8, "only int8 supported!"
         # TODO: This is CUDA specific, check if ROCm has the same limitation
-        assert lhs.shape[1].value >= 32, "small blocks not supported!"
+        assert is_hip() or lhs.shape[1].value >= 32, "small blocks not supported!"
         _0 = builder.get_int32(0)
         ret_scalar_ty = tl.int32
     elif lhs.type.scalar.is_fp32() or lhs.type.scalar.is_bf16():
@@ -1446,7 +1492,7 @@ def associative_scan(
 
 def _check_dtype(dtypes: List[str]) -> T:
     """
-    We following libdevice's convention to check accepted data types for math functions.
+    We're following libdevice's convention to check accepted data types for math functions.
     It is not a good practice to support all data types as accelerators/GPUs don't support
     many float16 and bfloat16 math operations.
     We should let the users know that they are using and invoke explicit cast to convert

@@ -9,6 +9,7 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include <atomic>
 #include <limits>
 
@@ -29,6 +30,7 @@ getScratchConfigForCvtLayout(triton::gpu::ConvertLayoutOp op, unsigned &inVec,
 template <typename T> class Interval {
 public:
   Interval() {}
+  Interval(T S) : Start(S), End(S+1) {}
   Interval(T S, T E) : Start(S), End(E) { assert(Start <= End); }
   T start() const { return Start; }
   T end() const { return End; }
@@ -43,6 +45,16 @@ public:
   bool operator!=(const Interval &R) const { return !(*this == R); }
   bool operator<(const Interval &R) const {
     return std::make_pair(Start, End) < std::make_pair(R.Start, R.End);
+  }
+  bool adjacent(T Addr) const {
+    return Addr+1 == Start || Addr == End;
+  }
+  bool adjacent(const Interval &R) const {
+    return adjacent(R.Start) || adjacent(R.End-1);
+  }
+
+  Interval merge(const Interval &R) const {
+    return Interval(std::min(Start, R.Start), std::max(End, R.End));
   }
 
 private:
@@ -147,17 +159,17 @@ private:
     BufferKind kind;
     BufferId id;
     size_t size;
+    size_t alignment;
     size_t offset;
 
     bool operator==(const BufferT &other) const { return id == other.id; }
     bool operator<(const BufferT &other) const { return id < other.id; }
 
-    BufferT() : BufferT(BufferKind::Explicit) {}
-    BufferT(BufferKind kind)
-        : kind(kind), id(InvalidBufferId), size(0), offset(0) {}
-    BufferT(BufferKind kind, size_t size) : BufferT(kind, size, 0) {}
-    BufferT(BufferKind kind, size_t size, size_t offset)
-        : kind(kind), id(nextId++), size(size), offset(offset) {}
+    BufferT() : BufferT(BufferKind::Explicit, 0) {}
+    BufferT(BufferKind kind, size_t size, size_t alignment = 4,
+            size_t offset = 0)
+        : kind(kind), id(nextId++), size(size), alignment(alignment),
+          offset(offset) {}
   };
 
   /// Op -> Scratch Buffer

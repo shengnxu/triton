@@ -739,6 +739,8 @@ for mode in ['fwd', 'bwd']:
         if mode == 'bwd' and causal == False:
             continue
         for D_HEAD in [64, 128]:
+            if mode == 'bwd' and D_HEAD == 128:
+                continue
             configs.append(triton.testing.Benchmark(
                 x_names=['N_CTX'],
                 x_vals=[2**i for i in range(10, 15)],

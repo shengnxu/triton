@@ -275,13 +275,8 @@ Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 }
 
 static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
-<<<<<<< HEAD
-                            Value val, int i, const std::string &shuffleType,
-                            const std::string &clamp, Value laneId = Value()) {
-=======
-                            Value val, Value i, NVVM::ShflKind mode,
-                            Value clamp) {
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+                            Value val, Value i,  NVVM::ShflKind mode,
+                            Value clamp, Value laneId = Value()) {
   unsigned bits = val.getType().getIntOrFloatBitWidth();
 
   if (bits == 64) {
@@ -289,23 +284,18 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     Value vec = bitcast(val, vecTy);
     Value val0 = extract_element(f32_ty, vec, i32_val(0));
     Value val1 = extract_element(f32_ty, vec, i32_val(1));
-<<<<<<< HEAD
-    val0 = commonShflSync(loc, rewriter, val0, i, shuffleType, clamp, laneId);
-    val1 = commonShflSync(loc, rewriter, val1, i, shuffleType, clamp, laneId);
-=======
-    val0 = commonShflSync(loc, rewriter, val0, i, mode, clamp);
-    val1 = commonShflSync(loc, rewriter, val1, i, mode, clamp);
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+    val0 = commonShflSync(loc, rewriter, val0, i, mode, clamp, laneId);
+    val1 = commonShflSync(loc, rewriter, val1, i, mode, clamp, laneId);
     vec = undef(vecTy);
     vec = insert_element(vecTy, vec, val0, i32_val(0));
     vec = insert_element(vecTy, vec, val1, i32_val(1));
     return bitcast(vec, val.getType());
   }
-<<<<<<< HEAD
 
 #ifdef USE_ROCM
   GCNBuilder builder;
-  if (shuffleType == "bfly") {
+  switch (kind) {
+  case NVVM::ShflKind::bfly:
     if (i > 16) {
       Value threadId =
           rewriter
@@ -335,7 +325,8 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
           builder.newConstantOperand("offset:" + std::to_string(masks[i]));
       (*shfl)(dOpr, aOpr, maskOpr);
     }
-  } else { // shuffle_up
+    break;
+  case NVVM::ShflKind::up:
     assert(shuffleType == "up" && "Only shfl_bfly and shfl_up are supported");
     Value mask = icmp_slt(laneId, i32_val(i));
     Value delta = sub(laneId, i32_val(i));
@@ -347,22 +338,12 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     auto addrOpr = builder.newOperand(permuteAddr, "v");
     auto aOpr = builder.newOperand(val, "v");
     (*shfl)(dOpr, addrOpr, aOpr);
-  }
+    break
+
   auto swait = builder.create("s_waitcnt lgkmcnt(0)");
   (*swait)();
   return builder.launch(rewriter, loc, val.getType(), true);
 #else
-  PTXBuilder builder;
-  auto &shfl = builder.create("shfl.sync")->o(shuffleType).o("b32");
-  auto *dOpr = builder.newOperand("=r");
-  auto *aOpr = builder.newOperand(val, "r");
-  auto *bOpr = builder.newConstantOperand(i);
-  auto *cOpr = builder.newConstantOperand(clamp);
-  auto *maskOpr = builder.newConstantOperand("0xffffffff");
-  shfl(dOpr, aOpr, bOpr, cOpr, maskOpr);
-  return builder.launch(rewriter, loc, val.getType(), false);
-#endif
-=======
   Type type = val.getType();
   if (type != i32_ty) {
     val = bitcast(val, int_ty(bits));
@@ -376,7 +357,7 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     result = bitcast(result, type);
   }
   return result;
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+#endif
 }
 
 Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
@@ -386,14 +367,9 @@ Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
 }
 
 Value shflUpSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
-<<<<<<< HEAD
                  int i, Value laneId) {
-  return commonShflSync(loc, rewriter, val, i, "up", "0x0", laneId);
-=======
-                 int i) {
   return commonShflSync(loc, rewriter, val, i32_val(i), NVVM::ShflKind::up,
-                        i32_val(0x0));
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
+                        i32_val(0x0), laneId);
 }
 
 Value shflIdxSync(Location loc, ConversionPatternRewriter &rewriter, Value val,

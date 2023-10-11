@@ -17,7 +17,7 @@ import pdb
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = True
+tuning_full_space = False
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):

@@ -51,13 +51,6 @@ def matmul_kernel(
         pid_m = first_pid_m + (pid % group_size_m)
         pid_n = (pid % num_pid_in_group) // group_size_m
 
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
-
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
     # We will advance this pointer as we move in the K direction
@@ -160,7 +153,7 @@ def matmul(a, b, c, output_type, block_m, block_n, block_k, group_m, split_k, nu
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
-    for _ in range(5):
+    for _ in range(1):
         matmul_kernel[grid](
             a, b, c,
             M, N, K,

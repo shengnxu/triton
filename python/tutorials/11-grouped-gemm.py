@@ -30,6 +30,39 @@ import triton.language as tl
     configs= [
         triton.Config(
             {
+                'BLOCK_SIZE_M': 128,
+                'BLOCK_SIZE_N': 128,
+                'BLOCK_SIZE_K': 32,
+                'NUM_SM': 84,
+            }
+        ),
+        triton.Config(
+            {
+                'BLOCK_SIZE_M': 128,
+                'BLOCK_SIZE_N': 128,
+                'BLOCK_SIZE_K': 32,
+                'NUM_SM': 128,
+            }
+        ),
+        triton.Config(
+            {
+                'BLOCK_SIZE_M': 64,
+                'BLOCK_SIZE_N': 64,
+                'BLOCK_SIZE_K': 32,
+                'NUM_SM': 84,
+            }
+        ),
+        triton.Config(
+            {
+                'BLOCK_SIZE_M': 64,
+                'BLOCK_SIZE_N': 64,
+                'BLOCK_SIZE_K': 32,
+                'NUM_SM': 128,
+            }
+        ),
+    ] if torch.version.hip is None else [
+        triton.Config(
+            {
                 'BLOCK_SIZE_M': 32,
                 'BLOCK_SIZE_N': 32,
                 'BLOCK_SIZE_K': 64,

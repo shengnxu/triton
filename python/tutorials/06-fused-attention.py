@@ -80,6 +80,8 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 32, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 32, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': True}, num_stages=1, num_warps=4),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=4),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=4),
@@ -101,7 +103,7 @@ def _attn_fwd_inner(
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=0, num_warps=4),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 4, 'pre_load_v': False}, num_stages=0, num_warps=4),
    ],
-   key=['N_CTX', 'STAGE'],
+   key=['N_CTX', 'STAGE', 'BLOCK_DMODEL'], verbose = True
 )
 
 
@@ -114,9 +116,9 @@ def _attn_fwd(
     stride_oz, stride_oh, stride_om, stride_on,
     Z, H,
     N_CTX,
+    BLOCK_DMODEL: tl.constexpr,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     pre_load_v: tl.constexpr,
 ):
@@ -747,30 +749,31 @@ except BaseException:
         FLASH_VER = None
 HAS_FLASH = FLASH_VER is not None
 
-BATCH, N_HEADS, N_CTX, D_HEAD = 4, 48, 4096, 64
+BATCH, N_HEADS, N_CTX= 4, 48, 4096
 # vary seq length for fixed head and batch=4
 configs = []
 for mode in ['fwd', 'bwd']:
     for causal in [False, True]:
         if mode == 'bwd' and causal == False:
             continue
-        configs.append(triton.testing.Benchmark(
-            x_names=['N_CTX'],
-            x_vals=[2**i for i in range(10, 15)],
-            line_arg='provider',
-            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-            styles=[('red', '-'), ('blue', '-')],
-            ylabel='ms',
-            plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}-causal={causal}',
-            args={
-                'H': N_HEADS,
-                'BATCH': BATCH,
-                'D_HEAD': D_HEAD,
-                'dtype': torch.float16,
-                'mode': mode,
-                'causal': causal})
-        )
+        for D_HEAD in [64, 128]:
+            configs.append(triton.testing.Benchmark(
+                x_names=['N_CTX'],
+                x_vals=[2**i for i in range(10, 15)],
+                line_arg='provider',
+                line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+                line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+                styles=[('red', '-'), ('blue', '-')],
+                ylabel='ms',
+                plot_name=f'fused-attention-batch{BATCH}-head{N_HEADS}-d{D_HEAD}-{mode}-causal={causal}',
+                args={
+                    'H': N_HEADS,
+                    'BATCH': BATCH,
+                    'D_HEAD': D_HEAD,
+                    'dtype': torch.float16,
+                    'mode': mode,
+                    'causal': causal})
+            )
 
 
 @triton.testing.perf_report(configs)

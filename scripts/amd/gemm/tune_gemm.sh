@@ -23,4 +23,4 @@ DRIVER=$(echo $DRIVER | sed -e "s/matmul_grouped.py/matmul.py/g")
 # -mnk are the size of input matrices, matrix (m, k) x (k, n)
 # --rocprof means using rocprof to measure kernel time. If not set,
 # kernel time is from do_bench()
-python $DRIVER -m $M -n $N -k $K
+python $DRIVER -m $M -n $N -k $K --rocprof

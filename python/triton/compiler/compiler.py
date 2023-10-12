@@ -248,7 +248,7 @@ def get_amdgcn_bitcode_paths(arch):
 
 def get_amdgpu_arch_fulldetails():
     """
-    get the amdgpu fulll ISA details for compiling:
+    get the amdgpu full ISA details for compiling:
     i.e., arch_triple: amdgcn-amd-amdhsa; arch_name: gfx906; arch_features: sramecc+:xnack-
     """
     try:
@@ -262,7 +262,8 @@ def get_amdgpu_arch_fulldetails():
         arch_features = ""
 
         return [arch_triple, arch_name, arch_features, warp_size]
-    except BaseException:
+    except BaseException as e:
+        print("Error: Attempting to get amgpu ISA Details {}".format(e))
         return None
 
 
@@ -458,7 +459,11 @@ def compile(fn, **kwargs):
     capability = kwargs.get("cc", None)
 
     if device_type in ["cuda", "hip"]:
-        arch = get_architecture_descriptor(capability)
+        # hip with kwargs.get("cc", None) causes multiprocessing issues in torch.compile
+        if device_type == "hip":
+            arch = get_architecture_descriptor(None if type(capability) is int else capability)
+        else:
+            arch = get_architecture_descriptor(capability)
     else:
         _device_backend = get_backend(device_type)
         assert _device_backend

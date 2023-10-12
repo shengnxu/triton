@@ -102,11 +102,11 @@ struct DotOpMFMAConversionHelper {
       }
     case MatrixCoreType::INT32_INT8_INT8_INT32:
       if (mfmaDescr.size == 16) {
-        return rewriter.create<ROCDL::mfma_i32_16x16x16i8>(
+        return rewriter.create<ROCDL::mfma_i32_16x16x32i8>(
             loc, TypeRange{resType},
             ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
       } else {
-        return rewriter.create<ROCDL::mfma_i32_32x32x8i8>(
+        return rewriter.create<ROCDL::mfma_i32_32x32x16i8>(
             loc, TypeRange{resType},
             ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
       }

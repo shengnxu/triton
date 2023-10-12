@@ -181,7 +181,7 @@ public:
           kDim = 8;
       }
       if (elemType.isInteger(8))
-        kDim = 8;
+        kDim = 16;
     } else {
       if (elemType.isF32())
         kDim = 4;
@@ -194,7 +194,7 @@ public:
           kDim = 16;
       }
       if (elemType.isInteger(8))
-        kDim = 16;
+        kDim = 32;
     }
     assert(kDim != -1);
     return {nonKDim, kDim};

@@ -175,6 +175,8 @@ def matmul_kernel(
         a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
         b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
 
+    mask_a = offs_am[:, None] < M
+    mask_b = offs_bn[None, :] < N
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
@@ -185,12 +187,13 @@ def matmul_kernel(
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
+            a = tl.load(a_ptrs, mask=mask_a, other=0.0)
+            b = tl.load(b_ptrs, mask=mask_b, other=0.0)
         else:
             k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < k_remaining, other=0.0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < k_remaining, other=0.0)
+            a = tl.load(a_ptrs, mask=(offs_k[None, :] < k_remaining) and mask_a, other=0.0)
+            b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_remaining) and mask_b, other=0.0)
+
         # We accumulate along the K dimension.
         accumulator += tl.dot(a, b)
         # Advance the ptrs to the next K block.

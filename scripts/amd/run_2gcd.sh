@@ -16,7 +16,6 @@ BENCHMARK_DRIVER=${TRITON_DIR}/scripts/amd/benchmark_flash_attention.py
 
 bs=2
 nheads=48
-d=64
 mode=$1
 
 declare -A repA
@@ -35,31 +34,37 @@ else
     repA[16384]=100
 fi
 
-echo "Benchmarking FA $mode kernel on 2 GCDs"
-for seqlen in 1024 2048  4096 8192 16384
+for d in 64 128
 do
-    rep=${repA[$seqlen]}
-    args="-bs $bs -nheads $nheads -d $d -seqlen $seqlen -rep $rep -mode $mode"
+    echo "Benchmarking FA $mode kernel with D = $d on 2 GCDs"
+    for seqlen in 1024 2048  4096 8192 16384
+    do
+        rep=${repA[$seqlen]}
+        args="-bs $bs -nheads $nheads -d $d -seqlen $seqlen -mode $mode"
 
-    start_time=$(date +%s.%3N)
-    export ROCR_VISIBLE_DEVICES=0
-    python ${BENCHMARK_DRIVER} $args &
+        ## pre-compile the kernel
+        python ${BENCHMARK_DRIVER} $args -rep 1
 
-    export ROCR_VISIBLE_DEVICES=1
-    python ${BENCHMARK_DRIVER} $args
+        start_time=$(date +%s.%3N)
+        export ROCR_VISIBLE_DEVICES=0
+        python ${BENCHMARK_DRIVER} $args -rep $rep &
 
-    wait
-    end_time=$(date +%s.%3N)
+        export ROCR_VISIBLE_DEVICES=1
+        python ${BENCHMARK_DRIVER} $args -rep $rep
 
-    # elapsed time with millisecond resolution
-    # keep three digits after floating point.
-    elapsed=$(echo "scale=3; $end_time - $start_time" | bc)
-    # Convert second to tflops
-    if [[ $mode == "fwd" ]];then
-        tflops=$(echo "scale=2; 8*$seqlen*$seqlen*$bs*$nheads*$d*$rep/$elapsed/1000000000000" | bc)
-    else
-        tflops=$(echo "scale=2; 7*4*0.5*$seqlen*$seqlen*$bs*$nheads*$d*$rep/$elapsed/1000000000000" | bc)
-    fi
-    echo "$seqlen  $tflops tflops $elapsed s"
+        wait
+        end_time=$(date +%s.%3N)
 
+        # elapsed time with millisecond resolution
+        # keep three digits after floating point.
+        elapsed=$(echo "scale=3; $end_time - $start_time" | bc)
+        # Convert second to tflops
+        if [[ $mode == "fwd" ]];then
+            tflops=$(echo "scale=2; 8*$seqlen*$seqlen*$bs*$nheads*$d*$rep/$elapsed/1000000000000" | bc)
+        else
+            tflops=$(echo "scale=2; 7*4*0.5*$seqlen*$seqlen*$bs*$nheads*$d*$rep/$elapsed/1000000000000" | bc)
+        fi
+        echo "$seqlen  $tflops tflops $elapsed s"
+
+    done
 done

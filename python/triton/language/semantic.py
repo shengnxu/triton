@@ -1351,7 +1351,7 @@ def dot(lhs: tl.tensor,
         f"All values in both first input shape ({lhs.shape}) and second input shape ({rhs.shape}) must be >= 16!"
 
     # hip for now converts fp8 to fp16 for mixed input
-    if is_hip():
+    if is_hip() and gpu_matrix_core_version() != 3:
         if lhs.type.scalar.is_fp8():
             lhs = cast(lhs, tl.float16, builder)
         if rhs.type.scalar.is_fp8():

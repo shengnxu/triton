@@ -180,9 +180,9 @@ public:
         if (mfmaVersion >= 2)
           kDim = 8;
       }
-      if (elemType.isFloat8E4M3B11FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
         assert(mfmaVersion == 3);
-        kDim == 16;
+        kDim = 16;
       }
       if (elemType.isInteger(8))
         kDim = 8;
@@ -197,9 +197,9 @@ public:
         if (mfmaVersion >= 2)
           kDim = 16;
       }
-      if (elemType.isFloat8E4M3B11FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
         assert(mfmaVersion == 3);
-        kDim == 32;
+        kDim = 32;
       }
       if (elemType.isInteger(8))
         kDim = 16;

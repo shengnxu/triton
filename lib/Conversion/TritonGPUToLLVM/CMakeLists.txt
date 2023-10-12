@@ -1,4 +1,11 @@
 add_library(rocm_libraries SHARED IMPORTED )
+
+message(STATUS "ROCM_LIBRARIES: ${ROCM_LIBRARIES}")
+
+if(NOT DEFINED ROCM_LIBRARIES)
+    message(FATAL_ERROR "ROCM_LIBRARIES is not set")
+endif()
+
 set_target_properties(rocm_libraries PROPERTIES IMPORTED_LOCATION ${ROCM_LIBRARIES})
 
 add_mlir_conversion_library(TritonGPUToLLVM

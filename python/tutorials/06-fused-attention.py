@@ -79,17 +79,6 @@ def _attn_fwd_inner(
     return acc, l_i, m_i
 
 
-@triton.autotune(
-   configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4), # d64-False
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
-   ],
-   key=['N_CTX', 'STAGE', 'BLOCK_DMODEL'],
-)
-
-
 @triton.jit
 def _attn_fwd(
     Q, K, V, sm_scale, M, Out,
@@ -518,7 +507,7 @@ class _attention(torch.autograd.Function):
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
-        assert Lk in {16, 32, 64, 128}
+        assert Lk in {64, 128}
         o = torch.empty_like(q)
         if torch.version.hip is None:
             BLOCK_M = 128
@@ -527,11 +516,29 @@ class _attention(torch.autograd.Function):
             num_warps = 4 if Lk <= 64 else 8
 
         stage = 3 if causal else 1
-        grid = lambda META: (
-            triton.cdiv(q.shape[2], META['BLOCK_M']),
-            q.shape[0] * q.shape[1],
-            1
-        )
+
+        ## hardcoded best perf_configs for MI250
+        if Lk == 64:
+            ## D_HEAD = 64
+            BLOCK_M = 128
+            BLOCK_N = 64
+            waves_per_eu = 3
+            num_warps = 4
+            num_stages = 1
+            ## causal=False likes to pre load v but causal=True does not
+            pre_load_v = False if causal else True
+        else:
+            ## D_HEAD = 128
+            BLOCK_M = 256
+            BLOCK_N = 64
+            waves_per_eu = 2
+            num_warps = 8
+            num_stages = 1
+            pre_load_v = False
+            if causal and q.shape[2] >= 8192:
+                BLOCK_N = 128
+
+        grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
         _attn_fwd[grid](
@@ -544,12 +551,13 @@ class _attention(torch.autograd.Function):
             N_CTX=q.shape[2],
             BLOCK_DMODEL=Lk,
             STAGE=stage,
+            BLOCK_M = BLOCK_M,
+            BLOCK_N = BLOCK_N,
+            waves_per_eu = waves_per_eu,
+            num_warps = num_warps,
+            num_stages = num_stages,
+            pre_load_v = pre_load_v,
         )
-
-        ## restore the grid for bwd kernel
-        best_config = _attn_fwd.get_best_config(N_CTX = q.shape[2], STAGE = stage, BLOCK_DMODEL=Lk)
-        block_m = int(best_config.__str__().split(",")[0].split("BLOCK_M:")[1])
-        grid = (triton.cdiv(q.shape[2], block_m), q.shape[0] * q.shape[1], 1)
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid

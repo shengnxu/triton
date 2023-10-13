@@ -26,6 +26,7 @@ def get_full_tuning_space():
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
     num_stage_range = [1, 0]
+    waves_per_eu_range = [0,1,2,3,4]
 
     for block_m in block_mn_range:
         for block_n in block_mn_range:
@@ -34,7 +35,8 @@ def get_full_tuning_space():
                     for group_m in group_m_range:
                         for split_k in split_k_range:
                             for num_stages in num_stage_range:
-                                configs.append({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k, 'num_warps': num_warps, 'num_stages': num_stages})
+                                for waves_per_eu in waves_per_eu_range:
+                                    configs.append({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k, 'num_warps': num_warps, 'num_stages': num_stages, 'waves_per_eu': waves_per_eu})
 
     return configs
 
@@ -100,12 +102,13 @@ def read_config(config):
     split_k = config.get('SPLIT_K')
     num_warps = config.get('num_warps')
     num_stages = config.get('num_stages')
-    return block_m, block_n, block_k, group_m, split_k, num_warps, num_stages
+    waves_per_eu = config.get('waves_per_eu')
+    return block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu
 
 
 def gen_kernel_and_configStr_from_config(M, N, K, config):
-    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages = read_config(config)
-    configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}"
+    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu = read_config(config)
+    configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}"
 
     matmul_def_str = f"""
 def matmul_{configStr}(a, b, c):
@@ -125,7 +128,8 @@ def matmul_{configStr}(a, b, c):
         GROUP_SIZE_M = {group_m},
         SPLIT_K = {split_k},
         num_warps = {num_warps},
-        num_stages = {num_stages}
+        num_stages = {num_stages},
+        waves_per_eu = {waves_per_eu}
     )
     return c
 
@@ -181,24 +185,31 @@ import multiprocessing
     b = torch.randn((K, N), device='cuda', dtype=dtype)
     c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     task_args = (M, N, K, dtype)
+
+    if num_threads > 1:
 """
     f_kernel.write(test_gemm_pre_str + "\n")
 
     # warm up call of all matmul functions in parallel
     for config in configs:
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
-        task_str = f"    thread_pool.apply_async(try_config_{configStr}, args=task_args)\n"
+        task_str = f"        thread_pool.apply_async(try_config_{configStr}, args=task_args)\n"
         f_kernel.write(task_str)
 
+    f_kernel.write("""
+        thread_pool.close()
+        thread_pool.join()
+    """)
+    f_kernel.write("else:")
     # call all matmul_xxx functions
     for config in configs:
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
         matmul_call_str = f"""
-    for i in range(10):
-        d = matmul_{configStr}(a, b, c)"""
+        for i in range(10):
+            d = matmul_{configStr}(a, b, c)"""
         f_kernel.write(matmul_call_str + "\n")
     # post string
-    f_kernel.write("    return d\n")
+    f_kernel.write("        return d\n")
 
     ### def main and call test_gemm
     def_main_str = """
@@ -227,7 +238,7 @@ def tune_gemm_config(M, N, K, configs):
 
     ## precompile the kernels in parallel
     ## TODO: parameterize numThreads at this level
-    run_bash_command(f"python generated_kernel{M}{N}{K}.py -n 16")
+    run_bash_command(f"python generated_kernel{M}{N}{K}.py -n 32")
 
     ## profile generated kernels
     run_bash_command(f"rocprof --stats python generated_kernel{M}{N}{K}.py")
@@ -250,7 +261,7 @@ def tune_gemm_config(M, N, K, configs):
     return minTime, bestConfig
 
 
-def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages):
+def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -276,19 +287,20 @@ def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_
         SPLIT_K = split_k,
         num_warps = num_warps,
         num_stages = num_stages,
+        waves_per_eu = waves_per_eu,
     )
     return c
 
 
 def test_correctness(M, N, K, config, verbose, datatype = torch.float16):
-    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages = read_config(config)
+    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu = read_config(config)
 
     torch.manual_seed(0)
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     # Allocates output.
     c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
-    triton_output = matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages)
+    triton_output = matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu)
     torch_output = torch.matmul(a, b)
     #print(f"triton_output={triton_output}")
     #print(f"torch_output={torch_output}")

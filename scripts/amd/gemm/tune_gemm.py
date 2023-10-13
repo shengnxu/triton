@@ -111,34 +111,48 @@ def gen_kernel_and_configStr_from_config(M, N, K, config):
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}"
 
     matmul_def_str = f"""
-def matmul_{configStr}(a, b, c):
-    M, K = a.shape
-    K, N = b.shape
+def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
+    #M, K = a.shape
+    #K, N = b.shape
     grid = triton.cdiv(M, {block_m}) * triton.cdiv(N, {block_n}), {split_k}
     print(f'config: matmul_kernel_{configStr}')
-    matmul_kernel_{configStr}[grid](
-        a, b, c,
-        M, N, K,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        BLOCK_SIZE_M = {block_m},
-        BLOCK_SIZE_N = {block_n},
-        BLOCK_SIZE_K = {block_k},
-        GROUP_SIZE_M = {group_m},
-        SPLIT_K = {split_k},
-        num_warps = {num_warps},
-        num_stages = {num_stages},
-        waves_per_eu = {waves_per_eu}
-    )
+    if warmup:
+        matmul_kernel_{configStr}.warmup(
+            torch.float16, torch.float16, torch.float16,
+            M, N, K,
+            am, ak, bk, bn, cm, cn,
+            BLOCK_SIZE_M = {block_m},
+            BLOCK_SIZE_N = {block_n},
+            BLOCK_SIZE_K = {block_k},
+            GROUP_SIZE_M = {group_m},
+            SPLIT_K = {split_k},
+            num_warps = {num_warps},
+            num_stages = {num_stages},
+            waves_per_eu = {waves_per_eu},
+            grid=(1,)
+        )
+    else:
+        matmul_kernel_{configStr}[grid](
+            a, b, c,
+            M, N, K,
+            am, ak, bk, bn, cm, cn,
+            BLOCK_SIZE_M = {block_m},
+            BLOCK_SIZE_N = {block_n},
+            BLOCK_SIZE_K = {block_k},
+            GROUP_SIZE_M = {group_m},
+            SPLIT_K = {split_k},
+            num_warps = {num_warps},
+            num_stages = {num_stages},
+            waves_per_eu = {waves_per_eu}
+        )
     return c
 
-def try_config_{configStr}(M, N, K, dtype):
-    a = torch.randn((M, K), device='cuda', dtype=dtype)
-    b = torch.randn((K, N), device='cuda', dtype=dtype)
-    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
+def try_config_{configStr}(M, N, K, am, ak, bk, bn, cm, cn, dtype):
+    #a = torch.randn((M, K), device='cuda', dtype=dtype)
+    #b = torch.randn((K, N), device='cuda', dtype=dtype)
+    #c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     try:
-        matmul_{configStr}(a, b, c)
+        matmul_{configStr}(None, None, None, M, N, K, am, ak, bk, bn, cm, cn, True)
     except Exception:
         print(f'invalid config {configStr}')
 """
@@ -184,7 +198,10 @@ import multiprocessing
     a = torch.randn((M, K), device='cuda', dtype=dtype)
     b = torch.randn((K, N), device='cuda', dtype=dtype)
     c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
-    task_args = (M, N, K, dtype)
+    task_args = (M, N, K,
+                 a.stride(0), a.stride(1),
+                 b.stride(0), b.stride(1),
+                 c.stride(0), c.stride(1), dtype)
 
     if num_threads > 1:
 """
@@ -206,7 +223,7 @@ import multiprocessing
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
         matmul_call_str = f"""
         for i in range(10):
-            d = matmul_{configStr}(a, b, c)"""
+            d = matmul_{configStr}(a, b, c, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
         f_kernel.write(matmul_call_str + "\n")
     # post string
     f_kernel.write("        return d\n")

@@ -500,7 +500,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           }
         }
         if (aElemTy == i8_ty)
-          valVec = bitcast(valVec, i32_ty);
+          valVec = bitcast(valVec, i64_ty);
         ha.push_back(valVec);
       }
     }
@@ -542,7 +542,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           }
         }
         if (aElemTy == i8_ty)
-          valVec = bitcast(valVec, i32_ty);
+          valVec = bitcast(valVec, i64_ty);
         ha.push_back(valVec);
       }
     }
@@ -646,7 +646,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           }
         }
         if (bElemTy == i8_ty)
-          valVec = bitcast(valVec, i32_ty);
+          valVec = bitcast(valVec, i64_ty);
         hb.push_back(valVec);
       }
     }
@@ -686,7 +686,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           }
         }
         if (bElemTy == i8_ty)
-          valVec = bitcast(valVec, i32_ty);
+          valVec = bitcast(valVec, i64_ty);
         hb.push_back(valVec);
       }
     }

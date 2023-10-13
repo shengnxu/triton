@@ -140,67 +140,69 @@ const std::string Fp8E5M2_to_Fp16 = "{                           \n"
 
 #ifdef USE_ROCM
 
-// static Value adjust_val(Location loc, ConversionPatternRewriter &rewriter, Value v) {
-//   auto fp8x2VecTy = vec_ty(i8_ty, 2);
-//   Value a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
-//   a = insert_element(fp8x2VecTy, a, v, i32_val(1));
-//   a = bitcast(a, i16_ty);
-
-//   auto e_mask = int_val(16, 0x7C00);
-//   auto e = and_(i16_ty, a, e_mask);
-
-//   auto m = and_(i16_ty, a, int_val(16, 0x0300));
-//   auto sign = and_(i16_ty, a, int_val(16, 0x8000));
-
-//   // check whether all exponents are zeros
-//   auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
-
-//   // case 1, e is zero, need to move m right by 1 bit
-//   auto m1 = lshr(i16_ty, m, int_val(16, 1));
-//   auto o0 = or_(i16_ty, sign, m1);
-
-//   // case 2, e is nonzero, sub exponent by 1
-//   auto b = and_(i16_ty, a, int_val(16, 0x7FFF));
-//   auto o1 = sub(i16_ty, b, int_val(16, 0x0400));
-//   o1 = or_(i16_ty, o1, sign);
-
-//   return select(e_is_zero, o0, o1);
-// }
-
 static Value adjust_val(Location loc, ConversionPatternRewriter &rewriter, Value v) {
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  Value a = undef(fp8x2VecTy);
+  a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
+  a = insert_element(fp8x2VecTy, a, v, i32_val(1));
+  a = bitcast(a, i16_ty);
 
-  Value a = undef(fp8x4VecTy);
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
-  a = insert_element(fp8x4VecTy, a, v, i32_val(1));
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(3));
-  a = bitcast(a, i32_ty);
+  auto e_mask = int_val(16, 0x7C00);
+  auto e = and_(i16_ty, a, e_mask);
 
-  auto e_mask = int_val(32, 0x7C00);
-  auto e = and_(i32_ty, a, e_mask);
-
-  auto m = and_(i32_ty, a, i32_val(0x0300));
-  auto sign = and_(i32_ty, a, i32_val(0x8000));
+  auto m = and_(i16_ty, a, int_val(16, 0x0300));
+  auto sign = and_(i16_ty, a, int_val(16, 0x8000));
 
   // check whether all exponents are zeros
-  auto e_is_zero = icmp_eq(e, i32_val(0));
+  auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
 
   // case 1, e is zero, need to move m right by 1 bit
-  auto m1 = lshr(i32_ty, m, i32_val(1));
-  auto o0 = or_(i32_ty, sign, m1);
+  auto m1 = lshr(i16_ty, m, int_val(16, 1));
+  auto o0 = or_(i16_ty, sign, m1);
 
   // case 2, e is nonzero, sub exponent by 1
-  auto b = and_(i32_ty, a, i32_val(0x7FFF));
-  auto o1t = sub(i32_ty, b, i32_val(0x0400));
-  auto o1 = or_(i32_ty, o1t, sign);
+  auto b = and_(i16_ty, a, int_val(16, 0x7FFF));
+  auto o1v = sub(i16_ty, b, int_val(16, 0x0400));
+  auto o1 = or_(i16_ty, o1v, sign);
 
-  auto o = select(e_is_zero, o0, o1);
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  auto fp16x2Vec = bitcast(o, fp16x2VecTy);
-
-  return extract_element(f16_ty, fp16x2Vec, i32_val(0));
+  auto io = select(e_is_zero, o0, o1);
+  return bitcast(io, f16_ty);
 }
+
+// static Value adjust_val(Location loc, ConversionPatternRewriter &rewriter, Value v) {
+//   auto fp8x4VecTy = vec_ty(i8_ty, 4);
+
+//   Value a = undef(fp8x4VecTy);
+//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
+//   a = insert_element(fp8x4VecTy, a, v, i32_val(1));
+//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
+//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(3));
+//   a = bitcast(a, i32_ty);
+
+//   auto e_mask = int_val(32, 0x7C00);
+//   auto e = and_(i32_ty, a, e_mask);
+
+//   auto m = and_(i32_ty, a, i32_val(0x0300));
+//   auto sign = and_(i32_ty, a, i32_val(0x8000));
+
+//   // check whether all exponents are zeros
+//   auto e_is_zero = icmp_eq(e, i32_val(0));
+
+//   // case 1, e is zero, need to move m right by 1 bit
+//   auto m1 = lshr(i32_ty, m, i32_val(1));
+//   auto o0 = or_(i32_ty, sign, m1);
+
+//   // case 2, e is nonzero, sub exponent by 1
+//   auto b = and_(i32_ty, a, i32_val(0x7FFF));
+//   auto o1t = sub(i32_ty, b, i32_val(0x0400));
+//   auto o1 = or_(i32_ty, o1t, sign);
+
+//   auto o = select(e_is_zero, o0, o1);
+//   auto fp16x2VecTy = vec_ty(f16_ty, 2);
+//   auto fp16x2Vec = bitcast(o, fp16x2VecTy);
+
+//   return extract_element(f16_ty, fp16x2Vec, i32_val(0));
+// }
 
 
 static SmallVector<Value>

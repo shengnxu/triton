@@ -899,7 +899,8 @@ private:
         Type BElType =
             dotOp.getA().getType().cast<RankedTensorType>().getElementType();
 
-        auto maxBitWidth = std::max(AElType.getIntOrFloatBitWidth(), BElType.getIntOrFloatBitWidth());
+        auto maxBitWidth = std::max(AElType.getIntOrFloatBitWidth(),
+                                    BElType.getIntOrFloatBitWidth());
 
         // TODO check mfma tensor core version compatibility
         if (maxBitWidth == 8)

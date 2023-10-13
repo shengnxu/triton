@@ -175,11 +175,11 @@ struct DotOpMFMAConversionHelper {
 
     auto dotOpEncoding = aTensorTy.getEncoding().cast<DotOperandEncodingAttr>();
     auto mfmaEncoding = dotOpEncoding.getParent().cast<MfmaEncodingAttr>();
-    if (aElemTy.isFloat8E4M3B11FNUZ() && bElemTy.isFloat8E4M3B11FNUZ())
+    if (aElemTy.isFloat8E4M3FNUZ() && bElemTy.isFloat8E4M3FNUZ())
       return MatrixCoreType::FP32_FP8_FP8_FP32;
-    if (aElemTy.isFloat8E4M3B11FNUZ() && bElemTy.isFloat8E5M2FNUZ())
+    if (aElemTy.isFloat8E4M3FNUZ() && bElemTy.isFloat8E5M2FNUZ())
       return MatrixCoreType::FP32_FP8_BF8_FP32;
-    if (aElemTy.isFloat8E5M2FNUZ() && bElemTy.isFloat8E4M3B11FNUZ())
+    if (aElemTy.isFloat8E5M2FNUZ() && bElemTy.isFloat8E4M3FNUZ())
       return MatrixCoreType::FP32_BF8_FP8_FP32;
     if (aElemTy.isFloat8E5M2FNUZ() && bElemTy.isFloat8E5M2FNUZ())
       return MatrixCoreType::FP32_BF8_BF8_FP32;

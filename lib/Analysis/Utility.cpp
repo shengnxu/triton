@@ -394,7 +394,7 @@ bool supportMFMATypes(Type a, Type b) {
     return false;
 
   auto F8E4M3 = TypeID::get<mlir::Float8E4M3FNUZType>();
-  auto F8E5M2 = TypeID::get<mlir::Float8E5M2Type>();
+  auto F8E5M2 = TypeID::get<mlir::Float8E5M2FNUZType>();
   auto F16 = TypeID::get<mlir::Float16Type>();
   auto BF16 = TypeID::get<mlir::BFloat16Type>();
   auto F32 = TypeID::get<mlir::Float32Type>();

@@ -1311,7 +1311,7 @@ def dot(lhs: tl.tensor,
     def assert_dtypes_valid(lhs_dtype, rhs_dtype, arch):
         if is_hip():
             assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or \
-                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), \
+                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()) or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8()), \
                 f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
 
             return

@@ -246,7 +246,7 @@ def main():
     f_kernel.close()
 
 
-def tune_gemm_config(M, N, K, configs):
+def tune_gemm_config(M, N, K, configs, verbose=False):
     ## Generate kernel out of all configs
     generate_kernel(M, N, K, configs)
 
@@ -255,10 +255,17 @@ def tune_gemm_config(M, N, K, configs):
 
     ## precompile the kernels in parallel
     ## TODO: parameterize numThreads at this level
+    start_time = datetime.now()
     run_bash_command(f"python generated_kernel{M}{N}{K}.py -n 32")
+    compile_time = datetime.now()
+    if verbose:
+        print(f"compile time: {compile_time - start_time}")
 
     ## profile generated kernels
     run_bash_command(f"rocprof --stats python generated_kernel{M}{N}{K}.py")
+    profile_time = datetime.now()
+    if verbose:
+        print(f"profile time: {profile_time - compile_time}")
 
     ## post process results.csv to get the best config and minTime
     ## TODO: process the file in parallel
@@ -275,6 +282,9 @@ def tune_gemm_config(M, N, K, configs):
         else:
             min_us = -1
             print(f"invalid config: SIZE {M} {N} {K}: {config}")
+    post_time = datetime.now()
+    if verbose:
+        print(f"post procesing time: {post_time - profile_time}")
     return minTime, bestConfig
 
 

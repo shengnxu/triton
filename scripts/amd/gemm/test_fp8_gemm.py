@@ -152,7 +152,7 @@ def gen_input(M, N, d_type, seed, device='cuda'):
         input_f16 = input
     else: # d_type is float8
         assert d_type in torch_to_tl_fp8_types
-        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') /2.0
+        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
         torch_f8 = raw_data.to(d_type)
         # input = torch_f8
         input = triton.reinterpret(torch_f8, torch_to_tl_fp8_types[d_type])
@@ -172,12 +172,8 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
     print(f'gold = {golden}')
     print(f'c = {c}')
 
-    golden_abs_err = 0.01
-    golden_rel_err = 0.01
-
     torch.set_printoptions(profile="full")
-    torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
-    # assert torch.allclose(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err))
+    torch.testing.assert_close(c, golden, rtol=1e-2, atol=1e-1, check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -203,10 +199,10 @@ def main():
     K = args.k
     a_type = torch.float16
     b_type = torch.float16
-    fp8_type = torch.float8_e4m3fnuz
+    # fp8_type = torch.float8_e4m3fnuz
     # fp8_type = torch.float8_e5m2fnuz
     # fp8_type = torch.float8_e5m2
-    # fp8_type = torch.float8_e4m3fn
+    fp8_type = torch.float8_e4m3fn
     if args.fp8a:
         a_type = fp8_type
     if args.fp8b:

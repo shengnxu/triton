@@ -12,6 +12,7 @@ import triton.language as tl
 from matmul_kernel import matmul_kernel
 
 from datetime import datetime
+import multiprocessing
 
 
 def get_full_tuning_space():
@@ -245,8 +246,13 @@ def main():
     sys.exit(main())""")
     f_kernel.close()
 
+def extract_kernel_time(M, N, K, config):
+    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
+    parse_result_cmd = f'sed -n \'/matmul_kernel_{configStr}/p\' results.csv | awk -F \',\' \'{{print $NF}}\' | tail -n1'
+    parsed_outputs = run_bash_command(parse_result_cmd)
+    return config, parsed_outputs
 
-def tune_gemm_config(M, N, K, configs, verbose=False):
+def tune_gemm_config(M, N, K, configs, verbose=False, num_threads=16):
     ## Generate kernel out of all configs
     generate_kernel(M, N, K, configs)
 
@@ -270,10 +276,15 @@ def tune_gemm_config(M, N, K, configs, verbose=False):
     ## post process results.csv to get the best config and minTime
     ## TODO: process the file in parallel
     minTime = 1024 * 1024 * 1024
+    thread_pool = multiprocessing.Pool(processes=num_threads)
+    tasks = []
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
-        parse_result_cmd = f'sed -n \'/matmul_kernel_{configStr}/p\' results.csv | awk -F \',\' \'{{print $NF}}\' | tail -n1'
-        parsed_outputs = run_bash_command(parse_result_cmd)
+        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config))]
+    thread_pool.close()
+    thread_pool.join()
+
+    for task in tasks:
+        config, parsed_outputs = task.get()
         if parsed_outputs:
             min_us = int(parsed_outputs[0]) / 1000
             if min_us < minTime:

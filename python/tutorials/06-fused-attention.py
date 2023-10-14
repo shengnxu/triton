@@ -80,34 +80,34 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       ##triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
-       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
-       #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
+
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 0, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 0, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 2, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': False}, num_stages=1, num_warps=8),
+       #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 256, 'waves_per_eu': 1, 'pre_load_v': True}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
    ],
    key=['N_CTX', 'STAGE', 'BLOCK_DMODEL'], verbose=True
 )
@@ -835,6 +835,6 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
 
 
 # only works on post-Ampere GPUs right now
-#bench_flash_attention.run(save_path='.', print_data=True)
+bench_flash_attention.run(save_path='.', print_data=True)
 
-test_op_fwd(4, 48, 16384, 128, False)
+#test_op_fwd(4, 48, 16384, 128, False)

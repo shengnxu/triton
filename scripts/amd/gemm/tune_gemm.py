@@ -287,9 +287,10 @@ def tune_gemm_config(M, N, K, configs, verbose=False, num_threads=16, ngpus = 1)
     start_time = datetime.now()
     for fi in range(ngpus):
         run_bash_command(f"python generated_kernel{M}{N}{K}-{fi}.py -n 32")
-    compile_time = datetime.now()
+    compile_end = datetime.now()
+    compile_time = compile_end - start_time
     if verbose:
-        print(f"compile time: {compile_time - start_time}")
+        print(f"compile time: {compile_time}")
 
     ## profile generated kernels
     running = [multiprocessing.Process(target=profile_batch_kernels, args=(M,N,K,fi)) for fi in range(ngpus)]
@@ -298,9 +299,10 @@ def tune_gemm_config(M, N, K, configs, verbose=False, num_threads=16, ngpus = 1)
     for p in running:
         p.join()
 
-    profile_time = datetime.now()
+    profile_end = datetime.now()
+    profile_time = profile_end - compile_end
     if verbose:
-        print(f"profile time: {profile_time - compile_time}")
+        print(f"profile time: {profile_time}")
 
     ## post process results.csv to get the best config and minTime
     ## TODO: process the file in parallel
@@ -325,10 +327,11 @@ def tune_gemm_config(M, N, K, configs, verbose=False, num_threads=16, ngpus = 1)
         else:
             min_us = -1
             print(f"invalid config: SIZE {M} {N} {K}: {config}")
-    post_time = datetime.now()
+    post_end = datetime.now()
+    post_time = post_end - profile_end
     if verbose:
-        print(f"post procesing time: {post_time - profile_time}")
-    return minTime, bestConfig
+        print(f"post procesing time: {post_time}")
+    return minTime, bestConfig, compile_time, profile_time, post_time
 
 
 def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu):
@@ -454,9 +457,11 @@ def main():
     configs_full = get_full_tuning_space()
 
     start_time = datetime.now()
+    print(f"Tuning starts at: {start_time}")
 
     f_results = open(tuning_output_file, 'w')
     for (M, N, K) in mnks:
+        start_local_time = datetime.now()
         ## Obtain a pruned tuning space according to gemm size
         pruned_configs = prune_configs(M, N, K, configs_full)
 
@@ -464,7 +469,7 @@ def main():
         print(f"{size_str} nConfigs: {len(pruned_configs)}", end=" ", flush=True)
 
         ## The main tuning funtion for one gemm size
-        minTime, bestConfig = tune_gemm_config(M, N, K, pruned_configs, ngpus = ngpus, verbose=args.time_breakdown)
+        minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(M, N, K, pruned_configs, ngpus = ngpus, verbose=args.time_breakdown)
 
         ## post processing the numbers
         perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us * 1e-6)
@@ -498,11 +503,15 @@ def main():
         else:
             print("")
 
+        end_local_time = datetime.now()
+        print(f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)")
+
     f_results.close()
 
     end_time = datetime.now()
     tuning_time = end_time - start_time
-    print(f"Tuning time (h:m:s): {tuning_time}")
+    print(f"Tuning ends at: {end_time}")
+    print(f"Total tuning time (h:m:s): {tuning_time}")
 
 
 if __name__ == '__main__':

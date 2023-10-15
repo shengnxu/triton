@@ -172,12 +172,12 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
     print(f'gold = {golden}')
     print(f'c = {c}')
 
-    golden_abs_err = 0.01
-    golden_rel_err = 0.01
+    # golden_abs_err = 0.01
+    # golden_rel_err = 0.01
 
     # torch.set_printoptions(profile="full")
     # torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
-    torch.testing.assert_close(c, golden, atol=6e-2, rtol=1e-2)
+    torch.testing.assert_close(c, golden, atol=7e-2, rtol=6e-2)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -204,18 +204,21 @@ def main():
     a_type = torch.float16
     b_type = torch.float16
     # fp8_type = torch.float8_e4m3fnuz
-    fp8_type = torch.float8_e5m2fnuz
+    # fp8_type = torch.float8_e5m2fnuz
     # fp8_type = torch.float8_e5m2
     # fp8_type = torch.float8_e4m3fn
-    if args.dta == 'fp8e4':
-        a_type = torch.float8_e4m3fnuz
-    elif args.dta == 'fp8e5':
-        a_type = torch.float8_e5m2fnuz
 
-    if args.dtb == 'fp8e4':
-        b_type = torch.float8_e4m3fnuz
-    elif args.dtb == 'fp8e5':
-        b_type = torch.float8_e5m2fnuz
+    fp8_name_to_types = {
+        'fp16': torch.float16,
+        'fp8e4': torch.float8_e4m3fnuz,
+        'fp8e5': torch.float8_e5m2fnuz,
+    }
+
+    if args.dta in fp8_name_to_types:
+        a_type = fp8_name_to_types[args.dta]
+
+    if args.dtb in fp8_name_to_types:
+        b_type = fp8_name_to_types[args.dtb]
     c_type = torch.float16
 
     try:

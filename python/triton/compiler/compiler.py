@@ -282,7 +282,7 @@ arg_type_pattern = {
     "ptx": ptx_arg_type_pattern,
 }
 if is_hip():
-    ttgir_num_warps_pattern = r'"triton_gpu_rocm.num-warps"\s?=\s?(\d+)\s?:'
+    ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
 else:
     ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
 
@@ -359,7 +359,6 @@ def get_arch_default_num_stages(device_type, capability=None):
 
 
 def add_cuda_stages(arch, extern_libs, stages):
-
     stages["ptx"] = (lambda path: Path(path).read_text(),
                      lambda src: llir_to_ptx(src, arch))
     stages["cubin"] = (lambda path: Path(path).read_bytes(),
@@ -385,6 +384,7 @@ def compile(fn, **kwargs):
     is_cuda = device_type == "cuda" and _is_cuda(arch)
     if is_hip():
         is_cuda = False
+    warp_size = CUDA_DEFAULT_WARP_SIZE if _is_cuda(arch) else arch["warp_size"]
     context = ir.context()
     constants = kwargs.get("constants", dict())
     num_warps = kwargs.get("num_warps", get_arch_default_num_warps(device_type))
@@ -424,7 +424,23 @@ def compile(fn, **kwargs):
                           lambda src: ttgir_to_llir(src, extern_libs, arch, tma_infos))
         add_cuda_stages(arch, extern_libs, stages)
     elif device_type == "hip":
-        _device_backend.add_stages(arch, extern_libs, stages, num_warps=num_warps, num_stages=num_stages)
+         # pass the user's configuration to the backend device.
+        arch["num_warps"] = num_warps
+        arch["num_stages"] = num_stages
+        arch["num_ctas"] = num_ctas
+
+        other = {}
+        other["context"] = context
+        other["warp_size"] = warp_size
+        other["cluster_info"] = cluster_info 
+        other["enable_warp_specialization"] = enable_warp_specialization
+        other["enable_persistent"] = enable_persistent
+        other["optimize_epilogue"] = optimize_epilogue 
+        other["tma_infos"] = tma_infos
+        other["waves_per_eu"] = waves_per_eu
+        other["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
+        _device_backend.add_stages(arch, extern_libs, stages, other)
     elif device_type == "xpu":
         stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
                            lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue))

@@ -14,13 +14,18 @@ chmod -R 777 $LOG_DIR
 sh scripts/amd/clean.sh
 
 UNIT_TEST="python/test/unit/language/test_core_amd.py"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_gemm_fp816_mixed_inputs"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_gemm_fp816_mixed_inputs[32-128-64-a_type37-b_type37-out_dtype37]"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_make_range"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_program_functions"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_bin_op"
 # UNIT_TEST="python/test/unit/language/test_core.py::test_empty_kernel[float32]"
 # UNIT_TEST="python/test/unit/runtime/test_cache.py::test_compile_in_subproc"
 # UNIT_TEST="python/test/unit/language/test_core_amd.py::test_shift_op[int8-int8-<<]"
 # UNIT_TEST="python/test/unit/language/test_core_amd.py::test_shift_op[int32-int32->>]"
 # UNIT_TEST="python/test/unit/language/test_core.py::test_bin_op"
 # UNIT_TEST="python/test/unit/language/test_core.py::test_bin_op[float32-float32-+]"
-# UNIT_TEST="python/test/unit/language/test_core.py::test_bin_op[int8-float16-%]"
+# UNIT_TEST="python/test/unit/language/test_core_amd.py::test_bin_op[int8-float16-%]"
 # UNIT_TEST="python/test/unit/language/test_core_amd.py::test_masked_load_shared_memory[dtype0]"
 # UNIT_TEST="python/test/unit/language/test_core_amd.py::test_masked_load_shared_memory[dtype1]"
 # UNIT_TEST="python/test/unit/language/test_elementwise.py"
@@ -39,7 +44,7 @@ if [ "$1" == "backtrace" ]; then
 		2>&1 | tee $LOG_DIR/backtrace.log
 
 else
-	pytest --capture=tee-sys -rfs --verbose "$UNIT_TEST" 2>&1 | tee $LOG_DIR/unit_test.log
+	pytest -n 32 --capture=tee-sys -rfs --verbose "$UNIT_TEST" 2>&1 | tee $LOG_DIR/unit_test.log
 fi
 
-# bash scripts/amd/cache_print.sh  2>&1 |tee $LOG_DIR/cache.log
+bash scripts/amd/cache_print.sh  2>&1 |tee $LOG_DIR/cache.log

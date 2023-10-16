@@ -1,22 +1,16 @@
 #!/bin/bash
 
-CACHED_FILES=$(find /root/.triton/cache/ -type f -name "*.*")
+ROOT_DIR=$(pwd)
+LOG_DIR=$ROOT_DIR/log
+# rm -rf $LOG_DIR
+mkdir -p $LOG_DIR
+chmod -R 777 $LOG_DIR
 
-rm -rf triton_cache
-mkdir -p triton_cache
+# create log/cache
+CACHE_DIR=$LOG_DIR/cache
+mkdir -p $CACHE_DIR
 
-for file in ${CACHED_FILES[@]}; do
-	echo "$file"
-	if [[ $file == *.so ]]; then
-		echo "Skipping printing .so file"
-	elif [[ $file == *.cubin ]]; then
-		echo "Skipping printing .cubin file"
-	else
-		sed -i -e '$a\' $file
-		cat $file
-		cp $file triton_cache
-	fi
-done
-
-cp /tmp/* triton_cache
-chmod -R 777 triton_cache
+# copy to log/cache
+cp -r /root/.triton/cache/* $CACHE_DIR
+cp -r /tmp/* $CACHE_DIR
+chmod -R 777 $CACHE_DIR

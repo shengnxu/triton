@@ -23,6 +23,11 @@ dtypes = int_dtypes + uint_dtypes + float_dtypes
 dtypes_with_bfloat16 = dtypes + ['bfloat16']
 torch_dtypes = ['bool'] + int_dtypes + ['uint8'] + float_dtypes + ['bfloat16']
 
+
+def hip_skip():
+    import inspect
+    return pytest.skip(f"Skipping {inspect.stack()[1][3]}!")
+
 if is_hip():
     GPU_DIALECT = "triton_gpu"
     THREADS_PER_WARP = 64

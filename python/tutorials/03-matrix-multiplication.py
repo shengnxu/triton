@@ -403,12 +403,22 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
 global verbose
 verbose = False
 
+def get_x_vals():
+    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+    good_vals = [
+        (4864, 4096, 8192),
+        (9728, 8192, 65536)
+    ]
+    x_vals.extend(good_vals)
+
+    return x_vals
+
+
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['M', 'N', 'K'],  # Argument names to use as an x-axis for the plot
-        x_vals=[
-            512 * i for i in range(2, 17)
-        ],  # Different possible values for `x_name`
+        x_vals = get_x_vals(),
+        # x_vals.append(good_vals)
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
         line_vals=['cublas', 'triton'],
@@ -422,7 +432,7 @@ verbose = False
     )
 )
 def benchmark(M, N, K, provider):
-    input_datetype = 'fp8e4b8'
+    input_datetype = 'float16'
     a, a_fp16 = gen_input(M, K, input_datetype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, input_datetype, 2, device='cuda')
     # Allocates output.

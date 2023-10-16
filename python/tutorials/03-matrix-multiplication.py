@@ -407,7 +407,7 @@ verbose = False
     triton.testing.Benchmark(
         x_names=['M', 'N', 'K'],  # Argument names to use as an x-axis for the plot
         x_vals=[
-            128 * i for i in range(32, 33)
+            512 * i for i in range(2, 17)
         ],  # Different possible values for `x_name`
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`

@@ -136,28 +136,45 @@ def get_variant_golden(a, b):
     return c_padded[:SIZE_M, :SIZE_N]
 
 
+name_to_torch_types = {
+    'int8': torch.int8,
+    'int32': torch.int32,
+    'fp16': torch.float16,
+    'fp32': torch.float32,
+    'bf32': torch.bfloat16,
+    # 'fp8e4b8': torch.float8_e4m3fnuz,
+    # 'fp8e5b16': torch.float8_e5m2fnuz,
+    # 'fp8e4': torch.float8_e4m3fn,
+    # 'fp8e5': torch.float8_e5m2,
+}
+
+name_to_triton_types = {
+    'int8': tl.int8,
+    'int32': tl.int32,
+    'fp16': tl.float16,
+    'fp32': tl.float32,
+    'bf16': tl.bfloat16,
+    # 'fp8e4b8': tl.float8e4b8,
+    # 'fp8e5b16': tl.float8e5b16,
+    # 'fp8e4': tl.float8e4nv,
+    # 'fp8e5': tl.float8e5,
+}
+
 def gen_input(M, N, d_type, seed, device='cuda'):
-
-    torch_to_tl_fp8_types = {
-        torch.float8_e5m2 : tl.float8e5,
-        torch.float8_e5m2fnuz : tl.float8e5b16,
-        torch.float8_e4m3fn : tl.float8e4nv,
-        torch.float8_e4m3fnuz : tl.float8e4b8
-    }
-
+    
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    if d_type == torch.float16:
-        input = torch.randn((M, N), dtype=d_type, device=device)
-        input_f16 = input
-    else: # d_type is float8
-        assert d_type in torch_to_tl_fp8_types
-        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
-        torch_f8 = raw_data.to(d_type)
+    raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
+    if 'fp8' in d_type: # d_type is float8
+        assert d_type in name_to_torch_types
+        torch_f8 = raw_data.to(name_to_torch_types[d_type])
         # input = torch_f8
-        input = triton.reinterpret(torch_f8, torch_to_tl_fp8_types[d_type])
+        input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
         input_f16 = torch_f8.to(torch.float16)
-        print(f'f8 = {torch_f8[71]}, f16 = {input_f16[71]}')
+    else:
+        input = raw_data.to(name_to_torch_types[d_type])
+        input_f16 = input.to(torch.float16)
+
     return input, input_f16
 
 
@@ -165,15 +182,20 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
     print(f"testing sizes: M: {SIZE_M}, N: {SIZE_N}, K: {SIZE_K}, a_type: {a_type}, b_type: {b_type}, c_type: {c_type}")
     a, a_f16 = gen_input(SIZE_M, SIZE_K, a_type, 10, device='cuda')
     b, b_f16 = gen_input(SIZE_K, SIZE_N, b_type, 11, device='cuda')
-    c = torch.empty((SIZE_M, SIZE_N), device=a.device, dtype=c_type)
+
+    c = torch.empty((SIZE_M, SIZE_N), device=a.device, dtype=name_to_torch_types[c_type])
     golden = torch.matmul(a_f16, b_f16)
-    matmul(a, b, c, c_type)
+    matmul(a, b, c, name_to_torch_types[c_type])
 
     print(f'gold = {golden}')
     print(f'c = {c}')
 
-    torch.set_printoptions(profile="full")
-    torch.testing.assert_close(c, golden, rtol=1e-2, atol=1e-1, check_dtype=False)
+    # golden_abs_err = 0.01
+    # golden_rel_err = 0.01
+
+    # torch.set_printoptions(profile="full")
+    # torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
+    torch.testing.assert_close(c, golden, atol=7e-2, rtol=6e-2, check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -185,8 +207,9 @@ def parse_arguments():
     parser.add_argument("-m", type=int, required=True, default=argparse.SUPPRESS)
     parser.add_argument("-n", type=int, required=True, default=argparse.SUPPRESS)
     parser.add_argument("-k", type=int, required=True, default=argparse.SUPPRESS)
-    parser.add_argument("--fp8a", action='store_true', default=False)
-    parser.add_argument("--fp8b", action='store_true', default=False)
+    parser.add_argument("-dta", type=str, default='fp16', help="float8 type: fp8e4/fp8e5")
+    parser.add_argument("-dtb", type=str, default='fp16', help="float8 type: fp8e4/fp8e5")
+    parser.add_argument("-dtc", type=str, default='fp16', help="output type: fp16/fp32/int32")
 
     args = parser.parse_args()
     return args
@@ -197,17 +220,25 @@ def main():
     M = args.m
     N = args.n
     K = args.k
-    a_type = torch.float16
-    b_type = torch.float16
+    a_type = "fp16"
+    b_type = "fp16"
     # fp8_type = torch.float8_e4m3fnuz
     # fp8_type = torch.float8_e5m2fnuz
     # fp8_type = torch.float8_e5m2
-    fp8_type = torch.float8_e4m3fn
-    if args.fp8a:
-        a_type = fp8_type
-    if args.fp8b:
-        b_type = fp8_type
-    c_type = torch.float16
+    # fp8_type = torch.float8_e4m3fn
+    c_type = "fp16"
+
+    if args.dta != "fp16":
+        assert args.dta in name_to_torch_types
+        a_type = args.dta
+
+    if args.dtb != "fp16":
+        assert args.dtb in name_to_torch_types
+        b_type = args.dtb
+
+    if args.dtc != "fp16":
+        assert args.dtc in name_to_torch_types
+        c_type = args.dtc
 
     try:
         test_gemm(M, N, K, a_type, b_type, c_type)

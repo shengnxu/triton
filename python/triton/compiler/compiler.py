@@ -450,7 +450,7 @@ def compile(fn, **kwargs):
         cluster_info.clusterDimZ = kwargs["clusterDims"][2]
     tma_infos = TMAInfos()
     # build architecture descriptor
-    if aot_arch is not None
+    if aot_arch is not None:
         arch, device_type = translate_aot_arch(aot_arch)
         _device_backend = get_backend(device_type)
         CurrentBuildTarget.configure_arch(arch)
@@ -527,10 +527,10 @@ def compile(fn, **kwargs):
         # TODO: support function attributes at group 3 (e.g., device function)
         name, signature = match.group(1), match.group(2)
         types = re.findall(arg_type_pattern[ir_name], signature)
-		if is_hip():
-			ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
-		else:
-			ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
+        if is_hip():
+            ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
+        else:
+            ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
         if ir_name == 'ttgir':
             num_warps_matches = re.findall(ttgir_num_warps_pattern, src)
             assert len(num_warps_matches) == 1, "Expected exactly one match for num_warps"

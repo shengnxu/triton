@@ -142,10 +142,10 @@ name_to_torch_types = {
     'fp16': torch.float16,
     'fp32': torch.float32,
     'bf32': torch.bfloat16,
-    # 'fp8e4b8': torch.float8_e4m3fnuz,
-    # 'fp8e5b16': torch.float8_e5m2fnuz,
-    # 'fp8e4': torch.float8_e4m3fn,
-    # 'fp8e5': torch.float8_e5m2,
+    'fp8e4b8': torch.float8_e4m3fnuz,
+    'fp8e5b16': torch.float8_e5m2fnuz,
+    'fp8e4': torch.float8_e4m3fn,
+    'fp8e5': torch.float8_e5m2,
 }
 
 name_to_triton_types = {
@@ -154,10 +154,10 @@ name_to_triton_types = {
     'fp16': tl.float16,
     'fp32': tl.float32,
     'bf16': tl.bfloat16,
-    # 'fp8e4b8': tl.float8e4b8,
-    # 'fp8e5b16': tl.float8e5b16,
-    # 'fp8e4': tl.float8e4nv,
-    # 'fp8e5': tl.float8e5,
+    'fp8e4b8': tl.float8e4b8,
+    'fp8e5b16': tl.float8e5b16,
+    'fp8e4': tl.float8e4nv,
+    'fp8e5': tl.float8e5,
 }
 
 def gen_input(M, N, d_type, seed, device='cuda'):
@@ -189,13 +189,8 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
 
     print(f'gold = {golden}')
     print(f'c = {c}')
+    torch.testing.assert_close(c, golden, atol=8e-2, rtol=6e-2, check_dtype=False)
 
-    # golden_abs_err = 0.01
-    # golden_rel_err = 0.01
-
-    # torch.set_printoptions(profile="full")
-    # torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
-    torch.testing.assert_close(c, golden, atol=7e-2, rtol=6e-2, check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(

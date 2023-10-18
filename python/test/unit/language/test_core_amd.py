@@ -1066,6 +1066,10 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                                            [tl.float8e4b15, tl.float16],
                                            [tl.float8e4b15x4, tl.float16],
                                            [tl.float8e5, tl.float16],
+                                           [tl.float8e4b8, tl.float16],
+                                           [tl.float8e5b16, tl.float16],
+                                           [tl.float16, tl.float8e5b16],
+                                           [tl.float16, tl.float8e4b8],
                                            [tl.float16, tl.float8e4nv],
                                            [tl.float16, tl.float8e4b15],
                                            [tl.float16, tl.float8e4b15x4],
@@ -1192,7 +1196,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
     torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=6e-2)
 
 
-
+@pytest.mark.skip(reason="Pytorch does not support the following types, so need to skip for now")
 @pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",
                         [(*shape, *ab_type, out_dtype)
                           for shape in [[128, 256, 32],
@@ -1205,13 +1209,10 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                         [32, 32, 128],
                                         [128, 128, 64],
                                         [64, 128, 128]]
-                          for ab_type in [[tl.float8e5, tl.float16],
-                                          [tl.float8e4b8, tl.float16],
-                                        #   [tl.float8e5b16, tl.float16],
-                                        #   [tl.float16, tl.float8e5b16],
-                                          [tl.float8e5, tl.float8e5],
-                                          [tl.float16, tl.float8e5]]
-                        #   for ab_type in [[tl.float8e4m3fnuz, tl.float16]]
+                          for ab_type in [[tl.float8e4b8, tl.float16],
+                                          [tl.float8e5b16, tl.float16],
+                                          [tl.float16, tl.float8e5b16],
+                                          [tl.float16, tl.float8e4b8]]
                           for out_dtype in [torch.float16, torch.float32]
                         ])
 def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
@@ -1298,27 +1299,21 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
         return c
 
     def gen_input(M, N, d_type, seed, device='cuda'):
-
         tl_to_torch_fp8_types = {
+            tl.float16: torch.float16,
+            tl.float32: torch.float32,
             tl.float8e5 : torch.float8_e5m2,
             tl.float8e5b16 : torch.float8_e5m2fnuz,
             tl.float8e4nv : torch.float8_e4m3fn,
             tl.float8e4b8 : torch.float8_e4m3fnuz
         }
-
+        assert d_type in tl_to_torch_fp8_types
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
-        if d_type == tl.float16:
-            input = torch.randn((M, N), dtype=torch.float16, device=device)
-            input_f16 = input
-            # input_f16 = input.to(torch.float8_e5m2)
-        else: # d_type is float8
-            assert d_type in tl_to_torch_fp8_types
-            raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
-            torch_f8 = raw_data.to(tl_to_torch_fp8_types[d_type])
-            input = triton.reinterpret(torch_f8, d_type)
-            input_f16 = torch_f8.to(torch.float16)
-            # input_f16 = torch_f8
+        raw_data = torch.randn((M, N), dtype=torch.float32, device=device)
+        input = raw_data.to(tl_to_torch_fp8_types[d_type])
+        input_f16 = input.to(torch.float16)
+
         return input, input_f16
 
     a, a_f16 = gen_input(M, K, a_type, 11, device=device)

@@ -1065,6 +1065,8 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                           for ab_type in [[tl.float8e4nv, tl.float16],
                                            [tl.float8e4b15, tl.float16],
                                            [tl.float8e4b15x4, tl.float16],
+                                           [tl.float8e4b15, tl.float8e5],
+                                           [tl.float8e5, tl.float8e4b15],
                                            [tl.float8e5, tl.float16],
                                            [tl.float16, tl.float8e4nv],
                                            [tl.float16, tl.float8e4b15],
@@ -1594,9 +1596,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 # ---------------
 
 
-@pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype",
+@pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim",
                          # FMA Test Dot tests
-                         [(*shape, 4, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
+                         [(*shape, 4, False, False, epilogue, allow_tf32, in_dtype, out_dtype, 0)
                           for shape in [(64, 64, 64), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
                           for allow_tf32 in [True, False]
@@ -1605,7 +1607,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float32', 'float32')]
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
-                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype)
+                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype, 0)
                           for shape_nw in [[128, 256, 32, 8],
                                            [128, 16, 32, 4],
                                            [32, 128, 64, 4],
@@ -1625,17 +1627,20 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float32', 'float32')]]
                          if triton.language.semantic.gpu_matrix_core_version() == 0 else
                          # MFMA Test Dot tests
-                         [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
+                         [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim)
                           for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [True, False]
                           for in_dtype, out_dtype in [('float16', 'float16'),
                                                       ('bfloat16', 'float32'),
+                                                      ('float8e5m2fnuz', 'float32'),
+                                                      ('float8e4m3fnuz', 'float32'),
                                                       ('float16', 'float32'),
                                                       ('float32', 'float32')]
+                          for non_k_dim in [0, 16, 32]
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
-                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype)
+                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype, non_k_dim)
                           for shape_nw in [[128, 128, 32, 2],
                                            [128, 16, 32, 4],
                                            [128, 128, 64, 2],
@@ -1663,8 +1668,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                           for col_a in [True, False]
                           for col_b in [True, False]
                           for in_dtype in ['int8', 'bfloat16', 'float16', 'float32']
-                          for out_dtype in [None]])
-def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, device='cuda'):
+                          for out_dtype in [None]
+                          for non_k_dim in [0, 16, 32]])
+def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim, device='cuda'):
     capability = torch.cuda.get_device_capability()
 
     if torch.version.hip is not None:
@@ -1678,6 +1684,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 out_dtype = "float32"
             else:
                 out_dtype = "int32"
+        if non_k_dim == 32 and (M < 32 or N < 32):
+            pytest.skip("incompatible non_k_dim == 32 with MN sizes")
 
     if capability[0] < 7:
         pytest.skip("Only test tl.dot() on devices with sm >= 70")
@@ -1698,6 +1706,7 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                Y, stride_yk, stride_yn,
                W, stride_wn, stride_wl,
                Z, stride_zm, stride_zn,
+               in_dtype: tl.constexpr,
                out_dtype: tl.constexpr,
                BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
                ADD_MATRIX: tl.constexpr, ADD_ROWS: tl.constexpr, ADD_COLS: tl.constexpr,
@@ -1714,6 +1723,11 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         Zs = Z + off_m[:, None] * stride_zm + off_n[None, :] * stride_zn
         x = tl.load(Xs)
         y = tl.load(Ys)
+        if in_dtype is tl.float8e4b15 or in_dtype is tl.float8e5:
+        # TODO change types when they are available
+        # if in_dtype is tl.float8e5b16 or in_dtype is tl.float8e4b8:
+            x = x.to(in_dtype)
+            y = y.to(in_dtype)
         z = tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
         if ADD_MATRIX:
             z += tl.load(Zs)
@@ -1734,6 +1748,27 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
             z = tl.dot(z.to(w.dtype), w, out_dtype=out_dtype)
         tl.store(Zs, z)
     # input
+    if in_dtype == "int8":
+        effective_in_dtype = tl.int8
+    elif in_dtype == "float32":
+        effective_in_dtype = tl.float32
+    elif in_dtype == "float16":
+        effective_in_dtype = tl.float16
+    elif in_dtype == "bfloat16":
+        effective_in_dtype = tl.bfloat16
+    elif in_dtype == "float8e5m2fnuz":
+        # TODO change types when they are available
+        effective_in_dtype = tl.float8e5
+        # effective_in_dtype = tl.float8e5b16
+        in_dtype = "float32"
+    elif in_dtype == "float8e4m3fnuz":
+        # TODO change types when they are available
+        effective_in_dtype = tl.float8e4b15
+        # effective_in_dtype = tl.float8e4b8
+        in_dtype = "float32"
+    else:
+        assert("unexpected in dtype")
+
     rs = RandomState(17)
     if col_a:
         x = numpy_random((K, M), dtype_str=in_dtype, rs=rs).T
@@ -1783,6 +1818,7 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                          w_tri, w_tri.stride(0), w_tri.stride(1),
                          z_tri, z_tri.stride(0), z_tri.stride(1),
                          out_dtype,
+                         effective_in_dtype,
                          COL_A=col_a, COL_B=col_b,
                          BLOCK_M=M, BLOCK_K=K, BLOCK_N=N,
                          ADD_MATRIX=epilogue == 'add-matrix',
@@ -1791,7 +1827,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                          DO_SOFTMAX=epilogue == 'softmax',
                          CHAIN_DOT=epilogue == 'chain-dot',
                          ALLOW_TF32=allow_tf32,
-                         num_warps=num_warps)
+                         num_warps=num_warps,
+                         matrix_instr_nonkdim=non_k_dim)
     # torch result
     if in_dtype == 'int8':
         z_ref = np.matmul(x.astype(np.float32),
@@ -1826,6 +1863,19 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         # added atol, to loose precision for float16xfloat16->float32 case
         np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-3)
     if torch.version.hip is not None:
+        if triton.language.semantic.gpu_matrix_core_version() > 0:
+            ttgir = pgm.asm['ttgir']
+            if non_k_dim == 16:
+                assert "#triton_gpu.mfma<{nonKDim = 16" in ttgir
+                assert "#triton_gpu.mfma<{nonKDim = 32" not in ttgir
+            elif non_k_dim == 32:
+                assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
+                assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
+        gcn = pgm.asm['amdgcn']
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
+            assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
+            assert "v_mfma_f32_32x32x16_fp8_fp8" in gcn or "v_mfma_f32_16x16x32_fp8_fp8" in gcn
         return
     # make sure ld/st are vectorized
     ptx = pgm.asm['ptx']

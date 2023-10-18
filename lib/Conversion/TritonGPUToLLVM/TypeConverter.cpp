@@ -171,7 +171,7 @@ Type TritonGPUToLLVMTypeConverter::getElementTypeForStruct(
       return vec_ty(elemTy, dotOpLayout.getKWidth());
     if (elemTy.isF16())
       return vec_ty(elemTy, 4);
-    if (elemTy.isInteger(8) and dotOpLayout.getKWidth() == 4)
+    if (elemTy.isInteger(8) && dotOpLayout.getKWidth() == 4)
       return IntegerType::get(ctx, 32);
     if (elemTy.isInteger(8) && dotOpLayout.getKWidth() == 8)
       return IntegerType::get(ctx, 64);

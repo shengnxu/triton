@@ -1262,6 +1262,7 @@ def gpu_matrix_core_version() -> int:
         0 means no tensor cores are available
         1 corresponds to MFMA in CDNA 1 architecture
         2 corresponds to MFMA in CDNA 2 architecture
+        3 corresponds to MFMA in CDNA 3 architecture
     """
 
     if not is_hip():
@@ -1274,8 +1275,10 @@ def gpu_matrix_core_version() -> int:
     gpu_name = gfx_arch_details[1].split(':')[0]
     if gpu_name in ['gfx908']:
         return 1
-    if gpu_name in ['gfx90a', 'gfx940', 'gfx941', 'gfx942']:
+    if gpu_name in ['gfx90a']:
         return 2
+    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
+        return 3
     return 0
 
 def mfma_supported_granularity(m, n, k) -> bool:
@@ -1294,7 +1297,7 @@ def mfma_supported_granularity(m, n, k) -> bool:
 
 def mfma_supported(M, N, K, allow_tf32, ret_scalar_ty) -> bool:
     matrix_core_version = gpu_matrix_core_version()
-    if matrix_core_version not in [1, 2]:
+    if matrix_core_version not in [1, 2, 3]:
         return False
     if not mfma_supported_granularity(M, N ,K):
         return False
@@ -1308,7 +1311,7 @@ def dot(lhs: tl.tensor,
     def assert_dtypes_valid(lhs_dtype, rhs_dtype, arch):
         if is_hip():
             assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or \
-                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), \
+                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()) or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8()), \
                 f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
 
             return
@@ -1348,10 +1351,10 @@ def dot(lhs: tl.tensor,
         f"All values in both first input shape ({lhs.shape}) and second input shape ({rhs.shape}) must be >= 16!"
 
     # hip for now converts fp8 to fp16 for mixed input
-    if is_hip():
+    if is_hip() and gpu_matrix_core_version() != 3:
         if lhs.type.scalar.is_fp8():
             lhs = cast(lhs, tl.float16, builder)
-        elif rhs.type.scalar.is_fp8():
+        if rhs.type.scalar.is_fp8():
             rhs = cast(rhs, tl.float16, builder)
 
     if lhs.type.scalar.is_int():

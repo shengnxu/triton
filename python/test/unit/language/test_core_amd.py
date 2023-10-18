@@ -1168,7 +1168,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
         if d_type == tl.float16:
-            input = torch.randn((M, K), dtype=torch.float16, device=device)
+            input = torch.randn((M, N), dtype=torch.float16, device=device)
             input_f16 = input
         else: # d_type is float8
             f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
@@ -1190,6 +1190,145 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
 
     c = matmul(a, b, out_dtype)
     torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=6e-2)
+
+
+
+@pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",
+                        [(*shape, *ab_type, out_dtype)
+                          for shape in [[128, 256, 32],
+                                        [128, 16, 32],
+                                        [32, 128, 64],
+                                        [128, 128, 64],
+                                        [64, 128, 128],
+                                        [32, 128, 64],
+                                        [64, 64, 32],
+                                        [32, 32, 128],
+                                        [128, 128, 64],
+                                        [64, 128, 128]]
+                          for ab_type in [[tl.float8e5, tl.float16],
+                                          [tl.float8e4b8, tl.float16],
+                                        #   [tl.float8e5b16, tl.float16],
+                                        #   [tl.float16, tl.float8e5b16],
+                                          [tl.float8e5, tl.float8e5],
+                                          [tl.float16, tl.float8e5]]
+                        #   for ab_type in [[tl.float8e4m3fnuz, tl.float16]]
+                          for out_dtype in [torch.float16, torch.float32]
+                        ])
+def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
+
+    check_type_supported(out_dtype, device)
+
+    @triton.jit
+    def matmul_kernel(
+        a_ptr, b_ptr, c_ptr,
+        M, N, K,
+        stride_am, stride_ak,
+        stride_bk, stride_bn,
+        stride_cm, stride_cn,
+        compute_type:tl.constexpr,
+        # Meta-parameters
+        BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+        GROUP_SIZE_M: tl.constexpr,
+    ):
+        pid = tl.program_id(axis=0)
+        num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+        num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + (pid % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
+
+        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+        offs_k = tl.arange(0, BLOCK_SIZE_K)
+        a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+        b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=compute_type)
+        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+            # We accumulate along the K dimension.
+            accumulator += tl.dot(a, b, out_dtype=compute_type)
+            a_ptrs += BLOCK_SIZE_K * stride_ak
+            b_ptrs += BLOCK_SIZE_K * stride_bk
+        c = accumulator
+
+        # -----------------------------------------------------------
+        # Write back the block of the output matrix C with masks.
+        offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+        tl.store(c_ptrs, c, mask=c_mask)
+
+    def matmul(a, b, c_type):
+        assert a.shape[1] == b.shape[0], "Incompatible dimensions"
+        M, K = a.shape
+        K, N = b.shape
+
+        if c_type == torch.float16:
+            comp_type = tl.float16
+        else:
+            comp_type = tl.float32
+
+
+        c = torch.empty((M, N), device = a.device, dtype=c_type)
+        # 1D launch kernel where each block gets its own program.
+        grid = lambda META: (
+            triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
+        )
+        matmul_kernel[grid](
+            a, b, c,
+            M, N, K,
+            a.stride(0), a.stride(1),
+            b.stride(0), b.stride(1),
+            c.stride(0), c.stride(1),
+            compute_type = comp_type,
+            BLOCK_SIZE_M=32, 
+            BLOCK_SIZE_N=64,
+            BLOCK_SIZE_K=64,
+            GROUP_SIZE_M=4,
+            num_stages=1,
+            num_warps=2,
+        )
+
+        return c
+
+    def gen_input(M, N, d_type, seed, device='cuda'):
+
+        tl_to_torch_fp8_types = {
+            tl.float8e5 : torch.float8_e5m2,
+            tl.float8e5b16 : torch.float8_e5m2fnuz,
+            tl.float8e4nv : torch.float8_e4m3fn,
+            tl.float8e4b8 : torch.float8_e4m3fnuz
+        }
+
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        if d_type == tl.float16:
+            input = torch.randn((M, N), dtype=torch.float16, device=device)
+            input_f16 = input
+            # input_f16 = input.to(torch.float8_e5m2)
+        else: # d_type is float8
+            assert d_type in tl_to_torch_fp8_types
+            raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
+            torch_f8 = raw_data.to(tl_to_torch_fp8_types[d_type])
+            input = triton.reinterpret(torch_f8, d_type)
+            input_f16 = torch_f8.to(torch.float16)
+            # input_f16 = torch_f8
+        return input, input_f16
+
+    a, a_f16 = gen_input(M, K, a_type, 11, device=device)
+    b, b_f16 = gen_input(K, N, b_type, 22, device=device)
+
+    # call torch function to compute gold
+    golden = torch.matmul(a_f16, b_f16)
+
+    c = matmul(a, b, out_dtype)
+    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=2e-2)
 
 
 # ---------------

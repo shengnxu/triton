@@ -618,10 +618,10 @@ const std::string Fp16_to_Fp8E4M3B15x4 =
 // does not handle denormals and has
 // more than a single NaN values.
 
-// Fp8E4M3 -> Fp16 (packed)
+// Fp8E4M3FNUZ -> Fp16 (packed)
 #ifdef USE_ROCM
 static SmallVector<Value>
-Fp8E4M3_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
+Fp8E4M3FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   Value a0 = undef(fp8x4VecTy);
@@ -647,7 +647,7 @@ Fp8E4M3_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 	 };
 }
 #else
-const std::string Fp8E4M3_to_Fp16 =
+const std::string Fp8E4M3FNUZ_to_Fp16 =
     "{                                      \n"
     ".reg .b32 a<2>, b<2>;                  \n" // if input = 0xf1f2f3f4
     "prmt.b32 a0, 0, $2, 0x5040;            \n" // a0 = 0xf300f400
@@ -667,7 +667,7 @@ const std::string Fp8E4M3_to_Fp16 =
 // Fp16 -> Fp8E4M3 (packed)
 #ifdef USE_ROCM
 static SmallVector<Value>
-Fp16_to_Fp8E4M3(Location loc, ConversionPatternRewriter &rewriter,
+Fp16_to_Fp8E4M3FNUZ(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
   auto fp16x2VecTy = vec_ty(f16_ty, 2);
   Value fp16x2Vec0 = undef(fp16x2VecTy);
@@ -676,7 +676,7 @@ Fp16_to_Fp8E4M3(Location loc, ConversionPatternRewriter &rewriter,
   fp16x2Vec0 = insert_element(fp16x2VecTy, fp16x2Vec0, v[1], i32_val(1));
   
   fp16x2Vec0 = bitcast(fp16x2Vec0, i32_ty);
-  fp16x2Vec0 = sub(i32_ty, fp16x2Vec0, i32_val(0x20002000)); 
+  fp16x2Vec0 = sub(i32_ty, fp16x2Vec0, i32_val(0x1C001C00)); 
 
   Value a0 = shl(i32_ty, fp16x2Vec0, i32_val(1));
   a0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
@@ -691,7 +691,7 @@ Fp16_to_Fp8E4M3(Location loc, ConversionPatternRewriter &rewriter,
 	  };
 }
 #else
-const std::string Fp16_to_Fp8E4M3 =
+const std::string Fp16_to_Fp8E4M3FNUZ =
     "{                                      \n"
     ".reg .b32 a<2>, b<2>;                  \n" // see Fp8E4M3x4ToFp16x4
     "sub.u32 a0, $1, 0x20002000;            \n" // a0 = input0 - 0x20002000
@@ -1339,7 +1339,7 @@ struct FpToFpOpConversion
         // F8 -> F16
         {{F8E4M3B15TyID, F16TyID}, Fp8E4M3B15_to_Fp16},
         {{F8E4M3FNTyID, F16TyID}, Fp8E4M3B15x4_to_Fp16},
-        {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3_to_Fp16},
+        {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3FNUZ_to_Fp16},
         {{F8E5M2TyID, F16TyID}, Fp8E5M2_to_Fp16},
         {{F8E5M2FNUZTyID, F16TyID}, Fp8E5M2FNUZ_to_Fp16},
         // F16 -> F8
@@ -1349,7 +1349,7 @@ struct FpToFpOpConversion
         {{F16TyID, F8E4M3B15TyID}, Fp16_to_Fp8E4M3B15(computeCapability >= 80)},
 #endif
         {{F16TyID, F8E4M3FNTyID}, Fp16_to_Fp8E4M3B15x4},
-        {{F16TyID, F8E4M3FNUZTyID}, Fp16_to_Fp8E4M3},
+        {{F16TyID, F8E4M3FNUZTyID}, Fp16_to_Fp8E4M3FNUZ},
         {{F16TyID, F8E5M2TyID}, Fp16_to_Fp8E5M2},
         {{F16TyID, F8E5M2FNUZTyID}, Fp16_to_Fp8E5M2FNUZ},
         // F8 -> BF16

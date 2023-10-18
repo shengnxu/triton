@@ -148,32 +148,13 @@ name_to_torch_types = {
     'fp8e5': torch.float8_e5m2,
 }
 
-name_to_triton_types = {
-    'int8': tl.int8,
-    'int32': tl.int32,
-    'fp16': tl.float16,
-    'fp32': tl.float32,
-    'bf16': tl.bfloat16,
-    'fp8e4b8': tl.float8e4b8,
-    'fp8e5b16': tl.float8e5b16,
-    'fp8e4': tl.float8e4nv,
-    'fp8e5': tl.float8e5,
-}
-
 def gen_input(M, N, d_type, seed, device='cuda'):
-    
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
-    if 'fp8' in d_type: # d_type is float8
-        assert d_type in name_to_torch_types
-        torch_f8 = raw_data.to(name_to_torch_types[d_type])
-        # input = torch_f8
-        input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
-        input_f16 = torch_f8.to(torch.float16)
-    else:
-        input = raw_data.to(name_to_torch_types[d_type])
-        input_f16 = input.to(torch.float16)
+    assert d_type in name_to_torch_types
+    input = raw_data.to(name_to_torch_types[d_type])
+    input_f16 = input.to(torch.float16)
 
     return input, input_f16
 

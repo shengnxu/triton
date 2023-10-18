@@ -184,8 +184,14 @@ public:
         assert(mfmaVersion == 3);
         kDim = 16;
       }
-      if (elemType.isInteger(8))
-        kDim = 16;
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 16;
+        }
+        else {
+          kDim = 8;
+        }
+      }
     } else {
       if (elemType.isF32())
         kDim = 4;
@@ -201,8 +207,14 @@ public:
         assert(mfmaVersion == 3);
         kDim = 32;
       }
-      if (elemType.isInteger(8))
-        kDim = 32;
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 32;
+        }
+        else {
+          kDim = 16;
+        }
+      }
     }
     assert(kDim != -1);
     return {nonKDim, kDim};

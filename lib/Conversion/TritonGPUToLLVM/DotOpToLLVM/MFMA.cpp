@@ -26,6 +26,7 @@ enum class MatrixCoreType : uint8_t {
   FP32_FP32_FP32_FP32,
   FP64_FP64_FP64_FP64,
   INT32_INT8_INT8_INT32,
+  INT32_INT8_INT8_INT32_3K,
   NOT_APPLICABLE,
 };
 
@@ -146,6 +147,16 @@ struct DotOpMFMAConversionHelper {
       }
     case MatrixCoreType::INT32_INT8_INT8_INT32:
       if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_i32_16x16x16i8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_i32_32x32x8i8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }
+    case MatrixCoreType::INT32_INT8_INT8_INT32_3K:
+      if (mfmaDescr.size == 16) {
         return rewriter.create<ROCDL::mfma_i32_16x16x32_i8>(
             loc, TypeRange{resType},
             ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
@@ -198,8 +209,16 @@ struct DotOpMFMAConversionHelper {
         return MatrixCoreType::FP32_BF16_BF16_FP32;
       }
     }
-    if (aElemTy.isInteger(8))
-      return MatrixCoreType::INT32_INT8_INT8_INT32;
+    if (aElemTy.isInteger(8)) {
+      auto nonKDim = mfmaEncoding.getNonKDim();
+      auto kWidth = dotOpEncoding.getKWidth();
+      if ((nonKDim == 32 && kWidth == 8) || (nonKDim == 16 && kWidth == 16)) {
+        return MatrixCoreType::INT32_INT8_INT8_INT32_3K;
+      }
+      else {
+        return MatrixCoreType::INT32_INT8_INT8_INT32;
+      }
+    }
     if (aElemTy.isF64())
       return MatrixCoreType::FP64_FP64_FP64_FP64;
     return MatrixCoreType::NOT_APPLICABLE;

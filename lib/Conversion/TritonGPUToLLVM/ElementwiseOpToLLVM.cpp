@@ -21,16 +21,6 @@ Fp16_to_Fp8E5M2(Location loc, ConversionPatternRewriter &rewriter,
 
   Value a0 = bitcast(fp16x2Vec0, i32_ty);
   Value a1 = bitcast(fp16x2Vec1, i32_ty);
-  Value sign0 = and_(i32_ty, a0, i32_val(0x80008000));
-  Value sign1 = and_(i32_ty, a1, i32_val(0x80008000));
-
-  a0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
-  a1 = and_(i32_ty, a1, i32_val(0x7fff7fff));
-  a0 = add(i32_ty, a0, i32_val(0x00800080));
-  a1 = add(i32_ty, a1, i32_val(0x00800080));
-
-  a0 = or_(i32_ty, a0, sign0);
-  a1 = or_(i32_ty, a1, sign1);
   
   auto fp8x4VecTy = vec_ty(i8_ty, 4);
   a0 = bitcast(a0, fp8x4VecTy); 

@@ -1066,6 +1066,10 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                                            [tl.float8e4b15, tl.float16],
                                            [tl.float8e4b15x4, tl.float16],
                                            [tl.float8e5, tl.float16],
+                                           [tl.float8e4b8, tl.float16],
+                                           [tl.float8e5b16, tl.float16],
+                                           [tl.float16, tl.float8e5b16],
+                                           [tl.float16, tl.float8e4b8],
                                            [tl.float16, tl.float8e4nv],
                                            [tl.float16, tl.float8e4b15],
                                            [tl.float16, tl.float8e4b15x4],
@@ -1189,10 +1193,10 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
     golden = torch.matmul(a_f16, b_f16)
 
     c = matmul(a, b, out_dtype)
-    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=6e-2)
+    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=1e-2)
 
 
-
+@pytest.mark.skip(reason="Pytorch does not support the following types, so need to skip for now")
 @pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",
                         [(*shape, *ab_type, out_dtype)
                           for shape in [[128, 256, 32],
@@ -1205,13 +1209,11 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                         [32, 32, 128],
                                         [128, 128, 64],
                                         [64, 128, 128]]
-                          for ab_type in [[tl.float8e5, tl.float16],
-                                          [tl.float8e4b8, tl.float16],
-                                        #   [tl.float8e5b16, tl.float16],
-                                        #   [tl.float16, tl.float8e5b16],
-                                          [tl.float8e5, tl.float8e5],
-                                          [tl.float16, tl.float8e5]]
-                        #   for ab_type in [[tl.float8e4m3fnuz, tl.float16]]
+                          for ab_type in [[tl.float8e4b8, tl.float16],
+                                          [tl.float8e5b16, tl.float16],
+                                          [tl.float8e4nv, tl.float16],
+                                          [tl.float16, tl.float8e5b16],
+                                          [tl.float16, tl.float8e4b8]]
                           for out_dtype in [torch.float16, torch.float32]
                         ])
 def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
@@ -1298,27 +1300,21 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
         return c
 
     def gen_input(M, N, d_type, seed, device='cuda'):
-
         tl_to_torch_fp8_types = {
+            tl.float16: torch.float16,
+            tl.float32: torch.float32,
             tl.float8e5 : torch.float8_e5m2,
             tl.float8e5b16 : torch.float8_e5m2fnuz,
-            tl.float8e4nv : torch.float8_e4m3fn,
+            tl.float8e4nv : torch.float8_e4m3fnuz,
             tl.float8e4b8 : torch.float8_e4m3fnuz
         }
-
+        assert d_type in tl_to_torch_fp8_types
         torch.manual_seed(seed)
         torch.cuda.manual_seed(seed)
-        if d_type == tl.float16:
-            input = torch.randn((M, N), dtype=torch.float16, device=device)
-            input_f16 = input
-            # input_f16 = input.to(torch.float8_e5m2)
-        else: # d_type is float8
-            assert d_type in tl_to_torch_fp8_types
-            raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') + 1
-            torch_f8 = raw_data.to(tl_to_torch_fp8_types[d_type])
-            input = triton.reinterpret(torch_f8, d_type)
-            input_f16 = torch_f8.to(torch.float16)
-            # input_f16 = torch_f8
+        raw_data = torch.randn((M, N), dtype=torch.float32, device=device)
+        input = raw_data.to(tl_to_torch_fp8_types[d_type])
+        input_f16 = input.to(torch.float16)
+
         return input, input_f16
 
     a, a_f16 = gen_input(M, K, a_type, 11, device=device)
@@ -1594,9 +1590,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
 # ---------------
 
 
-@pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype",
+@pytest.mark.parametrize("M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim",
                          # FMA Test Dot tests
-                         [(*shape, 4, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
+                         [(*shape, 4, False, False, epilogue, allow_tf32, in_dtype, out_dtype, 0)
                           for shape in [(64, 64, 64), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'add-rows', 'add-cols', 'softmax', 'chain-dot']
                           for allow_tf32 in [True, False]
@@ -1605,7 +1601,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float32', 'float32')]
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
-                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype)
+                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype, 0)
                           for shape_nw in [[128, 256, 32, 8],
                                            [128, 16, 32, 4],
                                            [32, 128, 64, 4],
@@ -1625,7 +1621,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float32', 'float32')]]
                          if triton.language.semantic.gpu_matrix_core_version() == 0 else
                          # MFMA Test Dot tests
-                         [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype)
+                         [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim)
                           for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [True, False]
@@ -1633,9 +1629,10 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('bfloat16', 'float32'),
                                                       ('float16', 'float32'),
                                                       ('float32', 'float32')]
+                          for non_k_dim in [0, 16, 32]
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
-                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype)
+                         [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype, non_k_dim)
                           for shape_nw in [[128, 128, 32, 2],
                                            [128, 16, 32, 4],
                                            [128, 128, 64, 2],
@@ -1663,8 +1660,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                           for col_a in [True, False]
                           for col_b in [True, False]
                           for in_dtype in ['int8', 'bfloat16', 'float16', 'float32']
-                          for out_dtype in [None]])
-def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, device='cuda'):
+                          for out_dtype in [None]
+                          for non_k_dim in [0, 16, 32]])
+def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim, device='cuda'):
     capability = torch.cuda.get_device_capability()
 
     if torch.version.hip is not None:
@@ -1678,6 +1676,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 out_dtype = "float32"
             else:
                 out_dtype = "int32"
+        if non_k_dim == 32 and (M < 32 or N < 32):
+            pytest.skip("incompatible non_k_dim == 32 with MN sizes")
 
     if capability[0] < 7:
         pytest.skip("Only test tl.dot() on devices with sm >= 70")
@@ -1791,7 +1791,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                          DO_SOFTMAX=epilogue == 'softmax',
                          CHAIN_DOT=epilogue == 'chain-dot',
                          ALLOW_TF32=allow_tf32,
-                         num_warps=num_warps)
+                         num_warps=num_warps,
+                         matrix_instr_nonkdim=non_k_dim)
     # torch result
     if in_dtype == 'int8':
         z_ref = np.matmul(x.astype(np.float32),
@@ -1826,6 +1827,15 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         # added atol, to loose precision for float16xfloat16->float32 case
         np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-3)
     if torch.version.hip is not None:
+        import triton.language.semantic as sem
+        if sem.gpu_matrix_core_version() > 0:
+            ttgir = pgm.asm['ttgir']
+            if non_k_dim == 16:
+                assert "#triton_gpu.mfma<{nonKDim = 16" in ttgir
+                assert "#triton_gpu.mfma<{nonKDim = 32" not in ttgir
+            elif non_k_dim == 32:
+                assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
+                assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
         return
     # make sure ld/st are vectorized
     ptx = pgm.asm['ptx']

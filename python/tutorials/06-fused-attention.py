@@ -550,7 +550,7 @@ class _attention(torch.autograd.Function):
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
         _attn_fwd[grid](
-            triton.reinterpret(q, tl.float8e5b16), triton.reinterpret(k, tl.float8e5b16), v, sm_scale, M, o,
+            q, k, v, sm_scale, M, o,
             q.stride(0), q.stride(1), q.stride(2), q.stride(3),
             k.stride(0), k.stride(1), k.stride(2), k.stride(3),
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),

@@ -143,8 +143,8 @@ class dtype:
     def is_fp8(self):
         return 'fp8' in self.name
 
-    def is_fp8e4m3nv(self):
-        return self.name == 'fp8e4m3nv'
+    def is_fp8e4nv(self):
+        return self.name == 'fp8e4nv'
 
     def is_fp8e4b8(self):
         return self.name == 'fp8e4b8'

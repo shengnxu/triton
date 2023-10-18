@@ -1193,7 +1193,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
     golden = torch.matmul(a_f16, b_f16)
 
     c = matmul(a, b, out_dtype)
-    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=6e-2)
+    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=1e-2)
 
 
 @pytest.mark.skip(reason="Pytorch does not support the following types, so need to skip for now")

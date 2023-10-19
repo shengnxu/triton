@@ -68,20 +68,20 @@ def matmul_kernel(
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=compute_type)
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
-        accumulator += tl.dot(a, b, out_dtype=compute_type)
+        accumulator += tl.dot(a, b, out_dtype=tl.float32)
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
-    c = accumulator
+    c = accumulator.to(compute_type)
     # c = accumulator.to(tl.float16)
 
     # -----------------------------------------------------------
@@ -142,10 +142,10 @@ name_to_torch_types = {
     'fp16': torch.float16,
     'fp32': torch.float32,
     'bf32': torch.bfloat16,
-    # 'fp8e4b8': torch.float8_e4m3fnuz,
-    # 'fp8e5b16': torch.float8_e5m2fnuz,
-    # 'fp8e4': torch.float8_e4m3fn,
-    # 'fp8e5': torch.float8_e5m2,
+    'fp8e4b8': torch.float8_e4m3fnuz,
+    'fp8e5b16': torch.float8_e5m2fnuz,
+    'fp8e4': torch.float8_e4m3fn,
+    'fp8e5': torch.float8_e5m2,
 }
 
 name_to_triton_types = {
@@ -154,26 +154,29 @@ name_to_triton_types = {
     'fp16': tl.float16,
     'fp32': tl.float32,
     'bf16': tl.bfloat16,
-    # 'fp8e4b8': tl.float8e4b8,
-    # 'fp8e5b16': tl.float8e5b16,
-    # 'fp8e4': tl.float8e4nv,
-    # 'fp8e5': tl.float8e5,
+    'fp8e4b8': tl.float8e4b8,
+    'fp8e5b16': tl.float8e5b16,
+    'fp8e4': tl.float8e4nv,
+    'fp8e5': tl.float8e5,
 }
 
 def gen_input(M, N, d_type, seed, device='cuda'):
     
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
-    if 'fp8' in d_type: # d_type is float8
-        assert d_type in name_to_torch_types
-        torch_f8 = raw_data.to(name_to_torch_types[d_type])
-        # input = torch_f8
-        input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
-        input_f16 = torch_f8.to(torch.float16)
-    else:
-        input = raw_data.to(name_to_torch_types[d_type])
-        input_f16 = input.to(torch.float16)
+    raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') * 2
+    # if 'fp8' in d_type: # d_type is float8
+    #     assert d_type in name_to_torch_types
+    #     torch_f8 = raw_data.to(name_to_torch_types[d_type])
+    #     # input = torch_f8
+    #     input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
+    #     input_f16 = torch_f8.to(torch.float16)
+    # else:
+    #     input = raw_data.to(name_to_torch_types[d_type])
+    #     input_f16 = input.to(torch.float16)
+    input = raw_data.to(name_to_torch_types[d_type])
+    input_f16 = input.to(torch.float16)
+    print(f"input[0] = {input[0]}")
 
     return input, input_f16
 
@@ -187,15 +190,10 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, a_type, b_type, c_type):
     golden = torch.matmul(a_f16, b_f16)
     matmul(a, b, c, name_to_torch_types[c_type])
 
-    print(f'gold = {golden}')
-    print(f'c = {c}')
+    print(f'gold = {golden[0]}')
+    print(f'c = {c[0]}')
 
-    # golden_abs_err = 0.01
-    # golden_rel_err = 0.01
-
-    # torch.set_printoptions(profile="full")
-    # torch.testing.assert_close(c.to(torch.float64), golden.to(torch.float64), rtol=max(5e-2, 10 * golden_rel_err), atol=max(5e-2, 10 * golden_abs_err), check_dtype=False)
-    torch.testing.assert_close(c, golden, atol=7e-2, rtol=6e-2, check_dtype=False)
+    torch.testing.assert_close(c, golden, atol=1e-2, rtol=1e-2, check_dtype=False)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -226,7 +224,7 @@ def main():
     # fp8_type = torch.float8_e5m2fnuz
     # fp8_type = torch.float8_e5m2
     # fp8_type = torch.float8_e4m3fn
-    c_type = "fp16"
+    c_type = "fp32"
 
     if args.dta != "fp16":
         assert args.dta in name_to_torch_types

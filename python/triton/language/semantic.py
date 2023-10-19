@@ -1349,11 +1349,20 @@ def dot(lhs: tl.tensor,
         f"All values in both first input shape ({lhs.shape}) and second input shape ({rhs.shape}) must be >= 16!"
 
     # hip for now converts fp8 to fp16 for mixed input
-    if is_hip() and gpu_matrix_core_version() != 3:
-        if lhs.type.scalar.is_fp8():
-            lhs = cast(lhs, tl.float16, builder)
-        if rhs.type.scalar.is_fp8():
-            rhs = cast(rhs, tl.float16, builder)
+    if is_hip(): 
+        if gpu_matrix_core_version() != 3:
+            if lhs.type.scalar.is_fp8():
+                lhs = cast(lhs, tl.float16, builder)
+            if rhs.type.scalar.is_fp8():
+                rhs = cast(rhs, tl.float16, builder)
+        else:
+            if lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8():
+                assert lhs.type.scalar.is_fp8e4b8() or lhs.type.scalar.is_fp8e5b16(), f"only fp8e4b8 and fp8e5b16 types are supported"
+                assert rhs.type.scalar.is_fp8e4b8() or rhs.type.scalar.is_fp8e5b16(), f"only fp8e4b8 and fp8e5b16 types are supported"
+            elif lhs.type.scalar.is_fp8() and not rhs.type.scalar.is_fp8():
+                lhs = cast(lhs, tl.float16, builder)
+            elif not lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8():
+                rhs = cast(rhs, tl.float16, builder)
 
     if lhs.type.scalar.is_int():
         assert lhs.type.scalar == tl.int8, "only int8 supported!"

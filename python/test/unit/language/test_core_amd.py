@@ -1065,8 +1065,6 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                           for ab_type in [[tl.float8e4nv, tl.float16],
                                            [tl.float8e4b15, tl.float16],
                                            [tl.float8e4b15x4, tl.float16],
-                                           [tl.float8e4b15, tl.float8e5],
-                                           [tl.float8e5, tl.float8e4b15],
                                            [tl.float8e5, tl.float16],
                                            [tl.float8e4b8, tl.float16],
                                            [tl.float8e5b16, tl.float16],
@@ -1198,7 +1196,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
     torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=1e-2)
 
 
-@pytest.mark.skip(reason="Pytorch does not support the following types, so need to skip for now")
+# @pytest.mark.skip(reason="Pytorch does not support the following types, so need to skip for now")
 @pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",
                         [(*shape, *ab_type, out_dtype)
                           for shape in [[128, 256, 32],

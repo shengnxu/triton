@@ -234,7 +234,7 @@ struct DotOpMFMAConversionHelper {
     if (aElemTy.isInteger(8)) {
       auto nonKDim = mfmaEncoding.getNonKDim();
       auto kWidth = dotOpEncoding.getKWidth();
-      if ((nonKDim == 32 && kWidth == 8) || (nonKDim == 16 && kWidth == 16)) {
+      if ((nonKDim == 32 && kWidth == 8) || (nonKDim == 16 && kWidth == 8)) {
         return MatrixCoreType::INT32_INT8_INT8_INT32_3K;
       }
       else {

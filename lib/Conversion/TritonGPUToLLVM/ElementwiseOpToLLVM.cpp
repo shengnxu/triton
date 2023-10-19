@@ -666,29 +666,47 @@ const std::string Fp8E4M3FNUZ_to_Fp16 =
 
 // Fp16 -> Fp8E4M3 (packed)
 #ifdef USE_ROCM
+static Value convert_val_Fp16_to_Fp8E4M3FNUZ(
+  Location loc, ConversionPatternRewriter &rewriter, Value v) {
+  auto vi16 = bitcast(v, i16_ty);
+  auto e10 = and_(vi16, int_val(16, 0x7C00));
+  auto e = lshr(i16_ty, e10, int_val(16, 10));
+
+  auto s = and_(i16_ty, vi16, int_val(16, 0x8000));
+
+  auto m7 = and_(i16_ty, vi16, int_val(16, 0x0380));
+  auto m = shl(i16_ty, m7, int_val(16, 1));
+
+  // three cases: 
+  //  1) e > 21 --> e = 1111, 
+  //  2) e <= 7 ---> e = 0, 
+  //  3) others, normal conversion
+  auto e1 = int_val(16, 0x7800);
+  auto e2 = int_val(16, 0x0);
+  auto e31 = sub(i16_ty, e10, int_val(16, 0x1C00));
+  auto e3 = shl(i16_ty, e31, int_val(16, 1));
+
+  auto c13 = icmp_sgt(e, int_val(16, 21));
+  auto e13 = select(c13, e1, e3);
+  auto c23 = icmp_sle(e, int_val(16, 7));
+  auto re = select(c23, e2, e13);
+
+  auto r = or_(i16_ty, s, or_(i16_ty, re, m));
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  auto res = bitcast(r, fp8x2VecTy); 
+
+  return extract_element(i8_ty, res, i32_val(1));
+}
+
 static SmallVector<Value>
 Fp16_to_Fp8E4M3FNUZ(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  Value fp16x2Vec0 = undef(fp16x2VecTy);
 
-  fp16x2Vec0 = insert_element(fp16x2VecTy, fp16x2Vec0, v[0], i32_val(0));
-  fp16x2Vec0 = insert_element(fp16x2VecTy, fp16x2Vec0, v[1], i32_val(1));
-  
-  fp16x2Vec0 = bitcast(fp16x2Vec0, i32_ty);
-  fp16x2Vec0 = sub(i32_ty, fp16x2Vec0, i32_val(0x1C001C00)); 
+  SmallVector<Value> result(2);
+  result[0] = convert_val_Fp16_to_Fp8E4M3FNUZ(loc, rewriter, v[0]);
+  result[1] = convert_val_Fp16_to_Fp8E4M3FNUZ(loc, rewriter, v[1]);
 
-  Value a0 = shl(i32_ty, fp16x2Vec0, i32_val(1));
-  a0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
-  a0 = add(i32_ty, a0, i32_val(0x00800080));
-  Value b0 = or_( i32_ty, and_(i32_ty, fp16x2Vec0, i32_val(0x80008000)), a0 );
-
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  b0 = bitcast(b0, fp8x4VecTy); 
-
-  return {extract_element(i8_ty, b0, i32_val(1)),
-	  extract_element(i8_ty, b0, i32_val(3))
-	  };
+  return result;
 }
 #else
 const std::string Fp16_to_Fp8E4M3FNUZ =

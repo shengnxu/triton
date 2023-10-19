@@ -1116,15 +1116,15 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
         a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
         b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
-        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=compute_type)
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             # We accumulate along the K dimension.
-            accumulator += tl.dot(a, b, out_dtype=compute_type)
+            accumulator += tl.dot(a, b)
             a_ptrs += BLOCK_SIZE_K * stride_ak
             b_ptrs += BLOCK_SIZE_K * stride_bk
-        c = accumulator
+        c = accumulator.to(compute_type)
 
         # -----------------------------------------------------------
         # Write back the block of the output matrix C with masks.
@@ -1209,14 +1209,13 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                         [32, 32, 128],
                                         [128, 128, 64],
                                         [64, 128, 128]]
-                          for ab_type in [[tl.float8e4b8, tl.float16],
-                                          [tl.float8e5b16, tl.float16],
-                                          [tl.float8e4nv, tl.float16],
-                                          [tl.float16, tl.float8e5b16],
-                                          [tl.float16, tl.float8e4b8]]
-                          for out_dtype in [torch.float16, torch.float32]
+                          for ab_type in [[tl.float8e4b8, tl.float8e4b8],
+                                          [tl.float8e5b16, tl.float8e4b8],
+                                          [tl.float8e4b8, tl.float8e5b16],
+                                          [tl.float8e5b16, tl.float8e5b16]]
+                          for out_dtype in [torch.float32]
                         ])
-def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
+def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
 
     check_type_supported(out_dtype, device)
 
@@ -1248,15 +1247,15 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
         a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
         b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
-        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=compute_type)
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             # We accumulate along the K dimension.
-            accumulator += tl.dot(a, b, out_dtype=compute_type)
+            accumulator += tl.dot(a, b)
             a_ptrs += BLOCK_SIZE_K * stride_ak
             b_ptrs += BLOCK_SIZE_K * stride_bk
-        c = accumulator
+        c = accumulator.to(compute_type)
 
         # -----------------------------------------------------------
         # Write back the block of the output matrix C with masks.
@@ -1305,7 +1304,6 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
             tl.float32: torch.float32,
             tl.float8e5 : torch.float8_e5m2,
             tl.float8e5b16 : torch.float8_e5m2fnuz,
-            tl.float8e4nv : torch.float8_e4m3fnuz,
             tl.float8e4b8 : torch.float8_e4m3fnuz
         }
         assert d_type in tl_to_torch_fp8_types
@@ -1317,14 +1315,17 @@ def test_gemm_amd_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device 
 
         return input, input_f16
 
-    a, a_f16 = gen_input(M, K, a_type, 11, device=device)
+    a, a_f16 = gen_input(M, K, a_type, 21, device=device)
     b, b_f16 = gen_input(K, N, b_type, 22, device=device)
 
     # call torch function to compute gold
     golden = torch.matmul(a_f16, b_f16)
-
     c = matmul(a, b, out_dtype)
-    torch.testing.assert_close(c.to(golden.dtype), golden, rtol=1e-2, atol=2e-2)
+
+    print(f'c = {c}')
+    print(f'gold = {golden}')
+
+    torch.testing.assert_close(golden, c.to(golden.dtype), rtol=1e-2, atol=1e-2)
 
 
 # ---------------

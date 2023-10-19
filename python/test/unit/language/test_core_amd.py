@@ -1742,9 +1742,9 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
                 assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
         gcn = pgm.asm['amdgcn']
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5:
             assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b15:
             assert "v_mfma_f32_32x32x16_fp8_fp8" in gcn or "v_mfma_f32_16x16x32_fp8_fp8" in gcn
         return
     # make sure ld/st are vectorized

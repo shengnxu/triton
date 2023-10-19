@@ -94,7 +94,7 @@ def _attn_fwd(
     Q, K, V, sm_scale, M, Out,
     stride_qz, stride_qh, stride_qm, stride_qk,
     stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vk, stride_vn,
+    stride_vz, stride_vh, stride_vn, stride_vk,
     stride_oz, stride_oh, stride_om, stride_on,
     Z, H,
     N_CTX,
@@ -129,7 +129,7 @@ def _attn_fwd(
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0)
+        order=(0, 1)
     )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -158,7 +158,7 @@ def _attn_fwd(
         )
     # stage 2: on-band
     if STAGE & 2:
-        # barrier makes it easier for compielr to schedule the
+        # barrier makes it easier for compiler to schedule the
         # two loops independently
         tl.debug_barrier()
         acc, l_i, m_i = _attn_fwd_inner(
@@ -515,7 +515,7 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, causal, sm_scale, split_kernel=False):
         # shape constraints
-        Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
+        Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-2]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
         o = torch.empty_like(q)
@@ -659,7 +659,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
         .requires_grad_()
     )
     v = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
+        torch.empty((Z, H, D_HEAD, N_CTX), dtype=dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
@@ -671,7 +671,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     if causal:
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v)
+    ref_out = torch.matmul(p, v.transpose(2,3))
     # triton implementation
     tri_out = attention(q, k, v, causal, sm_scale)
     # compare
@@ -737,7 +737,7 @@ HAS_FLASH = FLASH_VER is not None
 BATCH, N_HEADS, N_CTX= 4, 48, 4096
 # vary seq length for fixed head and batch=4
 configs = []
-for mode in ['fwd', 'bwd']:
+for mode in ['fwd']:
     for causal in [False, True]:
         if mode == 'bwd' and causal == False:
             continue
@@ -776,7 +776,7 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     if provider == "triton":
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=dtype, device="cuda", requires_grad=True)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':

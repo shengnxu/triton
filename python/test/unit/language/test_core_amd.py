@@ -1722,9 +1722,9 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         Zs = Z + off_m[:, None] * stride_zm + off_n[None, :] * stride_zn
         x = tl.load(Xs)
         y = tl.load(Ys)
-        if in_dtype is tl.float8e4b15 or in_dtype is tl.float8e5:
+        # if in_dtype is tl.float8e4b15 or in_dtype is tl.float8e5:
         # TODO change types when they are available
-        # if in_dtype is tl.float8e5b16 or in_dtype is tl.float8e4b8:
+        if in_dtype is tl.float8e5b16 or in_dtype is tl.float8e4b8:
             x = x.to(in_dtype)
             y = y.to(in_dtype)
         z = tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
@@ -1757,13 +1757,13 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         effective_in_dtype = tl.bfloat16
     elif in_dtype == "float8e5m2fnuz":
         # TODO change types when they are available
-        effective_in_dtype = tl.float8e5
-        # effective_in_dtype = tl.float8e5b16
+        # effective_in_dtype = tl.float8e5
+        effective_in_dtype = tl.float8e5b16
         in_dtype = "float32"
     elif in_dtype == "float8e4m3fnuz":
         # TODO change types when they are available
-        effective_in_dtype = tl.float8e4b15
-        # effective_in_dtype = tl.float8e4b8
+        # effective_in_dtype = tl.float8e4b15
+        effective_in_dtype = tl.float8e4b8
         in_dtype = "float32"
     else:
         assert("unexpected in dtype")
@@ -1786,10 +1786,12 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         y = (y.view('uint32') & np.uint32(0xffffe000)).view('float32')
         w = (w.view('uint32') & np.uint32(0xffffe000)).view('float32')
     if effective_in_dtype.is_fp8():
-        if effective_in_dtype.is_fp8e5():
+        x = x + 1
+        y = y + 1
+        if effective_in_dtype.is_fp8e5b16():
             mask = 0b111111000110 << 20
         else:
-            mask = 0b111110000111 << 20
+            mask = 0b101111000111 << 20
         x = (x.view('uint32') & np.uint32(mask)).view('float32')
         y = (y.view('uint32') & np.uint32(mask)).view('float32')
     x_tri = to_triton(x, device=device)
@@ -1878,9 +1880,9 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
                 assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
         gcn = pgm.asm['amdgcn']
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
             assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b15:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
             assert "v_mfma_f32_32x32x16_fp8_fp8" in gcn or "v_mfma_f32_16x16x32_fp8_fp8" in gcn
         return
     # make sure ld/st are vectorized

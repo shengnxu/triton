@@ -17,6 +17,17 @@ import torch
 import triton
 import triton.language as tl
 
+# we have two fp8 types supported by rocm, float8_e5m2fnuz and float8_e4m3fnuz
+input_dtype = torch.float8_e5m2fnuz
+TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
+
+torch_to_triton_types = {
+    torch.float8_e5m2fnuz: tl.float8e5b16,
+    torch.float8_e4m3fnuz: tl.float8e4b8,
+    torch.float16: tl.float16,
+    torch.bfloat16: tl.bfloat16,
+}
+
 
 @triton.jit
 def max_fn(x, y):
@@ -78,7 +89,7 @@ def _fwd_kernel(
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(tl.float16)
+    q = (q * qk_scale).to(torch_to_triton_types[input_dtype])
     # loop over k, v and update accumulator
     lo = 0
     hi = P_SEQ + (start_m + 1) * BLOCK_M if IS_CAUSAL else N_CTX + P_SEQ
@@ -87,7 +98,7 @@ def _fwd_kernel(
         k = tl.load(K_block_ptr)
         v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float16)
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if IS_CAUSAL:
             qk = tl.where(P_SEQ + offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
         qk += tl.dot(q, k)
@@ -98,7 +109,7 @@ def _fwd_kernel(
         # -- scale and update acc --
         acc_scale = l_i * 0 + alpha  # workaround some compiler bug
         acc *= acc_scale[:, None]
-        acc += tl.dot(p.to(tl.float16), v)
+        acc += tl.dot(p.to(torch_to_triton_types[input_dtype]), v)
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
         m_i = m_i_new
@@ -118,7 +129,7 @@ def _fwd_kernel(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    tl.store(O_block_ptr, acc.to(tl.float16))
+    tl.store(O_block_ptr, acc.to(torch_to_triton_types[input_dtype]))
 
 
 @triton.jit
@@ -405,7 +416,7 @@ def _bwd_kernel_dq(
     qk_scale = sm_scale * 1.44269504
     # load q and do: they will stay in SRAM throughout
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(tl.float16)
+    q = (q * qk_scale).to(input_dtype)
     do = tl.load(DO_block_ptr)
     Di = tl.load(D_ptrs + offs_m)
     l_i = tl.load(l_ptrs + offs_m)
@@ -441,7 +452,7 @@ def _bwd_kernel_dq(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    tl.store(DQ_block_ptr, (dq * sm_scale).to(tl.float16))
+    tl.store(DQ_block_ptr, (dq * sm_scale).to(input_dtype))
 
 empty = torch.empty(128, device="cuda")
 
@@ -570,8 +581,6 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 # we have two fp8 types supported by rocm, float8_e5m2fnuz and float8_e4m3fnuz
-fp8_type = torch.float8_e5m2fnuz
-TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, P_SEQ',
                          [(4, 48, 1024, 64, 128),
@@ -587,9 +596,9 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, P_SEQ, causal, dtype=torch.float16):
     k = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     if TORCH_HAS_FP8:
-        q = q.to(fp8_type)
-        k = k.to(fp8_type)
-        v = v.to(fp8_type)
+        q = q.to(input_dtype)
+        k = k.to(input_dtype)
+        v = v.to(input_dtype)
     sm_scale = q.shape[-1] ** (-0.5)
     dout = torch.randn_like(q)
     # reference implementation
@@ -618,9 +627,9 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, P_SEQ, dtype=torch.float16):
     k = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX + P_SEQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     if TORCH_HAS_FP8:
-        q = q.to(fp8_type)
-        k = k.to(fp8_type)
-        v = v.to(fp8_type)
+        q = q.to(input_dtype)
+        k = k.to(input_dtype)
+        v = v.to(input_dtype)
 
     sm_scale = q.shape[-1] ** (-0.5)
     split_kernel = True
@@ -696,9 +705,9 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         if TORCH_HAS_FP8:
-            q = q.to(fp8_type)
-            k = k.to(fp8_type)
-            v = v.to(fp8_type)
+            q = q.to(input_dtype)
+            k = k.to(input_dtype)
+            v = v.to(input_dtype)
 
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)

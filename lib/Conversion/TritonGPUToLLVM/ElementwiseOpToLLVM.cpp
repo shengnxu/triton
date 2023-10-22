@@ -618,33 +618,69 @@ const std::string Fp16_to_Fp8E4M3B15x4 =
 // does not handle denormals and has
 // more than a single NaN values.
 
-// Fp8E4M3FNUZ -> Fp16 (packed)
 #ifdef USE_ROCM
+static Value convert_val_Fp8E4M3FNUZ_to_Fp16(
+  Location loc, ConversionPatternRewriter &rewriter, Value v) {
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  Value a = undef(fp8x2VecTy);
+  a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
+  a = insert_element(fp8x2VecTy, a, v, i32_val(1));
+  a = bitcast(a, i16_ty);
+
+  auto e_mask = int_val(16, 0x7A00);
+  auto e = and_(i16_ty, a, e_mask);
+
+  auto m = and_(i16_ty, a, int_val(16, 0x0700));
+  auto sign = and_(i16_ty, a, int_val(16, 0x8000));
+
+  // check whether all exponents are zeros
+  auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
+  auto b = and_(i16_ty, a, int_val(16, 0x7FFF));
+  auto b1 = lshr(i16_ty, b, int_val(16, 1));
+
+  // case 1, e is nonzero, add exponent by 6
+  auto o0v = add(i16_ty, b1, int_val(16, 0x0C00));
+  auto o0 = or_(i16_ty, o0v, sign);
+
+  // case 2, e is nonzero, add exponent by 7
+  auto o1v = add(i16_ty, b1, int_val(16, 0x1C00));
+  auto o1 = or_(i16_ty, o1v, sign);
+
+  auto io = select(e_is_zero, o0, o1);
+  return bitcast(io, f16_ty);
+}
+
+// Fp8E4M3FNUZ -> Fp16 (packed)
 static SmallVector<Value>
 Fp8E4M3FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  Value a0 = undef(fp8x4VecTy);
-  a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
-  a0 = insert_element(fp8x4VecTy, a0, v[0], i32_val(1));
-  a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
-  a0 = insert_element(fp8x4VecTy, a0, v[1], i32_val(3));
-  a0 = bitcast(a0, i32_ty);
+  SmallVector<Value> result(2);
+  result[0] = convert_val_Fp8E4M3FNUZ_to_Fp16(loc, rewriter, v[0]);
+  result[1] = convert_val_Fp8E4M3FNUZ_to_Fp16(loc, rewriter, v[1]);
 
-  Value b0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
+  return result;
 
-  b0 = lshr(i32_ty, b0, i32_val(1));
+  // auto fp8x4VecTy = vec_ty(i8_ty, 4);
+  // Value a0 = undef(fp8x4VecTy);
+  // a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(0));
+  // a0 = insert_element(fp8x4VecTy, a0, v[0], i32_val(1));
+  // a0 = insert_element(fp8x4VecTy, a0, int_val(8,0), i32_val(2));
+  // a0 = insert_element(fp8x4VecTy, a0, v[1], i32_val(3));
+  // a0 = bitcast(a0, i32_ty);
 
-  b0 = add(i32_ty, b0, i32_val(0x1C001C00));
+  // Value b0 = and_(i32_ty, a0, i32_val(0x7fff7fff));
 
-  b0 = or_( i32_ty, b0, and_(i32_ty, a0, i32_val(0x80008000)) );
+  // b0 = lshr(i32_ty, b0, i32_val(1));
 
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  auto fp16x2Vec0 = bitcast(b0, fp16x2VecTy);
+  // b0 = add(i32_ty, b0, i32_val(0x1C001C00));
+  // b0 = or_( i32_ty, b0, and_(i32_ty, a0, i32_val(0x80008000)) );
 
-  return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
-	   extract_element(f16_ty, fp16x2Vec0, i32_val(1))
-	 };
+  // auto fp16x2VecTy = vec_ty(f16_ty, 2);
+  // auto fp16x2Vec0 = bitcast(b0, fp16x2VecTy);
+
+  // return { extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
+	//    extract_element(f16_ty, fp16x2Vec0, i32_val(1))
+	//  };
 }
 #else
 const std::string Fp8E4M3FNUZ_to_Fp16 =

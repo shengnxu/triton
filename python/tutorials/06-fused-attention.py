@@ -17,6 +17,27 @@ import torch
 import triton
 import triton.language as tl
 
+triton_dtype = tl.float8e5b16
+torch_dtype = torch.float8_e5m2fnuz
+# triton_dtype = tl.float16
+# torch_dtype = torch.float16
+
+TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
+
+torch_to_triton_types = {
+    torch.float8_e5m2fnuz: tl.float8e5b16,
+    torch.float8_e4m3fnuz: tl.float8e4b8,
+    torch.float16: tl.float16,
+    torch.bfloat16: tl.bfloat16,
+}
+
+triton_to_torch_types = {
+    tl.float8e5b16: torch.float8_e5m2fnuz,
+    tl.float8e4b8: torch.float8_e4m3fnuz,
+    tl.float16: torch.float16,
+    tl.bfloat16: torch.bfloat16,
+}
+
 
 @triton.jit
 def max_fn(x, y):
@@ -160,7 +181,7 @@ def _attn_fwd(
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(tl.float16)
+    q = (q * qk_scale).to(triton_dtype)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -373,7 +394,7 @@ def _bwd_kernel_dk_dv(
     qk_scale = sm_scale * 1.44269504
     # load k and v: they will stay in SRAM throughout
     k = tl.load(K_block_ptr)
-    k = (k * qk_scale).to(tl.float16)
+    k = (k * qk_scale).to(triton_dtype)
     v = tl.load(V_block_ptr)
     dv = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     dk = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
@@ -394,7 +415,7 @@ def _bwd_kernel_dk_dv(
         l_i = tl.load(l_ptrs + offs_m_curr)
         p = tl.math.exp2(qk - l_i)
         # -- compute dv ----
-        dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
+        dv += tl.dot(tl.trans(p.to(DO.dtype.element_ty)), do)
         # compute dp = dot(v, do)
         Di = tl.load(D_ptrs + offs_m_curr)
         dp = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32) - Di
@@ -485,7 +506,7 @@ def _bwd_kernel_dq(
     qk_scale = sm_scale * 1.44269504
     # load q and do: they will stay in SRAM throughout
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(tl.float16)
+    q = (q * qk_scale).to(triton_dtype)
     do = tl.load(DO_block_ptr)
     Di = tl.load(D_ptrs + offs_m)
     l_i = tl.load(l_ptrs + offs_m)
@@ -534,7 +555,7 @@ class _attention(torch.autograd.Function):
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q)
+        o = torch.empty_like(q, dtype=torch.float16)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -585,7 +606,7 @@ class _attention(torch.autograd.Function):
         q, k, v, o, L = ctx.saved_tensors
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
-        dk = torch.empty_like(k)
+        dk = torch.empty_like(k, dtype=torch.float16)
         dv = torch.empty_like(v)
         delta = torch.empty_like(L)
         do_scaled = torch.empty_like(do)
@@ -786,6 +807,9 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     if provider == "triton":
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        if mode == "fwd":
+            q = q.to(torch_dtype)
+            k = k.to(torch_dtype)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)

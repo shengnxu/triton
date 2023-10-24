@@ -2526,12 +2526,8 @@ class SharedLayout:
 
 
 def get_gpu_name():
-    arch_info = _triton.get_arch_info()
-    gfx_arch_details = re.search('amd.*', arch_info)
-    if gfx_arch_details is None:
-        return 0
-    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
-    gpu_name = gfx_arch_details[1].split(':')[0]
+    capabilities = triton.compiler.compiler.get_architecture_descriptor(None)
+    gpu_name = capabilities[1].split(':')[0]
     return gpu_name
 
 
@@ -2543,6 +2539,9 @@ def test_dot_mfma_vector_load(vec_size, swizzle, transposeA, transposeB):
     # we can not do vector loads in this case
     if transposeA and not transposeB:
         pytest.skip()
+
+    if triton.language.semantic.gpu_matrix_core_version() == 0:
+        pytest.skip("mfma is not available on hardware")
 
     # source code for following ttgir:
     # @triton.jit

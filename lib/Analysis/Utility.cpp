@@ -528,17 +528,6 @@ bool isMfmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
 }
 #endif
 
-bool isMmaToMmaShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy) {
-  auto src = srcTy.getEncoding().cast<triton::gpu::MmaEncodingAttr>();
-  auto dst = dstTy.getEncoding().cast<triton::gpu::MmaEncodingAttr>();
-  auto srcElemsPerThread = triton::gpu::getTotalElemsPerThread(srcTy);
-  auto dstElemsPerThread = triton::gpu::getTotalElemsPerThread(dstTy);
-  // when #mma = MmaEncoding<version=3, warpsPerCTA=[..., 1]>
-  return src.getVersionMajor() == 3 && src.getWarpsPerCTA()[1] == 1 &&
-         dst.getVersionMajor() == 3 && dst.getWarpsPerCTA()[1] == 1 &&
-         srcElemsPerThread == dstElemsPerThread;
-}
-
 bool isSingleValue(Value value) {
   // Don't consider load as expensive if it is loading a scalar.
   if (auto tensorTy = value.getType().dyn_cast<RankedTensorType>())

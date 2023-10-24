@@ -1272,7 +1272,6 @@ struct FpToFpOpConversion
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},
     };
-
     int inVecWidthBits = 32;
     int outVecWidthBits = 32;
     if (srcTy.isFloat8E4M3FNUZ()) {

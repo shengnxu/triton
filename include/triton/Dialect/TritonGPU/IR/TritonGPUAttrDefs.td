@@ -112,8 +112,7 @@ compared to 1*64 when the hasLeadingOffset is false.
                      "ArrayRef<int64_t>":$shape,
                      "ArrayRef<unsigned>":$order,
                      "CTALayoutAttr":$CTALayout,
-                     "unsigned":$typeWidthInBit,
-                     "bool":$needTrans), [{
+                     "unsigned":$typeWidthInBit), [{
         bool needTrans = false; // default value
         return get(context, dotOpEnc, shape, order, CTALayout, typeWidthInBit, needTrans);
     }]>,

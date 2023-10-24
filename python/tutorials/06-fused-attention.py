@@ -160,25 +160,12 @@ def _attn_fwd(
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     Z, H,
-<<<<<<< HEAD
     N_CTX,
-    STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    STAGE: tl.constexpr,
     pre_load_v: tl.constexpr,
-):
-    start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
-    qkv_offset = off_hz * stride_qh
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-=======
-    N_CTX: tl.constexpr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    STAGE: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -189,7 +176,6 @@ def _attn_fwd(
     # block pointers
     Q_block_ptr = tl.make_block_ptr(
         base=Q + qvk_offset,
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
         shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
@@ -205,26 +191,13 @@ def _attn_fwd(
         order=(1, 0),
     )
     K_block_ptr = tl.make_block_ptr(
-<<<<<<< HEAD
-        base=K + qkv_offset,
-=======
         base=K + qvk_offset,
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
         shape=(BLOCK_DMODEL, N_CTX),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1),
     )
-<<<<<<< HEAD
-    V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0)
-=======
     O_block_ptr = tl.make_block_ptr(
         base=Out + qvk_offset,
         shape=(N_CTX, BLOCK_DMODEL),
@@ -232,7 +205,6 @@ def _attn_fwd(
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0),
->>>>>>> ac9fa68d18c777e421bd3f6fb1ddcfd60b6fda33
     )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)

@@ -1360,18 +1360,17 @@ Value EmitDualBF16ElementwiseOp(Location loc,
 }
 
 struct CmpIOpConversion
-    : public ElementwiseOpConversionBase<triton::gpu::CmpIOp,
-                                         CmpIOpConversion> {
-  using Base =
-      ElementwiseOpConversionBase<triton::gpu::CmpIOp, CmpIOpConversion>;
+    : public ElementwiseOpConversionBase<arith::CmpIOp, CmpIOpConversion> {
+  using Base = ElementwiseOpConversionBase<arith::CmpIOp, CmpIOpConversion>;
   using Base::Base;
   using Adaptor = typename Base::OpAdaptor;
 
   // An interface to support variant DestOp builder.
-  SmallVector<LLVM::ICmpOp>
-  createDestOps(triton::gpu::CmpIOp op, OpAdaptor adaptor,
-                ConversionPatternRewriter &rewriter, Type elemTy,
-                MultipleOperandsRange operands, Location loc) const {
+  SmallVector<LLVM::ICmpOp> createDestOps(arith::CmpIOp op, OpAdaptor adaptor,
+                                          ConversionPatternRewriter &rewriter,
+                                          Type elemTy,
+                                          MultipleOperandsRange operands,
+                                          Location loc) const {
     return {rewriter.create<LLVM::ICmpOp>(
         loc, elemTy, ArithCmpIPredicateToLLVM(op.getPredicate()),
         operands[0][0], operands[0][1])};
@@ -1402,16 +1401,14 @@ struct CmpIOpConversion
 };
 
 struct CmpFOpConversion
-    : public ElementwiseOpConversionBase<triton::gpu::CmpFOp,
-                                         CmpFOpConversion> {
-  using Base =
-      ElementwiseOpConversionBase<triton::gpu::CmpFOp, CmpFOpConversion>;
+    : public ElementwiseOpConversionBase<arith::CmpFOp, CmpFOpConversion> {
+  using Base = ElementwiseOpConversionBase<arith::CmpFOp, CmpFOpConversion>;
   using Base::Base;
   using Adaptor = typename Base::OpAdaptor;
 
   // An interface to support variant DestOp builder.
   static SmallVector<LLVM::FCmpOp>
-  createDestOps(triton::gpu::CmpFOp op, OpAdaptor adaptor,
+  createDestOps(arith::CmpFOp op, OpAdaptor adaptor,
                 ConversionPatternRewriter &rewriter, Type elemTy,
                 MultipleOperandsRange operands, Location loc) {
     return {rewriter.create<LLVM::FCmpOp>(
@@ -1970,7 +1967,6 @@ void populateElementwiseOpToLLVMPatterns(
     int computeCapability, PatternBenefit benefit) {
 #define POPULATE_TERNARY_OP(SRC_OP, DST_OP)                                    \
   patterns.add<ElementwiseOpConversion<SRC_OP, DST_OP>>(typeConverter, benefit);
-  POPULATE_TERNARY_OP(triton::gpu::SelectOp, LLVM::SelectOp)
   POPULATE_TERNARY_OP(arith::SelectOp, LLVM::SelectOp)
 #undef POPULATE_TERNARY_OP
 

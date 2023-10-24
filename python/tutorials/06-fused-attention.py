@@ -88,7 +88,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         if not pre_load_v:
             v = tl.load(V_block_ptr)
-        acc += tl.dot(p.to(tl.float16), v)
+        acc += tl.dot(p.to(v.type.element_ty), v)
         # -- update m_i and l_i
         l_ij = tl.sum(p, 1)
         l_i = l_i * alpha + l_ij
@@ -555,7 +555,7 @@ class _attention(torch.autograd.Function):
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q, dtype=torch.float16)
+        o = torch.empty_like(q)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -680,7 +680,7 @@ attention = _attention.apply
                           #(4, 48, 16384, 64)
                           ])
 @pytest.mark.parametrize('causal', [False, True])
-def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch_dtype):
     torch.manual_seed(20)
     q = (
         torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
@@ -701,15 +701,15 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+    p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v)
+    ref_out = torch.matmul(p, v.half())
     # triton implementation
-    tri_out = attention(q, k, v, causal, sm_scale)
+    tri_out = attention(q, k, v, causal, sm_scale).half()
     # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
@@ -724,16 +724,21 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    if TORCH_HAS_FP8:
+        q = q.to(torch_dtype)
+        k = k.to(torch_dtype)
+        v = v.to(torch_dtype)
+
     sm_scale = 0,5
     split_kernel = True
     dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+    p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v)
+    ref_out = torch.matmul(p, v.half())
     ref_out.backward(dout)
     ref_dv, v.grad = v.grad.clone(), None
     ref_dk, k.grad = k.grad.clone(), None
@@ -807,10 +812,11 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     if provider == "triton":
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         if mode == "fwd":
             q = q.to(torch_dtype)
             k = k.to(torch_dtype)
-        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+            v = v.to(torch_dtype)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':

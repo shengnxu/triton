@@ -214,6 +214,7 @@ def matmul_kernel(
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr,
+    dtype: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -256,14 +257,23 @@ def matmul_kernel(
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    if dtype != "int8":
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    else:
+        assert dtype == "int8"
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.int32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
-        accumulator += tl.dot(a, b)
+        if dtype != "int8":
+            accumulator += tl.dot(a, b)
+        else:
+            assert dtype == "int8"
+            accumulator += tl.dot(a, b, out_dtype=tl.int8)
+
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
@@ -271,7 +281,11 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    if dtype != "int8":
+        c = accumulator.to(tl.float16)
+    else:
+        assert dtype == "int8"
+        c = accumulator.to(tl.int8)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -294,7 +308,7 @@ def leaky_relu(x):
 # and (1) checks any shape constraint; (2) allocates the output; (3) launches the above kernel.
 
 
-def matmul(a, b, c, activation=""):
+def matmul(a, b, c, activation="", dtype="float16"):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -311,7 +325,8 @@ def matmul(a, b, c, activation=""):
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
-        ACTIVATION=activation
+        ACTIVATION=activation,
+        dtype=dtype,
     )
 
 
@@ -368,15 +383,15 @@ def gen_input(M, N, d_type, seed, device='cuda'):
     for in_dtype, out_dtype in [('float16', 'float16'),
                                 ('bfloat16', 'bfloat16'),
                                 ('float16', 'float32'),
-                                ('float32', 'float32')]]
+                                ('float32', 'float32'),
+                                ('int8', 'int8')]]
 )
 def test_correctness(M, N, K, in_dtype, out_dtype):
     a, a_fp16 = gen_input(M, K, in_dtype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, in_dtype, 2, device='cuda')
     # Allocates output.
     c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[out_dtype])
-
-    matmul(a, b, c)
+    matmul(a, b, c, activation="", dtype=in_dtype)
     torch_output = torch.matmul(a_fp16, b_fp16)
     print(f"triton_output={c}")
     print(f"torch_output={torch_output}")
@@ -425,16 +440,16 @@ def get_x_vals():
     )
 )
 def benchmark(M, N, K, provider):
-    input_datetype = 'float16'
-    a, a_fp16 = gen_input(M, K, input_datetype, 1, device='cuda')
-    b, b_fp16 = gen_input(K, N, input_datetype, 2, device='cuda')
+    input_datatype = 'float16'
+    a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
+    b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=torch.float16)
+    c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[input_datatype])
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'cublas':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a_fp16, b_fp16), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, activation="", dtype=input_datatype), quantiles=quantiles)
         global verbose
         if verbose:
             print(f'SIZE: {M},{N},{K}   Best tuning config: ({matmul_kernel.get_best_config(M, N, K)})')

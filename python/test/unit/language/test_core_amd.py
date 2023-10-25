@@ -1742,9 +1742,9 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
                 assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
         gcn = pgm.asm['amdgcn']
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
             assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b15:
+        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
             assert "v_mfma_f32_32x32x16_fp8_fp8" in gcn or "v_mfma_f32_16x16x32_fp8_fp8" in gcn
         return
     # make sure ld/st are vectorized
@@ -2570,6 +2570,12 @@ class SharedLayout:
         return f"#{GPU_DIALECT}.shared<{{vec={self.vec}, perPhase={self.per_phase}, maxPhase={self.max_phase}, order={self.order}, CTAsPerCGA={self.ctas_per_cga}, CTASplitNum={self.cta_split_num}, CTAOrder={self.cta_order}}}>"
 
 
+def get_gpu_name():
+    capabilities = triton.compiler.compiler.get_architecture_descriptor(None)
+    gpu_name = capabilities[1].split(':')[0]
+    return gpu_name
+
+
 @pytest.mark.parametrize("vec_size", [2, 4])
 @pytest.mark.parametrize("swizzle", [True, False])
 @pytest.mark.parametrize("transposeA", [True, False])
@@ -2578,6 +2584,9 @@ def test_dot_mfma_vector_load(vec_size, swizzle, transposeA, transposeB):
     # we can not do vector loads in this case
     if transposeA and not transposeB:
         pytest.skip()
+
+    if triton.language.semantic.gpu_matrix_core_version() == 0:
+        pytest.skip("mfma is not available on hardware")
 
     # source code for following ttgir:
     # @triton.jit
@@ -2662,7 +2671,7 @@ module attributes {"triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 4 :
         f.write(ir)
         f.flush()
         arch_triple = "amdgcn-amd-amdhsa"
-        arch_name = "gfx90a"
+        arch_name = get_gpu_name()
         features = ""
         warp_size = 64
         capabilities = [arch_triple, arch_name, features, warp_size]

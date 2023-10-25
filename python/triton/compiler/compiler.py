@@ -325,15 +325,21 @@ def is_hip():
 from ..language.semantic import gpu_matrix_core_version
 
 def get_architecture_descriptor(capability):
-    if capability is None:
-        device = get_current_device()
-        capability = get_device_capability(device)
-        capability = capability[0] * 10 + capability[1]
-    return capability
+    if is_hip():
+        _device_backend = get_backend("hip")
+        assert _device_backend
+        arch = _device_backend.get_architecture_descriptor()
+        return arch
+    else:
+        if capability is None:
+            device = get_current_device()
+            capability = get_device_capability(device)
+            capability = capability[0] * 10 + capability[1]
+        return capability
 
 
 def get_arch_default_num_warps(device_type):
-    if device_type in ["cuda", "hip"]:
+    if device_type in ["cuda"]:
         num_warps = 4
     else:
         _device_backend = get_backend(device_type)
@@ -345,7 +351,7 @@ def get_arch_default_num_warps(device_type):
 
 
 def get_arch_default_num_stages(device_type, capability=None):
-    if device_type in ["cuda", "hip"]:
+    if device_type in ["cuda"]:
         arch = get_architecture_descriptor(capability)
         is_cuda = device_type == "cuda" and _is_cuda(arch)
         num_stages = 3 if is_cuda and arch >= 75 else 2

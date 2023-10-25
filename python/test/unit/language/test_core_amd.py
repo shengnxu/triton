@@ -2576,9 +2576,8 @@ class SharedLayout:
 
 
 def get_gpu_name():
-    capabilities = triton.compiler.compiler.get_architecture_descriptor(None)
-    gpu_name = capabilities[1].split(':')[0]
-    return gpu_name
+    arch = triton.compiler.compiler.get_architecture_descriptor(None)
+    return arch["gfx_arch"]
 
 
 @pytest.mark.parametrize("vec_size", [2, 4])

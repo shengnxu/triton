@@ -17,10 +17,10 @@ import torch
 import triton
 import triton.language as tl
 
-# triton_dtype = tl.float8e5b16
-# torch_dtype = torch.float8_e5m2fnuz
-triton_dtype:tl.constexpr = tl.float16
-torch_dtype:tl.constexpr = torch.float16
+triton_dtype:tl.constexpr = tl.float8e5b16
+torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+# triton_dtype:tl.constexpr = tl.float16
+# torch_dtype:tl.constexpr = torch.float16
 
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
 
@@ -444,7 +444,7 @@ def _bwd_kernel_dk_dv(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    tl.store(DK_block_ptr, (dk * sm_scale).to(tl.float16))
+    tl.store(DK_block_ptr, (dk * sm_scale).to(triton_dtype))
     tl.store(DV_block_ptr, dv.to(tl.float16))
 
 @triton.jit
@@ -682,21 +682,12 @@ attention = _attention.apply
 @pytest.mark.parametrize('causal', [False, True])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch_dtype):
     torch.manual_seed(20)
-    q = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0., std=0.5)
-        .requires_grad_()
-    )
-    k = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0., std=0.5)
-        .requires_grad_()
-    )
-    v = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0., std=0.5)
-        .requires_grad_()
-    )
+    q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    q = q.to(torch_dtype)
+    k = k.to(torch_dtype)
+    v = v.to(torch_dtype)
     sm_scale = 0.5
     # dout = torch.randn_like(q)
     # reference implementation

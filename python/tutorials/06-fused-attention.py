@@ -19,8 +19,8 @@ import triton.language as tl
 
 # triton_dtype = tl.float8e5b16
 # torch_dtype = torch.float8_e5m2fnuz
-triton_dtype = tl.float16
-torch_dtype = torch.float16
+triton_dtype:tl.constexpr = tl.float16
+torch_dtype:tl.constexpr = torch.float16
 
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
 
@@ -88,7 +88,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         if not pre_load_v:
             v = tl.load(V_block_ptr)
-        acc += tl.dot(p.to(v.type.element_ty), v)
+        acc += tl.dot(p.to(triton_dtype), v)
         # -- update m_i and l_i
         l_ij = tl.sum(p, 1)
         l_i = l_i * alpha + l_ij
@@ -606,7 +606,7 @@ class _attention(torch.autograd.Function):
         q, k, v, o, L = ctx.saved_tensors
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
-        dk = torch.empty_like(k, dtype=torch.float16)
+        dk = torch.empty_like(k, dtype=torch_dtype)
         dv = torch.empty_like(v)
         delta = torch.empty_like(L)
         do_scaled = torch.empty_like(do)

@@ -17,10 +17,10 @@ import torch
 import triton
 import triton.language as tl
 
-triton_dtype:tl.constexpr = tl.float8e5b16
-torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
-# triton_dtype:tl.constexpr = tl.float16
-# torch_dtype:tl.constexpr = torch.float16
+# triton_dtype:tl.constexpr = tl.float8e5b16
+# torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+triton_dtype:tl.constexpr = tl.float16
+torch_dtype:tl.constexpr = torch.float16
 
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
 
@@ -293,7 +293,7 @@ def _bwd_kernel(
             p = tl.math.exp2(qk * qk_scale - l_i[:, None])
             # compute dv
             do = tl.load(do_ptrs)
-            dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
+            dv += tl.dot(tl.trans(p.to(do.dtype)), do)
             # compute dp = dot(v, do)
             Di = tl.load(D_ptrs + offs_m_curr)
             dp = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32) - Di[:, None]
@@ -399,7 +399,7 @@ def _bwd_kernel_dk_dv(
         l_i = tl.load(l_ptrs + offs_m_curr)
         p = tl.math.exp2(qk - l_i)
         # -- compute dv ----
-        dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
+        dv += tl.dot(tl.trans(p.to(do.dtype)), do)
         # compute dp = dot(v, do)
         Di = tl.load(D_ptrs + offs_m_curr)
         dp = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32) - Di
@@ -539,7 +539,7 @@ class _attention(torch.autograd.Function):
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q)
+        o = torch.empty_like(q, dtype=torch_dtype)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -702,14 +702,10 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    if TORCH_HAS_FP8:
-        q = q.to(torch_dtype)
-        k = k.to(torch_dtype)
-        v = v.to(torch_dtype)
 
     sm_scale = 0.5
     split_kernel = True
-    dout = torch.randn_like(q, dtype=torch.float16)
+    ref_dout = torch.randn_like(q, dtype=torch.float16)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
@@ -717,13 +713,14 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
     ref_out = torch.matmul(p, v.half())
-    ref_out.backward(dout)
+    ref_out.backward(ref_dout)
     ref_dv, v.grad = v.grad.clone(), None
     ref_dk, k.grad = k.grad.clone(), None
     ref_dq, q.grad = q.grad.clone(), None
     # # triton implementation
     tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
-    tri_out.backward(dout)
+    tri_dout = torch.randn_like(q)
+    tri_out.backward(tri_dout)
     tri_dv, v.grad = v.grad.clone(), None
     tri_dk, k.grad = k.grad.clone(), None
     tri_dq, q.grad = q.grad.clone(), None
@@ -802,7 +799,8 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':
             o = fn()
-            do = torch.randn_like(o)
+            do = torch.randn_like(o, dtype=torch.float16)
+            do = do.to(torch_dtype)
             fn = lambda: o.backward(do, retain_graph=True)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     if provider == "flash":

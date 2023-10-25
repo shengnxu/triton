@@ -415,7 +415,7 @@ def _bwd_kernel_dk_dv(
         l_i = tl.load(l_ptrs + offs_m_curr)
         p = tl.math.exp2(qk - l_i)
         # -- compute dv ----
-        dv += tl.dot(tl.trans(p.to(DO.dtype.element_ty)), do)
+        dv += tl.dot(tl.trans(p.to(Q.dtype.element_ty)), do)
         # compute dp = dot(v, do)
         Di = tl.load(D_ptrs + offs_m_curr)
         dp = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32) - Di
@@ -698,18 +698,18 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch_dtype):
         .requires_grad_()
     )
     sm_scale = 0.5
-    dout = torch.randn_like(q)
+    # dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v.half())
+    ref_out = torch.matmul(p.half(), v.half())
     # triton implementation
     tri_out = attention(q, k, v, causal, sm_scale).half()
     # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=1e-2)
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',

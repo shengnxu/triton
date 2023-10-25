@@ -396,15 +396,21 @@ bool supportMFMATypes(Type a, Type b) {
   if (a.getIntOrFloatBitWidth() != b.getIntOrFloatBitWidth())
     return false;
 
-  auto F8E4M3 = TypeID::get<mlir::Float8E4M3FNUZType>();
-  auto F8E5M2 = TypeID::get<mlir::Float8E5M2FNUZType>();
+  auto F8E4M3FNUZ = TypeID::get<mlir::Float8E4M3FNUZType>();
+  auto F8E5M2FNUZ = TypeID::get<mlir::Float8E5M2FNUZType>();
   auto F16 = TypeID::get<mlir::Float16Type>();
   auto BF16 = TypeID::get<mlir::BFloat16Type>();
   auto F32 = TypeID::get<mlir::Float32Type>();
   auto Int = TypeID::get<mlir::IntegerType>();
   DenseSet<std::pair<mlir::TypeID, mlir::TypeID>> supportedTypes = {
-      {F32, F32},       {F16, F16},       {BF16, BF16},     {F8E4M3, F8E4M3},
-      {F8E4M3, F8E5M2}, {F8E5M2, F8E4M3}, {F8E5M2, F8E5M2}, {Int, Int}};
+      {F32, F32},
+      {F16, F16},
+      {BF16, BF16},
+      {F8E4M3FNUZ, F8E4M3FNUZ},
+      {F8E4M3FNUZ, F8E5M2FNUZ},
+      {F8E5M2FNUZ, F8E4M3FNUZ},
+      {F8E5M2FNUZ, F8E5M2FNUZ},
+      {Int, Int}};
 
   if (!supportedTypes.contains({a.getTypeID(), b.getTypeID()}))
     return false;

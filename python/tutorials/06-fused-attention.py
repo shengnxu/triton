@@ -17,10 +17,10 @@ import torch
 import triton
 import triton.language as tl
 
-triton_dtype = tl.float8e5b16
-torch_dtype = torch.float8_e5m2fnuz
-# triton_dtype = tl.float16
-# torch_dtype = torch.float16
+# triton_dtype = tl.float8e5b16
+# torch_dtype = torch.float8_e5m2fnuz
+triton_dtype = tl.float16
+torch_dtype = torch.float16
 
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
 
@@ -729,9 +729,9 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
         k = k.to(torch_dtype)
         v = v.to(torch_dtype)
 
-    sm_scale = 0,5
+    sm_scale = 0.5
     split_kernel = True
-    dout = torch.randn_like(q)
+    dout = torch.randn_like(q, dtype=torch.float16)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale

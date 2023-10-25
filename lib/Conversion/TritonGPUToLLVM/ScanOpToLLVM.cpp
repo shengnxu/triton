@@ -62,7 +62,8 @@ static void scanThreadContiguousElements(SmallVector<Value> &srcValues,
 // contiguous group of elements.
 static void warpScan(SmallVector<Value> &srcValues,
                      ConversionPatternRewriter &rewriter,
-                     ScanLoweringHelper &helper, Value laneIdAxis) {
+                     ScanLoweringHelper &helper, Value laneIdAxis,
+		     Value laneId) {
   Location loc = helper.getLoc();
   unsigned scanElementsPerThreads = helper.getAxisNumElementsPerThread();
   unsigned elementStride = helper.getAxisElementStride();
@@ -76,7 +77,7 @@ static void warpScan(SmallVector<Value> &srcValues,
     // Reduce within warps.
     Value acc = srcValues[srcIndex];
     for (unsigned i = 1; i <= (scanDim) / 2; i = i << 1) {
-      Value shfl = shflUpSync(loc, rewriter, acc, i * threadStride);
+      Value shfl = shflUpSync(loc, rewriter, acc, i * threadStride, laneId);
       Value tempAcc = accumulate(rewriter, helper.getCombineOp(), shfl, acc);
       Value mask = icmp_slt(laneIdAxis, i32_val(i));
       acc = select(mask, acc, tempAcc);
@@ -127,7 +128,7 @@ static void AddPartialReduce(SmallVector<Value> &srcValues,
                              ConversionPatternRewriter &rewriter,
                              ScanLoweringHelper &helper, Value sharedMemoryPtr,
                              Value warpId, Value laneIdAxis,
-                             Value parallelLaneId) {
+                             Value parallelLaneId, Value laneId) {
   Location loc = helper.getLoc();
   unsigned numParallelLane = helper.getNonAxisNumThreadsPerCTA();
   unsigned scanElementsPerThreads = helper.getAxisNumElementsPerThread();
@@ -217,7 +218,7 @@ static void AddPartialReduce(SmallVector<Value> &srcValues,
 static void AddPartialReduceOneWarp(SmallVector<Value> &srcValues,
                                     ConversionPatternRewriter &rewriter,
                                     ScanLoweringHelper &helper, Value warpId,
-                                    Value laneIdAxis, Value laneIdLast) {
+                                    Value laneIdAxis, Value laneIdLast, Value laneId) {
   Location loc = helper.getLoc();
   unsigned scanElementsPerThreads = helper.getAxisNumElementsPerThread();
   unsigned parallelElementsPerThread = helper.getNonAxisNumElementsPerThread();
@@ -260,7 +261,7 @@ static void AddPartialReduceOneWarp(SmallVector<Value> &srcValues,
     Value lastElement = srcValues[srcIndex];
     if (scanDim > 1) {
       lastElement =
-          shflUpSync(loc, rewriter, srcValues[srcIndex], threadStride);
+          shflUpSync(loc, rewriter, srcValues[srcIndex], threadStride, laneId);
       lastElement = select(maskFirstLane, accumulator, lastElement);
       if (numScanBlocks > 1)
         // Update accumulator with the value from the last lane.
@@ -422,7 +423,7 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
     // warpId. Then update each chunk of contiguous elements by adding the
     // accumulated value from the previous lane.
     AddPartialReduce(srcValues, rewriter, helper, baseSharedMemPtr, warpIdAxis,
-                     laneIdAxis, flatIdParallel);
+                     laneIdAxis, flatIdParallel, laneId);
   } else if (srcValues.size() > 1) {
     // Fast path for the case where there is only one warp with unique data on
     // the axis.
@@ -433,7 +434,7 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
     auto laneIdLast = linearize(rewriter, loc, multiDimLaneId, threadsPerWarp,
                                 triton::gpu::getOrder(helper.getEncoding()));
     AddPartialReduceOneWarp(srcValues, rewriter, helper, warpIdAxis, laneIdAxis,
-                            laneIdLast);
+                            laneIdLast, laneId);
   } // else axisNumWarps == 1 and srcValues.size() == 1, nothing to do.
 
   Value results = getTypeConverter()->packLLElements(loc, srcValues, rewriter,

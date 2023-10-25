@@ -17,27 +17,8 @@ import torch
 import triton
 import triton.language as tl
 
-# triton_dtype:tl.constexpr = tl.float8e5b16
-# torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
-triton_dtype:tl.constexpr = tl.float16
-torch_dtype:tl.constexpr = torch.float16
-
+torch_dtype = torch.float8_e5m2fnuz
 TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
-
-torch_to_triton_types = {
-    torch.float8_e5m2fnuz: tl.float8e5b16,
-    torch.float8_e4m3fnuz: tl.float8e4b8,
-    torch.float16: tl.float16,
-    torch.bfloat16: tl.bfloat16,
-}
-
-triton_to_torch_types = {
-    tl.float8e5b16: torch.float8_e5m2fnuz,
-    tl.float8e4b8: torch.float8_e4m3fnuz,
-    tl.float16: torch.float16,
-    tl.bfloat16: torch.bfloat16,
-}
-
 
 @triton.jit
 def max_fn(x, y):
@@ -165,7 +146,7 @@ def _attn_fwd(
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(triton_dtype)
+    q = (q * qk_scale).to(q.dtype)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -378,7 +359,7 @@ def _bwd_kernel_dk_dv(
     qk_scale = sm_scale * 1.44269504
     # load k and v: they will stay in SRAM throughout
     k = tl.load(K_block_ptr)
-    k = (k * qk_scale).to(triton_dtype)
+    k = (k * qk_scale).to(k.dtype)
     v = tl.load(V_block_ptr)
     dv = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     dk = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
@@ -428,7 +409,7 @@ def _bwd_kernel_dk_dv(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    tl.store(DK_block_ptr, (dk * sm_scale).to(triton_dtype))
+    tl.store(DK_block_ptr, (dk * sm_scale).to(DK.dtype.element_ty))
     tl.store(DV_block_ptr, dv.to(tl.float16))
 
 @triton.jit
@@ -490,7 +471,7 @@ def _bwd_kernel_dq(
     qk_scale = sm_scale * 1.44269504
     # load q and do: they will stay in SRAM throughout
     q = tl.load(Q_block_ptr)
-    q = (q * qk_scale).to(triton_dtype)
+    q = (q * qk_scale).to(q.dtype)
     do = tl.load(DO_block_ptr)
     Di = tl.load(D_ptrs + offs_m)
     l_i = tl.load(l_ptrs + offs_m)

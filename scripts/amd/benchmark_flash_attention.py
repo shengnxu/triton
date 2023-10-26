@@ -15,7 +15,7 @@ import torch
 def benchmark_FA(BATCH, H, N_CTX, D_HEAD, causal, rep, mode, dtype=torch.float16, device="cuda"):
     q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
     k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-    v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+    v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=dtype, device="cuda", requires_grad=True)
     sm_scale = 1.3
     split_kernel = True
     if mode == "bwd":

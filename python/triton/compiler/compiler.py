@@ -64,11 +64,11 @@ def ttir_compute_capability_rewrite(mod, target):
     # with block (tensor) pointers into tensors of pointers
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
-    if _is_cuda(arch):
-        pm.add_rewrite_tensor_pointer_pass(target.capability)
+    if _is_cuda(target):
+        pm.add_rewrite_tensor_pointer_pass(target.capability, False)
     elif is_hip():
         capability = 90
-        pm.add_rewrite_tensor_pointer_pass(capability)
+        pm.add_rewrite_tensor_pointer_pass(capability, True)
     else:
         assert(False, "unsupported target")
     pm.run(mod)
@@ -190,7 +190,7 @@ def ttgir_to_llir(mod, extern_libs, target, tma_infos, waves_per_eu=0):
     if _is_cuda(target):
         return translate_triton_gpu_to_llvmir(mod, target.capability, tma_infos, runtime.TARGET.NVVM, waves_per_eu)
     else:
-        return translate_triton_gpu_to_llvmir(mod, 0, TMAInfos(), runtime.TARGET.ROCDL, waves_per_eu)
+        return translate_triton_gpu_to_llvmir(mod, target.capability, TMAInfos(), runtime.TARGET.ROCDL, waves_per_eu)
 
 
 # PTX translation
@@ -400,7 +400,6 @@ def compile(fn, **kwargs):
     is_cuda = device_type == "cuda"
     if is_hip():
         is_cuda = False
-    warp_size = CUDA_DEFAULT_WARP_SIZE if _is_cuda(arch) else arch["warp_size"]
     context = ir.context()
     constants = kwargs.get("constants", dict())
     num_warps = kwargs.get("num_warps", get_arch_default_num_warps(device_type))
@@ -436,6 +435,7 @@ def compile(fn, **kwargs):
         _device_backend = get_backend(device_type)
         assert _device_backend
         target = _device_backend.get_architecture_descriptor(**kwargs)
+    warp_size = CUDA_DEFAULT_WARP_SIZE if is_cuda else target["warp_size"]
     # build compilation stages
     stages = dict()
     stages["ast"] = (lambda path: fn, None)
@@ -449,9 +449,9 @@ def compile(fn, **kwargs):
         add_cuda_stages(target, extern_libs, stages)
     elif device_type == "hip":
          # pass the user's configuration to the backend device.
-        arch["num_warps"] = num_warps
-        arch["num_stages"] = num_stages
-        arch["num_ctas"] = num_ctas
+        target["num_warps"] = num_warps
+        target["num_stages"] = num_stages
+        target["num_ctas"] = num_ctas
 
         other = {}
         other["context"] = context

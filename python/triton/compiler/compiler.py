@@ -350,7 +350,6 @@ def get_arch_default_num_warps(device_type):
 
     return num_warps
 
-
 @functools.lru_cache
 def get_arch_default_num_stages(device_type, capability=None):
     if device_type in ["cuda"]:
@@ -380,6 +379,7 @@ def compile(fn, **kwargs):
 
     if is_hip():
         device_type = "hip"
+        capability = None
 
     if device_type == "cuda":
         _device_backend = get_backend(device_type)

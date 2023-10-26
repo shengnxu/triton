@@ -324,6 +324,7 @@ def is_hip():
 
 from ..language.semantic import gpu_matrix_core_version
 
+@functools.lru_cache
 def get_architecture_descriptor(capability):
     if is_hip():
         _device_backend = get_backend("hip")
@@ -337,7 +338,7 @@ def get_architecture_descriptor(capability):
             capability = capability[0] * 10 + capability[1]
         return capability
 
-
+@functools.lru_cache
 def get_arch_default_num_warps(device_type):
     if device_type in ["cuda"]:
         num_warps = 4
@@ -349,7 +350,7 @@ def get_arch_default_num_warps(device_type):
 
     return num_warps
 
-
+@functools.lru_cache
 def get_arch_default_num_stages(device_type, capability=None):
     if device_type in ["cuda"]:
         arch = get_architecture_descriptor(capability)
@@ -418,6 +419,7 @@ def compile(fn, **kwargs):
         cluster_info.clusterDimY = kwargs["clusterDims"][1]
         cluster_info.clusterDimZ = kwargs["clusterDims"][2]
     tma_infos = TMAInfos()
+
     # build compilation stages
     stages = dict()
     stages["ast"] = (lambda path: fn, None)

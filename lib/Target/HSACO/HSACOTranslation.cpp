@@ -262,8 +262,7 @@ llir_to_amdgcn_and_hsaco(llvm::Module *module, std::string gfx_arch,
   // verify and store llvm
   auto module_obj = llvm::CloneModule(*module);
   if (!module_obj) {
-    llvm::errs() << "Error: clonging LLIR failed"
-                 << "\n";
+    llvm::errs() << "Error: clonging LLIR failed\n";
   }
   auto amdgcn =
       generate_amdgcn_assembly(module, gfx_triple, gfx_arch, gfx_features);

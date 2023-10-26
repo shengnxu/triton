@@ -23,6 +23,26 @@ else:
     from ..._C.libtriton import triton as _triton
 
 
+def make_stub(name, signature, constants, ids, **kwargs):
+    # name of files that are cached
+    so_cache_key = make_so_cache_key(version_key(), signature, constants, ids, **kwargs)
+    so_cache_manager = get_cache_manager(so_cache_key)
+    so_name = f"{name}.so"
+    # retrieve stub from cache if it exists
+    cache_path = so_cache_manager.get_file(so_name)
+    if cache_path is None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = generate_launcher_hip(constants, signature, ids)
+            src_path = os.path.join(tmpdir, "main.c")
+            with open(src_path, "w") as f:
+                f.write(src)
+            so = _build(name, src_path, tmpdir)
+            with open(so, "rb") as f:
+                return so_cache_manager.put(f.read(), so_name, binary=True)
+    else:
+        return cache_path
+
+
 def ty_to_cpp(ty):
     if ty[0] == '*':
         return "hipDeviceptr_t"
@@ -43,9 +63,8 @@ def ty_to_cpp(ty):
 
 
 def generate_launcher_hip(constants, signature, ids):
-    # print("generate_launcher_hip")
     start_desc = len(signature)
-    # signature = generate_cu_signature(constants, signature, ids)
+    signature = generate_cu_signature(constants, signature, ids)
     arg_decls = ', '.join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items())
 
     def _extracted_type(ty):
@@ -221,26 +240,6 @@ PyMODINIT_FUNC PyInit___triton_launcher(void) {{
     return src
 
 
-def make_stub(name, signature, constants, ids, **kwargs):
-    # name of files that are cached
-    so_cache_key = make_so_cache_key(version_key(), signature, constants, ids, **kwargs)
-    so_cache_manager = get_cache_manager(so_cache_key)
-    so_name = f"{name}.so"
-    # retrieve stub from cache if it exists
-    cache_path = so_cache_manager.get_file(so_name)
-    if cache_path is None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            src = generate_launcher_hip(constants, signature, ids)
-            src_path = os.path.join(tmpdir, "main.c")
-            with open(src_path, "w") as f:
-                f.write(src)
-            so = _build(name, src_path, tmpdir)
-            with open(so, "rb") as f:
-                return so_cache_manager.put(f.read(), so_name, binary=True)
-    else:
-        return cache_path
-
-
 def get_amdgcn_bitcode_paths(gfx_arch: str):
     # print("get_amdgcn_bitcode_paths")
     gpu_arch_agnostic_bitcode_libraries = ["opencl.bc",
@@ -399,7 +398,7 @@ class HIPBackend(BaseBackend):
     def is_standalone(self):
         return not HIP_BACKEND_MODE
 
-    def add_stages(self, arch: dict, extern_libs: dict, stages: dict, other : dict = {}):
+    def add_stages(self, arch: dict, extern_libs: dict, stages: dict, other: dict = {}):
         if self.is_standalone():
             num_warps = arch["num_warps"]
             num_ctas = arch["num_ctas"]
@@ -417,11 +416,11 @@ class HIPBackend(BaseBackend):
             tma_infos = other["tma_infos"]
             waves_per_eu = other["waves_per_eu"]
             matrix_instr_nonkdim = other["matrix_instr_nonkdim"]
-          
+
             stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
-                       lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, warp_size, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue, matrix_instr_nonkdim))
+                               lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, warp_size, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue, matrix_instr_nonkdim))
             stages["llir"] = (lambda path: Path(path).read_text(),
-                            lambda src: ttgir_to_llir(src, extern_libs, arch, tma_infos, waves_per_eu))
+                              lambda src: ttgir_to_llir(src, extern_libs, arch, tma_infos, waves_per_eu))
 
             extern_libs.update(get_amdgcn_bitcode_paths(gfx_arch))
             for key in list(extern_libs):

@@ -769,10 +769,10 @@ private:
 
     auto tmpCvt = builder.create<triton::gpu::ConvertLayoutOp>(
         cvtOp.getLoc(), newSrcType, cvtOp.getOperand());
-    auto newEpliogueCvt = builder.create<triton::gpu::ConvertLayoutOp>(
+    auto newEpilogueCvt = builder.create<triton::gpu::ConvertLayoutOp>(
         cvtOp.getLoc(), newDstType, tmpCvt);
 
-    return std::make_pair(tmpCvt, newEpliogueCvt);
+    return std::make_pair(tmpCvt, newEpilogueCvt);
   }
 
   // Try to reduce LDS usage of cvt(mfma->blocked) op by changing the shape of
@@ -783,7 +783,7 @@ private:
   // clang-format off
   //
   // LDS usage of this op is roughly calculated as:
-  // LDS_USAGE = getShapePerCTA(mfma_layout)[0] * getShapePerCTA(blocked_layoput)[1] * sizeof(data_type)
+  // LDS_USAGE = getShapePerCTA(mfma_layout)[0] * getShapePerCTA(blocked_layout)[1] * sizeof(data_type)
   // LDS_USAGE = warpsPerCTA(mfma_layout)[0] * warpsPerCta(blocked_layout)[1] * C,
   // where C = 32 * sizePerWarp(blocked_layout)[1] * threadsPerWarp(blocked_layout)[1] * sizeof(data_type)
   //
@@ -818,7 +818,7 @@ private:
           srcMfma.getWarpsPerCTA()[0] * srcMfma.getWarpsPerCTA()[1];
 
       triton::gpu::ConvertLayoutOp tmpCvt;
-      triton::gpu::ConvertLayoutOp newEpliogueCvt;
+      triton::gpu::ConvertLayoutOp newEpilogueCvt;
 
       // Find all possible shapes of WarpsPerCTA by finding all possible
       // factorizations of numWarps. Pick shape for which both conversions in
@@ -830,11 +830,11 @@ private:
 
       for (int i = 0; i < factorizedNumWarps.size(); i++) {
         auto warpsPerCTAPair = factorizedNumWarps[i];
-        std::tie(tmpCvt, newEpliogueCvt) =
+        std::tie(tmpCvt, newEpilogueCvt) =
             createNewConvertOps(mod, builder, cvtOp, warpsPerCTAPair);
 
         int tmpCvtLDS = getCvtOpLDSUsage(tmpCvt);
-        int newCvtLDS = getCvtOpLDSUsage(newEpliogueCvt);
+        int newCvtLDS = getCvtOpLDSUsage(newEpilogueCvt);
         if (tmpCvtLDS <= LDSSize && newCvtLDS <= LDSSize) {
           int LDSUsage = tmpCvtLDS + newCvtLDS;
           if (LDSUsage < minLDSUsage) {
@@ -842,7 +842,7 @@ private:
             minIdx = i;
           }
         }
-        newEpliogueCvt.erase();
+        newEpilogueCvt.erase();
         tmpCvt.erase();
       }
 
@@ -852,10 +852,10 @@ private:
 
       assert(minIdx >= 0 && minIdx < factorizedNumWarps.size());
       auto warpsPerCTAPair = factorizedNumWarps[minIdx];
-      std::tie(tmpCvt, newEpliogueCvt) =
+      std::tie(tmpCvt, newEpilogueCvt) =
           createNewConvertOps(mod, builder, cvtOp, warpsPerCTAPair);
 
-      cvtOp.replaceAllUsesWith(newEpliogueCvt.getResult());
+      cvtOp.replaceAllUsesWith(newEpilogueCvt.getResult());
       cvtOp.erase();
     });
   }
@@ -1046,10 +1046,23 @@ private:
                          .cast<RankedTensorType>()
                          .getEncoding()
                          .dyn_cast<MfmaEncodingAttr>()) {
-        if (AElType.isBF16() || AElType.isF16() || AElType.isF32() ||
-            AElType.isInteger(8))
+        Type BElType =
+            dotOp.getB().getType().cast<RankedTensorType>().getElementType();
+
+        auto maxBitWidth = std::max(AElType.getIntOrFloatBitWidth(),
+                                    BElType.getIntOrFloatBitWidth());
+
+        // TODO check mfma tensor core version compatibility
+        if (maxBitWidth == 8)
           return;
-        promoteType = builder.getF16Type();
+
+        if (AElType == BElType)
+          return;
+
+        if (maxBitWidth < 16)
+          promoteType = builder.getF16Type();
+        else if (maxBitWidth <= 32)
+          promoteType = builder.getF32Type();
 #endif
       } else {
         // FMA case.

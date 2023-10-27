@@ -180,24 +180,17 @@ import pytest
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5, num_warps=2),
     ] if torch.version.hip is None else [
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 16}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 8}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 32}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 32}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 16}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 32}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 4}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 4}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 16}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 32}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 4}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_warps=4, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4, 'waves_per_eu': 2}, num_warps=8, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2}, num_warps=8, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'waves_per_eu': 3}, num_warps=4, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 8}, num_warps=4, num_stages=0),
     ],
     key=['M', 'N', 'K'],
 )
+@triton.heuristics({
+    'EVEN_K': lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0,
+})
 @triton.jit
 def matmul_kernel(
     # Pointers to matrices
@@ -212,6 +205,7 @@ def matmul_kernel(
     stride_cm, stride_cn,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+    EVEN_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr,
     dtype: tl.constexpr,
@@ -226,12 +220,16 @@ def matmul_kernel(
     pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    if GROUP_SIZE_M == 1:
+        pid_m = pid // num_pid_n
+        pid_n = pid % num_pid_n
+    else:
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = pid // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + (pid % group_size_m)
+        pid_n = (pid % num_pid_in_group) // group_size_m
 
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
@@ -265,8 +263,12 @@ def matmul_kernel(
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
-        a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-        b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+        if EVEN_K:
+            a = tl.load(a_ptrs)
+            b = tl.load(b_ptrs)
+        else:
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
         if dtype != "int8":
             accumulator += tl.dot(a, b)
@@ -415,11 +417,16 @@ global verbose
 verbose = False
 
 def get_x_vals():
-    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
-    x_vals += [
+    # x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+    x_vals=[
+        (1024, 1024, 1024),
+        (2048, 2048, 2048),
+        (4096, 4096, 4096),
         (4864, 4096, 8192),
-        (9728, 8192, 65536),
-    ]
+        (8192, 8192, 8192),
+        (9728, 8192, 65536)
+    ],  # Different possible values for `x_name`
+    
     return x_vals
 
 
@@ -430,9 +437,9 @@ def get_x_vals():
         # x_vals.append(good_vals)
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
-        line_vals=['cublas', 'triton'],
+        line_vals=['rocblas', 'triton'],
         # Label name for the lines
-        line_names=["cuBLAS", "Triton"],
+        line_names=["rocBLAS", "Triton"],
         # Line styles
         styles=[('green', '-'), ('blue', '-')],
         ylabel="TFLOPS",  # Label name for the y-axis
@@ -447,7 +454,7 @@ def benchmark(M, N, K, provider):
     # Allocates output.
     c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[input_datatype])
     quantiles = [0.5, 0.2, 0.8]
-    if provider == 'cublas':
+    if provider == 'rocblas':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a_fp16, b_fp16), quantiles=quantiles)
     if provider == 'triton':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, activation="", dtype=input_datatype), quantiles=quantiles)

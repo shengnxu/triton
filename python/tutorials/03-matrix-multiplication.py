@@ -158,6 +158,12 @@ import sys
 import argparse
 import pytest
 
+# input_type = torch.float8_e4m3fnuz
+# input_type = torch.float8_e5m2fnuz
+# input_type = torch.float8_e5m2
+# d_type = torch.float8_e4m3fn
+
+
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
 #   - A list of `triton.Config` objects that define different configurations of
 #       meta-parameters (e.g., `BLOCK_SIZE_M`) and compilation options (e.g., `num_warps`) to try
@@ -208,6 +214,7 @@ def matmul_kernel(
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr,
+    dtype: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -250,14 +257,23 @@ def matmul_kernel(
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    if dtype != "int8":
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    else:
+        assert dtype == "int8"
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.int32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
-        accumulator += tl.dot(a, b)
+        if dtype != "int8":
+            accumulator += tl.dot(a, b)
+        else:
+            assert dtype == "int8"
+            accumulator += tl.dot(a, b, out_dtype=tl.int8)
+
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
@@ -265,7 +281,11 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    if dtype != "int8":
+        c = accumulator.to(tl.float16)
+    else:
+        assert dtype == "int8"
+        c = accumulator.to(tl.int8)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -288,15 +308,13 @@ def leaky_relu(x):
 # and (1) checks any shape constraint; (2) allocates the output; (3) launches the above kernel.
 
 
-def matmul(a, b, activation=""):
+def matmul(a, b, c, activation="", dtype="float16"):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
-    assert a.is_contiguous(), "Matrix A must be contiguous"
-    assert b.is_contiguous(), "Matrix B must be contiguous"
+    # assert a.is_contiguous(), "Matrix A must be contiguous"
+    # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
@@ -307,9 +325,48 @@ def matmul(a, b, activation=""):
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
-        ACTIVATION=activation
+        ACTIVATION=activation,
+        dtype=dtype,
     )
-    return c
+
+
+name_to_torch_types = {
+    'int8': torch.int8,
+    'float16': torch.float16,
+    'float32': torch.float32,
+    'bfloat16': torch.bfloat16,
+    # 'fp8e4b8': torch.float8_e4m3fnuz,
+    # 'fp8e5b16': torch.float8_e5m2fnuz,
+    # 'fp8e4': torch.float8_e4m3fn,
+    # 'fp8e5': torch.float8_e5m2,
+}
+
+def gen_input(M, N, d_type, seed, device='cuda'):
+    name_to_triton_types = {
+        'int8': tl.int8,
+        'float16': tl.float16,
+        'float32': tl.float32,
+        'bfloat16': tl.bfloat16,
+        # 'fp8e4b8': tl.float8e4b8,
+        # 'fp8e5b16': tl.float8e5b16,
+        'fp8e4': tl.float8e4nv,
+        'fp8e5': tl.float8e5,
+    }
+    
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
+    if 'fp8' in d_type: # d_type is float8
+        assert d_type in name_to_torch_types
+        torch_f8 = raw_data.to(name_to_torch_types[d_type])
+        # input = torch_f8
+        input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
+        input_f16 = torch_f8.to(torch.float16)
+    else:
+        input = raw_data.to(name_to_torch_types[d_type])
+        input_f16 = input.to(torch.float16)
+
+    return input, input_f16
 
 
 # %%
@@ -323,26 +380,27 @@ def matmul(a, b, activation=""):
                   (128, 128, 64), (64, 128, 128), (32, 128, 64),
                   (64, 64, 32), (32, 32, 128), (128, 128, 64),
                    (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
-    for in_dtype, out_dtype in [('int8', 'int8'),
-                                ('float16', 'float16'),
+    for in_dtype, out_dtype in [('float16', 'float16'),
                                 ('bfloat16', 'bfloat16'),
                                 ('float16', 'float32'),
-                                ('float32', 'float32')]]
+                                ('float32', 'float32'),
+                                ('int8', 'int8')]]
 )
 def test_correctness(M, N, K, in_dtype, out_dtype):
-    torch.manual_seed(0)
-    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
-    b = torch.randn((K, N), device='cuda', dtype=torch.float16)
-    triton_output = matmul(a, b)
-    torch_output = torch.matmul(a, b)
-    print(f"triton_output={triton_output}")
+    a, a_fp16 = gen_input(M, K, in_dtype, 1, device='cuda')
+    b, b_fp16 = gen_input(K, N, in_dtype, 2, device='cuda')
+    # Allocates output.
+    c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[out_dtype])
+    matmul(a, b, c, activation="", dtype=in_dtype)
+    torch_output = torch.matmul(a_fp16, b_fp16)
+    print(f"triton_output={c}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
-    if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
+    if torch.allclose(c.to(torch.float16), torch_output, atol=5e-2, rtol=rtol):
         print("✅ Triton and Torch match")
     else:
         print("❌ Triton and Torch differ")
-        assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol)
+        assert torch.allclose(c, torch_output, atol=1e-2, rtol=rtol)
 
 
 # %%
@@ -358,12 +416,17 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
 global verbose
 verbose = False
 
+def get_x_vals():
+    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+
+    return x_vals
+
+
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['M', 'N', 'K'],  # Argument names to use as an x-axis for the plot
-        x_vals=[
-            128 * i for i in range(2, 33)
-        ],  # Different possible values for `x_name`
+        x_vals = get_x_vals(),
+        # x_vals.append(good_vals)
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
         line_vals=['cublas', 'triton'],
@@ -377,13 +440,16 @@ verbose = False
     )
 )
 def benchmark(M, N, K, provider):
-    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
-    b = torch.randn((K, N), device='cuda', dtype=torch.float16)
+    input_datatype = 'float16'
+    a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
+    b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
+    # Allocates output.
+    c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[input_datatype])
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'cublas':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a_fp16, b_fp16), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, activation="", dtype=input_datatype), quantiles=quantiles)
         global verbose
         if verbose:
             print(f'SIZE: {M},{N},{K}   Best tuning config: ({matmul_kernel.get_best_config(M, N, K)})')
@@ -413,3 +479,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+    

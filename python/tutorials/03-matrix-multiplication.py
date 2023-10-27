@@ -281,11 +281,7 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    if dtype != "int8":
-        c = accumulator.to(tl.float16)
-    else:
-        assert dtype == "int8"
-        c = accumulator.to(tl.int8)
+    c = accumulator.to(c_ptr.type.element_ty)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -335,10 +331,10 @@ name_to_torch_types = {
     'float16': torch.float16,
     'float32': torch.float32,
     'bfloat16': torch.bfloat16,
-    # 'fp8e4b8': torch.float8_e4m3fnuz,
-    # 'fp8e5b16': torch.float8_e5m2fnuz,
-    # 'fp8e4': torch.float8_e4m3fn,
-    # 'fp8e5': torch.float8_e5m2,
+    'fp8e4b8': torch.float8_e4m3fnuz,
+    'fp8e5b16': torch.float8_e5m2fnuz,
+    'fp8e4': torch.float8_e4m3fn,
+    'fp8e5': torch.float8_e5m2,
 }
 
 def gen_input(M, N, d_type, seed, device='cuda'):
@@ -347,8 +343,8 @@ def gen_input(M, N, d_type, seed, device='cuda'):
         'float16': tl.float16,
         'float32': tl.float32,
         'bfloat16': tl.bfloat16,
-        # 'fp8e4b8': tl.float8e4b8,
-        # 'fp8e5b16': tl.float8e5b16,
+        'fp8e4b8': tl.float8e4b8,
+        'fp8e5b16': tl.float8e5b16,
         'fp8e4': tl.float8e4nv,
         'fp8e5': tl.float8e5,
     }
@@ -384,6 +380,8 @@ def gen_input(M, N, d_type, seed, device='cuda'):
                                 ('bfloat16', 'bfloat16'),
                                 ('float16', 'float32'),
                                 ('float32', 'float32'),
+                                ('fp8e4b8', 'float16'),
+                                ('fp8e5b16', 'float16'),
                                 ('int8', 'int8')]]
 )
 def test_correctness(M, N, K, in_dtype, out_dtype):
@@ -396,11 +394,11 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
     print(f"triton_output={c}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
-    if torch.allclose(c.to(torch.float16), torch_output, atol=5e-2, rtol=rtol):
+    if torch.allclose(c.to(torch_output.dtype), torch_output, atol=5e-2, rtol=rtol):
         print("✅ Triton and Torch match")
     else:
         print("❌ Triton and Torch differ")
-        assert torch.allclose(c, torch_output, atol=1e-2, rtol=rtol)
+        torch.testing.assert_close(c.to(torch_output.dtype), torch_output, atol=5e-2, rtol=rtol)
 
 
 # %%
@@ -418,7 +416,10 @@ verbose = False
 
 def get_x_vals():
     x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
-
+    x_vals += [
+        (4864, 4096, 8192),
+        (9728, 8192, 65536),
+    ]
     return x_vals
 
 
@@ -440,7 +441,7 @@ def get_x_vals():
     )
 )
 def benchmark(M, N, K, provider):
-    input_datatype = 'float16'
+    input_datatype = 'int8'
     a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
     # Allocates output.

@@ -17,10 +17,9 @@ import torch
 import triton
 import triton.language as tl
 
-torch_dtype = torch.float16
+torch_dtype:tl.constexpr = torch.float16
+# torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if TORCH_HAS_FP8E5:
-    torch_dtype = torch.float8_e5m2fnuz
 
 @triton.jit
 def max_fn(x, y):
@@ -573,7 +572,8 @@ class _attention(torch.autograd.Function):
         q, k, v, o, L = ctx.saved_tensors
         do = do.contiguous()
         dq = torch.zeros_like(q, dtype=torch.float32)
-        dk = torch.empty_like(k, dtype=torch_dtype)
+        # dk = torch.empty_like(k, dtype=torch_dtype)
+        dk = torch.empty_like(k)
         dv = torch.empty_like(v)
         delta = torch.empty_like(L)
         do_scaled = torch.empty_like(do)
@@ -659,16 +659,16 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
         q = q.to(torch_dtype)
         k = k.to(torch_dtype)
     sm_scale = 0.5
-    # dout = torch.randn_like(q)
+    dout = torch.randn_like(q, dtype=torch.float16)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
-    p = torch.softmax(p.float(), dim=-1)
-    ref_out = torch.matmul(p.half(), v)
+    p = torch.softmax(p.float(), dim=-1).half()
+    ref_out = torch.matmul(p, v)
     # triton implementation
-    tri_out = attention(q, k, v, causal, sm_scale).half()
+    tri_out = attention(q, k, v, causal, sm_scale)
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
@@ -688,22 +688,21 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
 
     sm_scale = 0.5
     split_kernel = True
-    ref_dout = torch.randn_like(q, dtype=torch.float16)
+    dout = torch.randn_like(q)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
+    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
     p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v.half())
-    ref_out.backward(ref_dout)
+    ref_out = torch.matmul(p, v)
+    ref_out.backward(dout)
     ref_dv, v.grad = v.grad.clone(), None
     ref_dk, k.grad = k.grad.clone(), None
     ref_dq, q.grad = q.grad.clone(), None
     # # triton implementation
     tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
-    tri_dout = torch.randn_like(q)
-    tri_out.backward(tri_dout)
+    tri_out.backward(dout)
     tri_dv, v.grad = v.grad.clone(), None
     tri_dk, k.grad = k.grad.clone(), None
     tri_dq, q.grad = q.grad.clone(), None
@@ -777,13 +776,11 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
         if mode == "fwd":
             q = q.to(torch_dtype)
             k = k.to(torch_dtype)
-            v = v.to(torch_dtype)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':
             o = fn()
-            do = torch.randn_like(o, dtype=torch.float16)
-            do = do.to(torch_dtype)
+            do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     if provider == "flash":

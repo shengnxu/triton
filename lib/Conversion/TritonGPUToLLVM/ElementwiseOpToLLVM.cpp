@@ -1296,12 +1296,29 @@ struct FpToFpOpConversion
            "FP8 casting only support tensors with aligned sizes");
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
-    auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
-                                     isDstFP32 ? f16_ty : dstElementType);
+
     SmallVector<Value> inVals;
     for (unsigned i = 0; i < numElements; i++) {
       inVals.push_back(operands[i][0]);
     }
+
+    if (srcElementType.isF16() and isDstFP32) {
+      SmallVector<Value> outVals;
+      for (auto& v : inVals) {
+        outVals.push_back(convertFp16ToFp32(loc, rewriter, v));
+      }
+      return outVals;
+    }
+    else if (isSrcFP32 and dstElementType.isF16()) {
+      SmallVector<Value> outVals;
+      for (auto& v : inVals) {
+        outVals.push_back(convertFp32ToFp16(loc, rewriter, v));
+      }
+      return outVals;
+    }
+
+    auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
+                                     isDstFP32 ? f16_ty : dstElementType);
     if (isSrcFP32)
       for (Value &v : inVals)
         v = convertFp32ToFp16(loc, rewriter, v);

@@ -1849,6 +1849,11 @@ void init_triton_ir(py::module &&m) {
              self.addPass(
                  mlir::createTritonGPUAccelerateMatmulPass(computeCapability));
            })
+      .def("add_tritonamdgpu_accelerate_matmul_pass",
+           [](mlir::PassManager &self, int tensorCoreVersion, int instrSize) {
+             self.addPass(mlir::createTritonAMDGPUAccelerateMatmulPass(
+                 tensorCoreVersion, instrSize));
+           })
       .def("add_tritongpu_optimize_dot_operands_pass",
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUOptimizeDotOperandsPass());
@@ -2091,7 +2096,7 @@ void init_triton_translation(py::module &m) {
         std::unique_ptr<llvm::Module> module =
             llvm::parseIR(buffer->getMemBufferRef(), error, context);
         // translate module to HSACO
-        auto hsacoCode = triton::translateLLVMIRToHSACO(
+        auto hsacoCode = ::mlir::triton::translateLLVMIRToHSACO(
             *module, gfx_arch, gfx_triple, gfx_features);
         return hsacoCode;
       },

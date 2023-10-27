@@ -4,6 +4,7 @@ from functools import wraps
 from typing import List, Optional, Sequence, Tuple, TypeVar
 
 from .._C.libtriton.triton import ir
+from ..common.build import is_hip
 from . import core as tl
 
 import triton._C.libtriton.triton as _triton
@@ -1262,6 +1263,7 @@ def gpu_matrix_core_version() -> int:
         0 means no tensor cores are available
         1 corresponds to MFMA in CDNA 1 architecture
         2 corresponds to MFMA in CDNA 2 architecture
+        3 corresponds to MFMA in CDNA 3 architecture
     """
 
     if not is_hip():
@@ -1274,27 +1276,27 @@ def gpu_matrix_core_version() -> int:
     gpu_name = gfx_arch_details[1].split(':')[0]
     if gpu_name in ['gfx908']:
         return 1
-    if gpu_name in ['gfx90a', 'gfx940', 'gfx941', 'gfx942']:
+    if gpu_name in ['gfx90a']:
         return 2
+    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
+        return 3
     return 0
 
 def mfma_supported_granularity(m, n, k) -> bool:
-    granularity_mn = 32
-    granularity_k = 8
-    import os
-    if "MFMA_TYPE" in os.environ and os.environ["MFMA_TYPE"] == "16":
-        granularity_mn = 16
-        granularity_k = 16
+    # todo make this gran_type matrix element type sensitive
+    for gran_type in [(32, 8), (16, 16)]:
+        granularity_mn, granularity_k = gran_type
 
-    if m % granularity_mn != 0 or n % granularity_mn != 0:
-        return False
-    if k % granularity_k != 0:
-        return False
-    return True
+        if m % granularity_mn != 0 or n % granularity_mn != 0:
+            continue
+        if k % granularity_k != 0:
+            continue
+        return True
+    return False
 
 def mfma_supported(M, N, K, allow_tf32, ret_scalar_ty) -> bool:
     matrix_core_version = gpu_matrix_core_version()
-    if matrix_core_version not in [1, 2]:
+    if matrix_core_version not in [1, 2, 3]:
         return False
     if not mfma_supported_granularity(M, N ,K):
         return False
@@ -1308,7 +1310,7 @@ def dot(lhs: tl.tensor,
     def assert_dtypes_valid(lhs_dtype, rhs_dtype, arch):
         if is_hip():
             assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or \
-                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()), \
+                (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()) or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8()), \
                 f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
 
             return
@@ -1349,10 +1351,15 @@ def dot(lhs: tl.tensor,
 
     # hip for now converts fp8 to fp16 for mixed input
     if is_hip():
-        if lhs.type.scalar.is_fp8():
+        fp8_supported = gpu_matrix_core_version() == 3
+        lhs_fp8 = lhs.type.scalar.is_fp8()
+        rhs_fp8 = rhs.type.scalar.is_fp8()
+        supported_fp8_dot = fp8_supported and lhs_fp8 and rhs_fp8
+        if not supported_fp8_dot and lhs_fp8:
             lhs = cast(lhs, tl.float16, builder)
-        elif rhs.type.scalar.is_fp8():
+        if not supported_fp8_dot and rhs_fp8:
             rhs = cast(rhs, tl.float16, builder)
+
 
     if lhs.type.scalar.is_int():
         assert lhs.type.scalar == tl.int8, "only int8 supported!"

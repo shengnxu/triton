@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files
+ * (the "Software"), to deal in the Software without restriction,
+ * including without limitation the rights to use, copy, modify, merge,
+ * publish, distribute, sublicense, and/or sell copies of the Software,
+ * and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
 #ifdef USE_ROCM
 
 #include "../DotOpToLLVM.h"
@@ -16,12 +38,17 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 enum class MatrixCoreType : uint8_t {
   // D = AB + C
-  FP32_FP16_FP16_FP32 = 0, // default
+  FP32_FP8_FP8_FP32,
+  FP32_FP8_BF8_FP32,
+  FP32_BF8_FP8_FP32,
+  FP32_BF8_BF8_FP32,
+  FP32_FP16_FP16_FP32,
   FP32_BF16_BF16_FP32,
   FP32_BF16_BF16_FP32_1K,
   FP32_FP32_FP32_FP32,
   FP64_FP64_FP64_FP64,
   INT32_INT8_INT8_INT32,
+  INT32_INT8_INT8_INT32_CDNA3,  
   NOT_APPLICABLE,
 };
 
@@ -58,6 +85,46 @@ struct DotOpMFMAConversionHelper {
     auto resType = valC.getType();
     Value zeroFlag = i32_val(0);
     switch (mfmaDescr.coreType) {
+    case MatrixCoreType::FP32_FP8_FP8_FP32:
+      if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_f32_16x16x32_fp8_fp8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_f32_32x32x16_fp8_fp8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }
+    case MatrixCoreType::FP32_FP8_BF8_FP32:
+      if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_f32_16x16x32_fp8_bf8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_f32_32x32x16_fp8_bf8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }
+    case MatrixCoreType::FP32_BF8_FP8_FP32:
+      if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_f32_16x16x32_bf8_fp8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_f32_32x32x16_bf8_fp8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }
+    case MatrixCoreType::FP32_BF8_BF8_FP32:
+      if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_f32_16x16x32_bf8_bf8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_f32_32x32x16_bf8_bf8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }
     case MatrixCoreType::FP32_FP16_FP16_FP32:
       if (mfmaDescr.size == 16) {
         return rewriter.create<ROCDL::mfma_f32_16x16x16f16>(
@@ -110,6 +177,16 @@ struct DotOpMFMAConversionHelper {
             loc, TypeRange{resType},
             ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
       }
+    case MatrixCoreType::INT32_INT8_INT8_INT32_CDNA3:
+      if (mfmaDescr.size == 16) {
+        return rewriter.create<ROCDL::mfma_i32_16x16x32_i8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      } else {
+        return rewriter.create<ROCDL::mfma_i32_32x32x16_i8>(
+            loc, TypeRange{resType},
+            ValueRange{valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
+      }      
     case MatrixCoreType::FP64_FP64_FP64_FP64:
       assert(mfmaDescr.size == 16);
       return rewriter.create<ROCDL::mfma_f64_16x16x4f64>(
@@ -120,17 +197,30 @@ struct DotOpMFMAConversionHelper {
     }
   }
 
+  // TODO unify this function with Utility.cpp:supportMFMATypes
   static MatrixCoreType getMatrixCoreTypeFromDot(DotOp op) {
     auto aOperandTy = op.getA().getType();
-    auto tensorTy = aOperandTy.cast<RankedTensorType>();
-    auto elemTy = tensorTy.getElementType();
-    auto dotOpEncoding = tensorTy.getEncoding().cast<DotOperandEncodingAttr>();
+    auto aTensorTy = aOperandTy.cast<RankedTensorType>();
+    auto aElemTy = aTensorTy.getElementType();
+    auto bOperandTy = op.getB().getType();
+    auto bTensorTy = bOperandTy.cast<RankedTensorType>();
+    auto bElemTy = bTensorTy.getElementType();
+
+    auto dotOpEncoding = aTensorTy.getEncoding().cast<DotOperandEncodingAttr>();
     auto mfmaEncoding = dotOpEncoding.getParent().cast<MfmaEncodingAttr>();
-    if (elemTy.isF16())
+    if (aElemTy.isFloat8E4M3FNUZ() && bElemTy.isFloat8E4M3FNUZ())
+      return MatrixCoreType::FP32_FP8_FP8_FP32;
+    if (aElemTy.isFloat8E4M3FNUZ() && bElemTy.isFloat8E5M2FNUZ())
+      return MatrixCoreType::FP32_FP8_BF8_FP32;
+    if (aElemTy.isFloat8E5M2FNUZ() && bElemTy.isFloat8E4M3FNUZ())
+      return MatrixCoreType::FP32_BF8_FP8_FP32;
+    if (aElemTy.isFloat8E5M2FNUZ() && bElemTy.isFloat8E5M2FNUZ())
+      return MatrixCoreType::FP32_BF8_BF8_FP32;
+    if (aElemTy.isF16())
       return MatrixCoreType::FP32_FP16_FP16_FP32;
-    if (elemTy.isF32())
+    if (aElemTy.isF32())
       return MatrixCoreType::FP32_FP32_FP32_FP32;
-    if (elemTy.isBF16()) {
+    if (aElemTy.isBF16()) {
       auto nonKDim = mfmaEncoding.getNonKDim();
       auto kWidth = dotOpEncoding.getKWidth();
       if ((nonKDim == 32 && kWidth == 4) || (nonKDim == 16 && kWidth == 4)) {
@@ -141,9 +231,17 @@ struct DotOpMFMAConversionHelper {
         return MatrixCoreType::FP32_BF16_BF16_FP32;
       }
     }
-    if (elemTy.isInteger(8))
-      return MatrixCoreType::INT32_INT8_INT8_INT32;
-    if (elemTy.isF64())
+    if (aElemTy.isInteger(8)) {
+      auto nonKDim = mfmaEncoding.getNonKDim();
+      auto kWidth = dotOpEncoding.getKWidth();
+      if ((nonKDim == 32 && kWidth == 8) || (nonKDim == 16 && kWidth == 8)) {
+        return MatrixCoreType::INT32_INT8_INT8_INT32_CDNA3;
+      }
+      else {
+        return MatrixCoreType::INT32_INT8_INT8_INT32;
+      }
+    }
+    if (aElemTy.isF64())
       return MatrixCoreType::FP64_FP64_FP64_FP64;
     return MatrixCoreType::NOT_APPLICABLE;
   }

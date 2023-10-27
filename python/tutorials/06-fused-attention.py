@@ -17,8 +17,10 @@ import torch
 import triton
 import triton.language as tl
 
-torch_dtype = torch.float8_e5m2fnuz
-TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2fnuz')
+torch_dtype = torch.float16
+TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
+if TORCH_HAS_FP8E5:
+    torch_dtype = torch.float8_e5m2fnuz
 
 @triton.jit
 def max_fn(x, y):
@@ -520,7 +522,7 @@ class _attention(torch.autograd.Function):
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q, dtype=torch_dtype)
+        o = torch.empty_like(q, dtype=v.dtype)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -648,14 +650,14 @@ attention = _attention.apply
                           #(4, 48, 16384, 64)
                           ])
 @pytest.mark.parametrize('causal', [False, True])
-def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch_dtype):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     torch.manual_seed(20)
-    q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float32, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    q = q.to(torch_dtype)
-    k = k.to(torch_dtype)
-    v = v.to(torch_dtype)
+    q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    if TORCH_HAS_FP8E5:
+        q = q.to(torch_dtype)
+        k = k.to(torch_dtype)
     sm_scale = 0.5
     # dout = torch.randn_like(q)
     # reference implementation
@@ -663,8 +665,8 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch_dtype):
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     if causal:
         p[:, :, M == 0] = float("-inf")
-    p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p.half(), v.half())
+    p = torch.softmax(p.float(), dim=-1)
+    ref_out = torch.matmul(p.half(), v)
     # triton implementation
     tri_out = attention(q, k, v, causal, sm_scale).half()
     # compare

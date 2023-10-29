@@ -1061,6 +1061,53 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
     assert torch.all(tri_fp8 == ref_fp8)
 
 
+TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E4B8 = hasattr(torch, 'float8_e4m3fnuz')
+tl_to_torch_types = {
+    tl.float16: torch.float16,
+    tl.float32: torch.float32,
+}
+
+if TORCH_HAS_FP8E5B16:
+    tl_to_torch_types[tl.float8e5b16] = torch.float8_e5m2fnuz
+if TORCH_HAS_FP8E4B8:
+    tl_to_torch_types[tl.float8e4b8] = torch.float8_e4m3fnuz
+
+@triton.jit
+def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    input = tl.load(input_ptr + offsets, mask=mask)
+    output = input
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+def gen_input(M, N, d_type, seed, device='cuda'):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    if d_type == tl.float16:
+        input = torch.randn((M, N), dtype=torch.float16, device=device)
+        input_f16 = input
+    else: # d_type is float8
+        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
+        if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
+            (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) :
+            input = raw_data.to(tl_to_torch_types[d_type])
+            input_f16 = input.to(torch.float16)
+            print("use_pytorch_conversion")
+        else:
+            f8_tensor = raw_data.to(torch.int8)
+            # keep only two bits of exponent to avoid overflow
+            f8_tensor = f8_tensor & 0b00111111
+            input = triton.reinterpret(f8_tensor, d_type)
+            input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+            grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+            n_elements = raw_data.numel()
+            copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
+            print("use_triton_conversion")
+    return input, input_f16
+
+
+
 @pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",
                         [(*shape, *ab_type, out_dtype)
                           for shape in [[128, 256, 32],
@@ -1088,16 +1135,7 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
                           for out_dtype in [torch.float16, torch.float32]
                         ])
 def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
-
     check_type_supported(out_dtype, device)
-
-    @triton.jit
-    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        input = tl.load(input_ptr + offsets, mask=mask)
-        output = input
-        tl.store(output_ptr + offsets, output, mask=mask)
 
     @triton.jit
     def matmul_kernel(
@@ -1175,27 +1213,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
             num_stages=1,
             num_warps=2,
         )
-
         return c
-
-
-    def gen_input(M, N, d_type, seed, device='cuda'):
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        if d_type == tl.float16:
-            input = torch.randn((M, N), dtype=torch.float16, device=device)
-            input_f16 = input
-        else: # d_type is float8
-            f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
-            f8_tensor = f8_tensor.to(torch.int8)
-            # keep only two bits of exponent to avoid overflow
-            f8_tensor = f8_tensor & 0b00111111
-            input = triton.reinterpret(f8_tensor, d_type)
-            input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
-            grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
-            n_elements = f8_tensor.numel()
-            copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
-        return input, input_f16
 
     a, a_f16 = gen_input(M, K, a_type, 11, device=device)
     b, b_f16 = gen_input(K, N, b_type, 22, device=device)
@@ -1227,8 +1245,10 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                           for out_dtype in [torch.float32]
                         ])
 def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
-
     check_type_supported(out_dtype, device)
+
+    if triton.language.semantic.gpu_matrix_core_version() != 3:
+        pytest.skip("fp8 data type is not available on hardware")
 
     @triton.jit
     def matmul_kernel(
@@ -1308,23 +1328,6 @@ def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'
         )
 
         return c
-
-    def gen_input(M, N, d_type, seed, device='cuda'):
-        tl_to_torch_fp8_types = {
-            tl.float16: torch.float16,
-            tl.float32: torch.float32,
-            tl.float8e5 : torch.float8_e5m2,
-            tl.float8e5b16 : torch.float8_e5m2fnuz,
-            tl.float8e4b8 : torch.float8_e4m3fnuz
-        }
-        assert d_type in tl_to_torch_fp8_types
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        raw_data = torch.randn((M, N), dtype=torch.float32, device=device)
-        input = raw_data.to(tl_to_torch_fp8_types[d_type])
-        input_f16 = input.to(torch.float16)
-
-        return input, input_f16
 
     a, a_f16 = gen_input(M, K, a_type, 21, device=device)
     b, b_f16 = gen_input(K, N, b_type, 22, device=device)

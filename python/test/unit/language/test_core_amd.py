@@ -1093,7 +1093,6 @@ def gen_input(M, N, d_type, seed, device='cuda'):
             (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) :
             input = raw_data.to(tl_to_torch_types[d_type])
             input_f16 = input.to(torch.float16)
-            print("use_pytorch_conversion")
         else:
             f8_tensor = raw_data.to(torch.int8)
             # keep only two bits of exponent to avoid overflow
@@ -1103,9 +1102,7 @@ def gen_input(M, N, d_type, seed, device='cuda'):
             grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
             n_elements = raw_data.numel()
             copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
-            print("use_triton_conversion")
     return input, input_f16
-
 
 
 @pytest.mark.parametrize("M, N, K, a_type, b_type, out_dtype",

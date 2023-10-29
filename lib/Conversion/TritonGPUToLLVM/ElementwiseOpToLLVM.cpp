@@ -179,7 +179,6 @@ Fp8E5M2FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
   return result;
 }
 #else
-// incorrect, need change
 const std::string Fp8E5M2FNUZ_to_Fp16 = "{                           \n"
                                     "prmt.b32 $0, 0, $2, 0x5140; \n\t"
                                     "prmt.b32 $1, 0, $2, 0x7362; \n\t"

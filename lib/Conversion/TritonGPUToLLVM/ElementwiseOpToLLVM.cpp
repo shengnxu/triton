@@ -166,23 +166,6 @@ static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
   return bitcast(o, f16_ty);
 }
 
-// static Value convert_val(Location loc, ConversionPatternRewriter &rewriter, Value v) {
-//     GCNBuilder builder;
-//     auto &cvt8_32 = *builder.create("v_cvt_pk_f32_fp8");
-//     auto operand32 = builder.newOperand("=v");
-//     auto operand8 = builder.newOperand(v, "v");
-//     cvt8_32(operand32, operand8);
-//     auto v32 = builder.launch(rewriter, loc, f32_ty, false);
-
-
-//     auto &cvt32_16 = *builder.create("v_cvt_f16_f32");
-//     auto operand16 = builder.newOperand("=v");
-//     auto o32 = builder.newOperand(v32, "v");
-//     cvt32_16(operand16, o32);
-
-//     return builder.launch(rewriter, loc, f16_ty, false);
-// }
-
 static SmallVector<Value>
 Fp8E5M2FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {

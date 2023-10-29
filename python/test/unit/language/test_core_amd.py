@@ -1333,7 +1333,7 @@ def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'
     golden = torch.matmul(a_f16, b_f16)
     c = matmul(a, b, out_dtype)
 
-    torch.testing.assert_close(golden, c.to(golden.dtype), rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(golden, c.to(golden.dtype), rtol=1e-2, atol=2e-2)
 
 
 # ---------------

@@ -955,7 +955,7 @@ def convert_float_to_float32(fp: torch.tensor, dtype=None):
 
     extended_exp = ((1 << (tl.float32.primitive_bitwidth - tl.float32.fp_mantissa_width - 1)) - 1) << tl.float32.fp_mantissa_width
     # special cases, exp is 0b11..1
-    if dtype in [tl.float8e4nv, tl.float8e4b15]:
+    if dtype in [tl.float8e4nv, tl.float8e4b15, tl.float8e4b8, tl.float8e5b16]:
         # float8e4m3nv does not have infinities
         output[fp == 0b01111111] = torch.nan
         output[fp == 0b11111111] = torch.nan
@@ -1015,7 +1015,11 @@ def deserialize_fp8(np_data, in_dtype):
         return np_data
 
 
-@pytest.mark.parametrize("in_dtype", [tl.float8e4b15, tl.float8e4b15x4, tl.float8e4b8, tl.float8e5, tl.float8e5b16])
+@pytest.mark.parametrize("in_dtype", [tl.float8e4b15, 
+                                      tl.float8e4b15x4, 
+                                      tl.float8e4b8, 
+                                      tl.float8e5, 
+                                      tl.float8e5b16])
 @pytest.mark.parametrize("out_dtype", [torch.float16, torch.float32])
 def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
     """
@@ -1040,9 +1044,11 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
     is_nan = (ref_fp8 & 0b01111100) == 128 - 2**in_dtype.fp_mantissa_width
     exp_mask = 0b01111111 ^ ((1 << in_dtype.fp_mantissa_width) - 1)
     is_subnormal = np.logical_or((ref_fp8 & exp_mask) == 0, (ref_fp8 & exp_mask) == exp_mask)
+
     ref_fp8[is_nan] = 0
     ref_fp8[is_subnormal] = 0
     tri_fp8 = torch.from_numpy(serialize_fp8(ref_fp8, in_dtype)).cuda()
+
     tri_fp16 = torch.empty(256, dtype=out_dtype, device="cuda")
     copy_kernel[(1,)](triton.reinterpret(tri_fp8, in_dtype), tri_fp16, tri_fp16.shape[0], BLOCK_SIZE=1024)
 
@@ -1052,7 +1058,6 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
 
     ref_fp8 = torch.empty_like(tri_fp16, dtype=torch.int8)
     copy_kernel[(1,)](tri_fp16, triton.reinterpret(ref_fp8, in_dtype), tri_fp16.shape[0], BLOCK_SIZE=1024)
-    # torch.testing.assert_close(tri_fp8, ref_fp8, rtol=1e-2, atol=1e-2)
     assert torch.all(tri_fp8 == ref_fp8)
 
 

@@ -124,7 +124,7 @@ def matmul_kernel(
     stride_bk, stride_bn,
     stride_cm, stride_cn,
     ACTIVATION: tl.constexpr,
-    output_datatype: tl.constexpr,
+    # output_datatype: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
@@ -182,7 +182,8 @@ def matmul_kernel(
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    acc_dtype = tl.int32 if c_ptr.type.element_ty == tl.int32 else tl.float32
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
@@ -203,7 +204,7 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(output_datatype)
+    c = accumulator.to(c_ptr.type.element_ty)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -238,19 +239,21 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def matmul(a, b, c, output_type, activation=""):
+def matmul(a, b, c, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
     # assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # 1D launch kernel where each block gets its own program.
-    otype = tl.float32
-    if output_type == torch.float16:
-        otype = tl.float16
-    elif output_type == torch.bfloat16:
-        otype = tl.bfloat16
+    # # 1D launch kernel where each block gets its own program.
+    # tl_otype = tl.float32
+    # if c.dtype == torch.float16:
+    #     tl_otype = tl.float16
+    # elif c.dtype == torch.bfloat16:
+    #     tl_otype = tl.bfloat16
+    # elif c.dtype == torch.int32:
+    #     tl_otype = tl.int32
 
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
@@ -263,7 +266,7 @@ def matmul(a, b, c, output_type, activation=""):
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
         ACTIVATION=activation,
-        output_datatype=otype,
+        # output_datatype=otype,
     )
 
 
@@ -271,32 +274,64 @@ def get_best_config(M, N, K):
     best_config = matmul_kernel.get_best_config(M = M, N = N, K = K)
     return best_config
 
+TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E4B8 = hasattr(torch, 'float8_e4m3fnuz')
+name_to_torch_types = {
+    'fp32': torch.float32,
+    'fp16': torch.float16,
+    'int8': torch.int8,
+}
+if TORCH_HAS_FP8E5B16:
+    name_to_torch_types['fp8e4b8'] = torch.float8_e4m3fnuz
+if TORCH_HAS_FP8E4B8:
+    name_to_torch_types['fp8e5b16'] = torch.float8_e5m2fnuz
 
-def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
+name_to_tl_types = {
+    'fp32': tl.float32,
+    'fp16': tl.float16,
+    "int8": tl.int8,
+    'fp8e4b8': tl.float8e4b8,
+    'fp8e5b16': tl.float8e5b16,
+}
+
+def gen_input(M, N, d_type, seed, device='cuda'):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    if isFp8: # convert fp8 to fp16 for ref input
-        fp8_type = tl.float8e4
-        f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
-        f8_tensor = f8_tensor.to(torch.int8)
+    raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
+    tl_dtype = name_to_tl_types[d_type]
+    if (tl_dtype == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
+        (tl_dtype == tl.float8e5b16 and TORCH_HAS_FP8E5B16) or not tl_dtype.is_fp8():
+        input = raw_data.to(name_to_torch_types[d_type])
+        input_f16 = input.to(torch.float16)
+    else:
+        f8_tensor = raw_data.to(torch.int8)
         # keep only two bits of exponent to avoid overflow
         f8_tensor = f8_tensor & 0b00111111
-        input = triton.reinterpret(f8_tensor, fp8_type)
+        input = triton.reinterpret(f8_tensor, tl_dtype)
         input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
         grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
-        n_elements = f8_tensor.numel()
+        n_elements = raw_data.numel()
         copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
-    else: # other data type
-        input = torch.randn((M, N), dtype=d_type, device=device)
-        input_f16 = input
+
     return input, input_f16
 
 
-def test_correctness(M, N, K, datatype, fp8a, fp8b):
-    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
-    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+def test_correctness(M, N, K, a_type, b_type):
+    a, a_f16 = gen_input(M, K, d_type=a_type, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=b_type, seed=20, device='cuda')
 
-    triton_output = matmul(a, b, output_type=datatype)
+    if a_type == 'int8':
+        assert a_type == b_type
+        out_dtype = torch.int32
+    elif a_type == 'fp32':
+        assert a_type == b_type
+        out_dtype = torch.float32
+    else:
+        out_dtype = torch.float16
+    # Allocates output.
+    c = torch.zeros((M, N), device=a.device, dtype=out_dtype)
+
+    triton_output = matmul(a, b, c)
     torch_output = torch.matmul(a_f16, b_f16)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
@@ -308,17 +343,27 @@ def test_correctness(M, N, K, datatype, fp8a, fp8b):
         print(f'❌ Triton and Torch differ for {size_str}')
 
 
-def run_speed(M, N, K, datatype, fp8a, fp8b, provider):
-    a, a_f16 = gen_input(M, K, d_type=datatype, isFp8=fp8a, seed=10, device='cuda')
-    b, b_f16 = gen_input(K, N, d_type=datatype, isFp8=fp8b, seed=11, device='cuda')
+def run_speed(M, N, K, a_type, b_type, provider):
+    a, a_f16 = gen_input(M, K, a_type, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, b_type, seed=13, device='cuda')
+
+    if a_type == 'int8':
+        assert a_type == b_type
+        out_dtype = torch.int32
+    elif a_type == 'fp32':
+        assert a_type == b_type
+        out_dtype = torch.float32
+    else:
+        out_dtype = torch.float16
+
     # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=datatype)
+    c = torch.zeros((M, N), device=a.device, dtype=out_dtype)
 
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'pytorch':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a, b), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a_f16, b_f16), quantiles=quantiles)
     if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, output_type=datatype), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c), quantiles=quantiles)
     return min_ms
 
 def run_bash_command(commandstring):
@@ -335,8 +380,8 @@ def parse_args(print_help_info = False):
     parser.add_argument("-m", type=int, default=0)
     parser.add_argument("-n", type=int, default=0)
     parser.add_argument("-k", type=int, default=0)
-    parser.add_argument("-dtype", type=str, default='fp16', help="Input data type, default is fp16")
-    parser.add_argument("--specify_type", action='store_true', default=False, help="Whether user specify data type, default false")
+    parser.add_argument("-dta", type=str, default='fp16', help="Input data type (fp8e4b8, fp8e5b16), default is fp16")
+    parser.add_argument("-dtb", type=str, default='fp16', help="Input data type (fp8e4b8, fp8e5b16), default is fp16")
     parser.add_argument("--use_size_file", action='store_true', default=False, help="Whether user specify input matrix size")
     parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
     parser.add_argument("-gemm_size_file", type=str, help='yaml file to indicate matrix size')
@@ -365,25 +410,8 @@ def main():
         print_usage()
         sys.exit(1)
 
-    fp8a = False
-    fp8b = False
-    dtype = torch.float16
-    if args.specify_type:
-        if args.dtype == "fp8a":
-            fp8a = True
-            dtype = torch.float16
-        elif args.dtype == 'fp8b':
-            fp8b = True
-            dtype = torch.float16
-        elif args.dtype == 'fp16':
-            dtype = torch.float16
-        elif args.dtype == 'fp32':
-            dtype = torch.float32
-        elif args.dtype == 'bf16':
-            dtype = torch.bfloat16
-        else:
-            print(f"Unsupported datatype {args.dtype}")
-            sys.exit(1)
+    a_type = args.dta
+    b_type = args.dtb
     use_rocprof = args.rocprof
     verbose = args.v
 
@@ -413,13 +441,13 @@ def main():
         mnks = [(M, N, K)]
 
     for (m, n, k) in mnks:
-        min_ms = run_speed(m, n, k, dtype, fp8a, fp8b, 'triton')
+        min_ms = run_speed(m, n, k, a_type, b_type, 'triton')
 
         # function to compute flops
         perf_flops = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
 
         if args.compare:
-            test_correctness(m, n, k, dtype, fp8a, fp8b)
+            test_correctness(m, n, k, a_type, b_type)
         best_config = get_best_config(m, n, k)
 
         if use_rocprof:

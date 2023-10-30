@@ -450,7 +450,7 @@ def get_x_vals():
     )
 )
 def benchmark(M, N, K, provider):
-    input_datatype = 'float16'
+    input_datatype = 'int8'
     a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
     # Allocates output.

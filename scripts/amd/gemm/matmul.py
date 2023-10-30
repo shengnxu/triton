@@ -335,7 +335,7 @@ def run_speed(M, N, K, a_type, b_type, provider):
 
     if a_type == 'int8':
         assert a_type == b_type
-        out_dtype = torch.int32
+        out_dtype = torch.int8
     elif a_type == 'fp32':
         assert a_type == b_type
         out_dtype = torch.float32
@@ -437,7 +437,8 @@ def main():
         best_config = get_best_config(m, n, k)
 
         if use_rocprof:
-            dtype_str = 'fp16' if (not args.specify_type) else args.dtype 
+            a_type = 'fp16' if args.dta is None else args.dta
+            b_type = 'fp16' if args.dtb is None else args.dtb
             block_m = best_config.kwargs['BLOCK_SIZE_M']
             block_n = best_config.kwargs['BLOCK_SIZE_N']
             block_k = best_config.kwargs['BLOCK_SIZE_K']
@@ -451,7 +452,7 @@ def main():
             run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
                         -group_m {group_m} -num_stages {num_stages} \
-                        -num_warps {num_warps} -dtype {dtype_str}'
+                        -num_warps {num_warps} -dta {a_type} -dtb {b_type}'
             prof_cmd = f'rocprof --stats {run_cmd}'
             run_bash_command(prof_cmd)
 

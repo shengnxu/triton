@@ -214,7 +214,6 @@ def matmul_kernel(
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr,
-    dtype: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -257,22 +256,15 @@ def matmul_kernel(
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
-    if dtype != "int8":
-        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-    else:
-        assert dtype == "int8"
-        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.int32)
+    acc_dtype = tl.float32 if c_ptr.type.element_ty != tl.int8 else tl.int32
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
         b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-        # We accumulate along the K dimension.
-        if dtype != "int8":
-            accumulator += tl.dot(a, b)
-        else:
-            assert dtype == "int8"
-            accumulator += tl.dot(a, b, out_dtype=tl.int32)
+        accumulator += tl.dot(a, b)
 
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
@@ -281,11 +273,7 @@ def matmul_kernel(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    if dtype != "int8":
-        c = accumulator.to(tl.float16)
-    else:
-        assert dtype == "int8"
-        c = accumulator.to(tl.int8)
+    c = accumulator.to(c_ptr.type.element_ty)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -326,7 +314,6 @@ def matmul(a, b, c, activation="", dtype="float16"):
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
         ACTIVATION=activation,
-        dtype=dtype,
     )
 
 
@@ -440,7 +427,7 @@ def get_x_vals():
     )
 )
 def benchmark(M, N, K, provider):
-    input_datatype = 'float16'
+    input_datatype = 'int8'
     a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
     # Allocates output.

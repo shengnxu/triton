@@ -188,7 +188,7 @@ import pytest
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 16, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 8, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 3, 'waves_per_eu': 22}, num_warps=4, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 3, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 32, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 16, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 32, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
@@ -450,7 +450,7 @@ def get_x_vals():
     )
 )
 def benchmark(M, N, K, provider):
-    input_datatype = 'int8'
+    input_datatype = 'float16'
     a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
     # Allocates output.

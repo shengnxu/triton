@@ -9,12 +9,55 @@ import sysconfig
 
 import setuptools
 
+class CurrentBuildTarget:
+    arch = None
+    aot_arch = None
+
+    @staticmethod
+    def is_aot():
+        return CurrentBuildTarget.arch is not None
+
+    @staticmethod
+    def configure_arch(arch : dict):
+        CurrentBuildTarget.arch = dict(arch)
+
+    @staticmethod
+    def configure_aot_arch(aot_arch : str):
+        CurrentBuildTarget.aot_arch = aot_arch
+
+    @staticmethod
+    def is_hip():
+        aot_arch = CurrentBuildTarget.aot_arch
+        if aot_arch is not None:
+            if aot_arch.startswith('MI') or aot_arch.startswith('Radeon'):
+                return True
+            else:
+                return False
+        arch = CurrentBuildTarget.arch
+        if arch is not None and isinstance(arch, dict):
+            gfx_triple = arch.get('gfx_triple', '')
+            return gfx_triple == 'amdgcn-amd-amdhsa'
+        # Auto detection
+        try:
+            import torch
+        except ImportError:
+            raise ImportError("Triton requires PyTorch to be installed")
+        return torch.version.hip is not None
+
+    @staticmethod
+    def get_arch_default_num_warps():
+        if CurrentBuildTarget.is_hip():
+            return CurrentBuildTarget.arch['num_warps']
+        raise NotImplementedError(f"CurrentBuildTarget.get_arch_default_num_warps not implemented for {CurrentBuildTarget.aot_arch} {CurrentBuildTarget.arch}")
+
+    @staticmethod
+    def get_arch_default_num_stages():
+        if CurrentBuildTarget.is_hip():
+            return CurrentBuildTarget.arch['num_stages']
+        raise NotImplementedError(f"CurrentBuildTarget.get_arch_default_num_stages not implemented for {CurrentBuildTarget.aot_arch} {CurrentBuildTarget.arch}")
 
 # TODO: is_hip shouldn't be here
-def is_hip():
-    import torch
-    return torch.version.hip is not None
-
+is_hip = CurrentBuildTarget.is_hip
 
 @functools.lru_cache()
 def libcuda_dirs():

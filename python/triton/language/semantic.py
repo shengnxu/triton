@@ -1249,14 +1249,6 @@ def atomic_xchg(ptr: tl.tensor,
 #                               Linear Algebra
 # ===----------------------------------------------------------------------===//
 
-def is_hip():
-    try:
-        import torch
-    except ImportError:
-        raise ImportError("Triton requires PyTorch to be installed")
-    return torch.version.hip is not None
-
-
 def gpu_matrix_core_version() -> int:
     """ Determine matrix core type available on current GPU.
 

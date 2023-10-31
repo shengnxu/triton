@@ -16,7 +16,7 @@ from .._C.libtriton.triton import (ClusterInfo, TMAInfos, add_external_libs,
                                    translate_llvmir_to_ptx,
                                    translate_triton_gpu_to_llvmir)
 from ..common.backend import get_backend, path_to_ptxas
-from ..common.build import is_hip
+from ..common.build import CurrentBuildTarget, is_hip
 # from ..runtime import driver, jit, JITFunction
 # TODO: runtime.errors
 from ..runtime.autotuner import OutOfResources
@@ -281,10 +281,6 @@ arg_type_pattern = {
     "ttgir": mlir_arg_type_pattern,
     "ptx": ptx_arg_type_pattern,
 }
-if is_hip():
-    ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
-else:
-    ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
 
 
 def _get_jsonable_constants(constants):
@@ -315,14 +311,30 @@ instance_descriptor = namedtuple("instance_descriptor", ["divisible_by_16", "equ
 def _is_cuda(arch):
     return isinstance(arch, int)
 
-def is_hip():
-    try:
-        import torch
-    except ImportError:
-        raise ImportError("Triton requires PyTorch to be installed")
-    return torch.version.hip is not None
-
 from ..language.semantic import gpu_matrix_core_version
+
+@functools.lru_cache
+def translate_aot_arch(aot_arch):
+    '''
+    aot_arch uses commerical names Intentionally to avoid cases like
+      gfx90a:sramecc+:xnack-
+      gfx90a:sramecc-:xnack+
+    are both gfx90a
+    '''
+    if aot_arch == 'MI200':
+        # gfx_arch_details = 'amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-'.split('--')
+        # arch_triple = gfx_arch_details[0]
+        # arch_name_features = gfx_arch_details[1].split(':')
+        # arch_name = arch_name_features[0]
+        # gfx_arch = os.environ.get('MI_GPU_ARCH', arch_name)
+        return { "gfx_triple": 'amdgcn-amd-amdhsa',
+                 "gfx_arch": 'gfx90a',
+                 "gfx_features": '+sramecc,-xnack',
+                 "num_warps": 4,
+                 "num_stages": 2,
+                 "num_ctas": 1,
+                 "warp_size": 64 }, 'hip'
+    raise NotImplementedError(f'{aot_arch} is not supported as Ahead Of Time target')
 
 @functools.lru_cache
 def get_architecture_descriptor(capability):
@@ -342,6 +354,8 @@ def get_architecture_descriptor(capability):
 def get_arch_default_num_warps(device_type):
     if device_type in ["cuda"]:
         num_warps = 4
+    elif CurrentBuildTarget.is_aot():
+        return CurrentBuildTarget.get_arch_default_num_warps()
     else:
         _device_backend = get_backend(device_type)
         assert _device_backend
@@ -356,6 +370,8 @@ def get_arch_default_num_stages(device_type, capability=None):
         arch = get_architecture_descriptor(capability)
         is_cuda = device_type == "cuda" and _is_cuda(arch)
         num_stages = 3 if is_cuda and arch >= 75 else 2
+    elif CurrentBuildTarget.is_aot():
+        return CurrentBuildTarget.get_arch_default_num_stages()
     else:
         _device_backend = get_backend(device_type)
         assert _device_backend
@@ -376,6 +392,8 @@ def compile(fn, **kwargs):
     # Get device type to decide which backend should be used
     device_type = kwargs.get("device_type", "cuda")
     capability = kwargs.get("cc", None)
+    aot_arch = kwargs.get('aot_arch', None)
+    CurrentBuildTarget.configure_aot_arch(aot_arch)
 
     if is_hip():
         device_type = "hip"
@@ -384,6 +402,10 @@ def compile(fn, **kwargs):
     if device_type == "cuda":
         _device_backend = get_backend(device_type)
         arch = get_architecture_descriptor(capability)
+    elif aot_arch is not None:
+        arch, device_type = translate_aot_arch(aot_arch)
+        _device_backend = get_backend(device_type)
+        CurrentBuildTarget.configure_arch(arch)
     else:
         _device_backend = get_backend(device_type)
         assert _device_backend
@@ -484,6 +506,11 @@ def compile(fn, **kwargs):
         match = re.search(prototype_pattern[ir_name], src, re.MULTILINE)
         name, signature = match.group(1), match.group(2)
         types = re.findall(arg_type_pattern[ir_name], signature)
+
+        if is_hip():
+            ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
+        else:
+            ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
         if ir_name == 'ttgir':
             num_warps_matches = re.findall(ttgir_num_warps_pattern, src)
             assert len(num_warps_matches) == 1, "Expected exactly one match for num_warps"

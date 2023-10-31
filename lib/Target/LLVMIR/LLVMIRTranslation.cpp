@@ -107,6 +107,7 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
         func->addFnAttr("amdgpu-waves-per-eu", std::to_string(wavesPerEU));
       func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
       func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
+      func->addFnAttr("amdgpu-kernarg-preload-count", "16");
     } break;
     }
   }

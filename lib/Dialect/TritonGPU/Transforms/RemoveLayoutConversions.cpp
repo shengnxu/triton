@@ -27,24 +27,6 @@ using triton::gpu::DotOperandEncodingAttr;
 using triton::gpu::MmaEncodingAttr;
 using triton::gpu::SliceEncodingAttr;
 
-struct PatternSharedInfo {
-  // If a conversion cannot be eliminated with a high-benefit pattern (e.g.,
-  // SimplifyConversion, RematerializeBackward), it will be pushed forward in
-  // the hope that this will enable the elimination of these conversions later.
-  // However, pushing a conversion forward can introduce more conversions
-  // (op(cvt(arg_0), arg_1, ..., arg_n) -> cvt(op(arg_0, cvt(arg_1), ...,
-  // cvt(arg_n))). This is why the RematerializeForward pattern performs an
-  // analysis to determine whether these added conversions can be eliminated
-  // later. The RematerializeBackward pattern, applied after pushing this
-  // conversion forward, will eliminate these newly added conversions by
-  // reversing the process achieved with RematerializeForward. This can create
-  // an infinite loop between these two optimizations. To avoid this, we keep
-  // track of the conversions that were pushed forward and skip them in the
-  // RematerializeBackward pattern. A similar kind of loop can occur with the
-  // RematerializeForward and MoveConvertOutOfLoop patterns.
-  llvm::DenseMap<Operation *, Operation *> cvtsPushedForwardMap;
-};
-
 // -----------------------------------------------------------------------------
 //
 // -----------------------------------------------------------------------------
@@ -1024,7 +1006,7 @@ static void hoistConvertOnTopOfExtOrBroadcast(ConvertLayoutOp convertOp) {
   auto isExtOrBroadcastOp = [](Operation *op) {
     return isa<arith::ExtSIOp, arith::ExtUIOp, arith::ExtFOp,
                triton::BroadcastOp, triton::ExpandDimsOp>(op);
-  };
+
   // 1. Take a backward slice of all the tensor dependencies.
   SetVector<Value> slice;
   DenseMap<Value, Attribute> layout;
@@ -1070,6 +1052,8 @@ static void hoistConvertOnTopOfExtOrBroadcast(ConvertLayoutOp convertOp) {
       inferSrcEncoding(extOrBroadcatOp, layout[extOrBroadcatOp->getResult(0)]);
   if (!srcEncoding)
     return;
+  std::optional<Attribute> srcEncoding =
+       inferSrcEncoding(extOp, layout[extOp->getResult(0)]);
   // Move the convert before the ext op and rewrite the slice.
   OpBuilder builder(extOrBroadcatOp);
   auto tensorType =

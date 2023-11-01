@@ -1006,6 +1006,7 @@ static void hoistConvertOnTopOfExtOrBroadcast(ConvertLayoutOp convertOp) {
   auto isExtOrBroadcastOp = [](Operation *op) {
     return isa<arith::ExtSIOp, arith::ExtUIOp, arith::ExtFOp,
                triton::BroadcastOp, triton::ExpandDimsOp>(op);
+  };
 
   // 1. Take a backward slice of all the tensor dependencies.
   SetVector<Value> slice;
@@ -1052,8 +1053,6 @@ static void hoistConvertOnTopOfExtOrBroadcast(ConvertLayoutOp convertOp) {
       inferSrcEncoding(extOrBroadcatOp, layout[extOrBroadcatOp->getResult(0)]);
   if (!srcEncoding)
     return;
-  std::optional<Attribute> srcEncoding =
-       inferSrcEncoding(extOp, layout[extOp->getResult(0)]);
   // Move the convert before the ext op and rewrite the slice.
   OpBuilder builder(extOrBroadcatOp);
   auto tensorType =

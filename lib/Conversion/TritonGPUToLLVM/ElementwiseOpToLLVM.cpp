@@ -1213,8 +1213,6 @@ struct FpToFpOpConversion
     auto dstElementType = getElementType(op.getResult());
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
-    auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
-                                     isDstFP32 ? f16_ty : dstElementType);
     SmallVector<Value> inVals = {operands[0][0], operands[1][0], operands[2][0],
                                  operands[3][0]};
     if (isSrcFP32)
@@ -1229,6 +1227,8 @@ struct FpToFpOpConversion
       outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[3]));
       return outVals;
     }
+    auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
+                                     isDstFP32 ? f16_ty : dstElementType);
     outVals = cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);
     assert(outVals.size() == inVals.size());
     if (isDstFP32)

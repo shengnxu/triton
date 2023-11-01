@@ -1220,8 +1220,16 @@ struct FpToFpOpConversion
     if (isSrcFP32)
       for (Value &v : inVals)
         v = convertFp32ToFp16(loc, rewriter, v);
-    SmallVector<Value> outVals =
-        cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);
+
+    SmallVector<Value> outVals;
+    if (srcElementType.isF16() && dstElementType.isF32()) {
+      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[0]));
+      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[1]));
+      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[2]));
+      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[3]));
+      return outVals;
+    }
+    outVals = cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);
     assert(outVals.size() == inVals.size());
     if (isDstFP32)
       for (Value &v : outVals)

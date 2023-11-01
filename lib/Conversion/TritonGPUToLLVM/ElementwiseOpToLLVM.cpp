@@ -1765,7 +1765,9 @@ struct FpToFpOpConversion
       outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[3]));
       return outVals;
     }
-    SmallVector<Value> outVals = cvtFunc(loc, rewriter, inVals);
+    auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
+                                     isDstFP32 ? f16_ty : dstElementType);
+    outVals = cvtFunc(loc, rewriter, inVals);
     assert(outVals.size() == inVals.size());
     outVals.resize(std::min(numElements, operands.size()));
     if (isDstFP32)

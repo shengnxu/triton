@@ -149,9 +149,9 @@ const std::string Fp8E5M2_to_Fp16 = "{                           \n"
                                     "}";
 #endif
 
+
 #ifdef USE_ROCM
 
-<<<<<<< HEAD
 // static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
 //   Location loc, ConversionPatternRewriter &rewriter, Value v) {
 //   auto fp8x2VecTy = vec_ty(i8_ty, 2);
@@ -201,40 +201,6 @@ static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
   auto operand1 = builder1.newOperand(tmp, "v");
   cvt(res1, operand1);
   return builder1.launch(rewriter, loc, f16_ty, false);
-=======
-static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
-  Location loc, ConversionPatternRewriter &rewriter, Value v) {
-  auto fp8x2VecTy = vec_ty(i8_ty, 2);
-  Value a = undef(fp8x2VecTy);
-  a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
-  a = insert_element(fp8x2VecTy, a, v, i32_val(1));
-  a = bitcast(a, i16_ty);
-
-  auto e = and_(i16_ty, a, int_val(16, 0x7C00));
-  auto m = and_(i16_ty, a, int_val(16, 0x0300));
-  auto sign = and_(i16_ty, a, int_val(16, 0x8000));
-
-  // check whether all exponents are zeros
-  auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
-
-  // case 1, e is zero, need to move m right by 1 bit
-  auto m1 = lshr(i16_ty, m, int_val(16, 1));
-  auto o0 = or_(i16_ty, sign, m1);
-
-  // case 2, e is nonzero, sub exponent by 1
-  auto e1 = sub(i16_ty, e, int_val(16, 0x0400));
-
-  auto e_is_one = icmp_eq(e, int_val(16, 0x0400));
-  auto m2 = add(i16_ty, m1, int_val(16, 0x0200));
-
-  auto o1 = or_(i16_ty, sign, or_(i16_ty, m, e1));
-  auto o2 = or_(i16_ty, sign, m2);
-
-  auto o12 = select(e_is_one, o2, o1);
-  auto o = select(e_is_zero, o0, o12);
-
-  return bitcast(o, f16_ty);
->>>>>>> 79bebc4ffeebb6ac384bc90f0399d710906b0987
 }
 
 static SmallVector<Value>

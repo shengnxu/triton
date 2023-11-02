@@ -2575,11 +2575,6 @@ class SharedLayout:
         return f"#{GPU_DIALECT}.shared<{{vec={self.vec}, perPhase={self.per_phase}, maxPhase={self.max_phase}, order={self.order}, CTAsPerCGA={self.ctas_per_cga}, CTASplitNum={self.cta_split_num}, CTAOrder={self.cta_order}}}>"
 
 
-def get_gpu_name():
-    arch = triton.compiler.compiler.get_architecture_descriptor(None)
-    return arch["gfx_arch"]
-
-
 @pytest.mark.parametrize("vec_size", [2, 4])
 @pytest.mark.parametrize("swizzle", [True, False])
 @pytest.mark.parametrize("transposeA", [True, False])
@@ -2674,11 +2669,8 @@ module attributes {"triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 4 :
     with tempfile.NamedTemporaryFile(mode='w', suffix='.ttgir') as f:
         f.write(ir)
         f.flush()
-        arch_triple = "amdgcn-amd-amdhsa"
-        arch_name = get_gpu_name()
-        features = ""
-        warp_size = 64
-        capabilities = [arch_triple, arch_name, features, warp_size]
+        backend = triton.common.backend.get_backend("hip")
+        capabilities = backend.get_architecture_descriptor()
         kernel = triton.compile(f.name, device_type="hip", cc=capabilities)
 
     import triton.language.semantic as sem

@@ -959,6 +959,8 @@ def convert_float_to_float32(fp: torch.tensor, dtype=None):
         # float8e4m3nv does not have infinities
         output[fp == 0b01111111] = torch.nan
         output[fp == 0b11111111] = torch.nan
+    elif dtype in [tl.float8e4b8, tl.float8e5b16]:
+        output[fp==0b10000000] = torch.nan
     else:
         output = torch.where(exp == (1 << exp_width) - 1,
                              ((sign << (tl.float32.primitive_bitwidth - 1)) | extended_exp | (frac << (tl.float32.fp_mantissa_width - dtype.fp_mantissa_width))).view(torch.float32),

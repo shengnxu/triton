@@ -184,6 +184,7 @@ def _add_external_libs(mod, libs):
 
 
 def ttgir_to_llir(mod, extern_libs, target, tma_infos, waves_per_eu=0):
+    print("ttgir_to_llir")
     if extern_libs:
         _add_external_libs(mod, extern_libs)
     # TODO: separate tritongpu_to_llvmir for different backends
@@ -313,7 +314,8 @@ arg_type_pattern = {
     "ptx": ptx_arg_type_pattern,
 }
 if is_hip():
-    ttgir_num_warps_pattern = r'"triton_gpu_rocm.num-warps"\s?=\s?(\d+)\s?:'
+    ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
+    #ttgir_num_warps_pattern = r'"triton_gpu_rocm.num-warps"\s?=\s?(\d+)\s?:'
 else:
     ttgir_num_warps_pattern = r'"triton_gpu.num-warps"\s?=\s?(\d+)\s?:'
 

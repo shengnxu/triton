@@ -85,7 +85,7 @@ static Value convert_val_Fp16_to_Fp8E5M2FNUZ(
   auto &cvt1 = *builder1.create("v_cvt_pk_bf8_f32");
   auto res1 = builder1.newOperand("=v");
   auto operand1 = builder1.newOperand(tmp, "v");
-  cvt(res1, operand1);
+  cvt1(res1, operand1);
   return builder1.launch(rewriter, loc, i8_ty, false);
 }
 

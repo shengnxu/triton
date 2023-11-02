@@ -1410,6 +1410,11 @@ def dot(lhs: tl.tensor,
 
     # Cast operands of types f16 and i8 for configurations where FMA only supported.
     if is_hip() and not mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty):
+        # max_num_imprecise_acc does not yet apply to hip
+        if is_hip():
+            max_num_imprecise_acc = 0
+        if max_num_imprecise_acc is None:
+            max_num_imprecise_acc = 2**30
         ret_cast_scalar_ty = tl.float32 if lhs.type.scalar.is_int() else ret_scalar_ty
         lhs = cast(lhs, ret_cast_scalar_ty, builder)
         rhs = cast(rhs, ret_cast_scalar_ty, builder)
@@ -1418,10 +1423,16 @@ def dot(lhs: tl.tensor,
         else:
             _0 = builder.create_splat(builder.get_fp32(0), [M, N])
         ret_ty = tl.block_type(ret_cast_scalar_ty, [M, N])
-        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
+        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32, max_num_imprecise_acc),
                         ret_ty)
         return cast(ret, ret_scalar_ty, builder)
-    if is_hip() and mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty) and ret_scalar_ty.primitive_bitwidth < 32:
+    if is_hip() and mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty) and ret_scalar_ty.primitive_bitwidth <= 32:
+        # max_num_imprecise_acc does not yet apply to hip
+        if is_hip():
+            max_num_imprecise_acc = 0
+        if max_num_imprecise_acc is None:
+            max_num_imprecise_acc = 2**30
+
         if lhs.type.scalar.is_int():
             ret_dot_scalar_ty = tl.int32
             _0 = builder.create_splat(builder.get_int32(0), [M, N])
@@ -1429,7 +1440,7 @@ def dot(lhs: tl.tensor,
             ret_dot_scalar_ty = tl.float32
             _0 = builder.create_splat(builder.get_fp32(0), [M, N])
         ret_ty = tl.block_type(ret_dot_scalar_ty, [M, N])
-        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32),
+        ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32, max_num_imprecise_acc),
                         ret_ty)
         return cast(ret, ret_scalar_ty, builder)
 

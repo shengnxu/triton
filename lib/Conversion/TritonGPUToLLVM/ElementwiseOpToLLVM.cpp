@@ -45,34 +45,32 @@ const std::string Fp16_to_Fp8E5M2 =
 #endif
 
 #ifdef USE_ROCM
-/*
-static Value convert_val_Fp16_to_Fp8E5M2FNUZ(
-  Location loc, ConversionPatternRewriter &rewriter, Value v) {
-  auto vi16 = bitcast(v, i16_ty);
-  auto e = and_(i16_ty, vi16, int_val(16, 0x7C00));
-  auto sign = and_(i16_ty, vi16, int_val(16, 0x8000));
+// static Value convert_val_Fp16_to_Fp8E5M2FNUZ(
+//   Location loc, ConversionPatternRewriter &rewriter, Value v) {
+//   auto vi16 = bitcast(v, i16_ty);
+//   auto e = and_(i16_ty, vi16, int_val(16, 0x7C00));
+//   auto sign = and_(i16_ty, vi16, int_val(16, 0x8000));
 
-  // normal value
-  auto a = and_(i16_ty, vi16, int_val(16, 0x7FFFF));
-  auto a1 = add(i16_ty, a, int_val(16, 0x0400));
-  auto o1 = or_(i16_ty, a1, sign);
+//   // normal value
+//   auto a = and_(i16_ty, vi16, int_val(16, 0x7FFFF));
+//   auto a1 = add(i16_ty, a, int_val(16, 0x0400));
+//   auto o1 = or_(i16_ty, a1, sign);
 
-  // subnormal value, e is 0
-  auto m = and_(i16_ty, vi16, int_val(16, 0x03FF));
-  auto m2 = shl(m, int_val(16, 1));
-  auto o2 = or_(i16_ty, sign, or_(i16_ty, int_val(16, 1), m2));
+//   // subnormal value, e is 0
+//   auto m = and_(i16_ty, vi16, int_val(16, 0x03FF));
+//   auto m2 = shl(m, int_val(16, 1));
+//   auto o2 = or_(i16_ty, sign, or_(i16_ty, int_val(16, 1), m2));
 
-  auto e_is_zero = icmp_eq(e, int_val(16, 0));
-  auto e_is_all1 = icmp_eq(e, int_val(16, 0x7C00));
+//   auto e_is_zero = icmp_eq(e, int_val(16, 0));
+//   auto e_is_all1 = icmp_eq(e, int_val(16, 0x7C00));
 
-  auto ot = select(e_is_zero, o2, o1);
-  auto o = select(e_is_all1, vi16, ot);
-  auto fp8x2VecTy = vec_ty(i8_ty, 2);
-  auto res = bitcast(o, fp8x2VecTy); 
+//   auto ot = select(e_is_zero, o2, o1);
+//   auto o = select(e_is_all1, vi16, ot);
+//   auto fp8x2VecTy = vec_ty(i8_ty, 2);
+//   auto res = bitcast(o, fp8x2VecTy); 
 
-  return extract_element(i8_ty, res, i32_val(1));
-}
-*/
+//   return extract_element(i8_ty, res, i32_val(1));
+// }
 
 static Value convert_val_Fp16_to_Fp8E5M2FNUZ(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
@@ -149,58 +147,40 @@ const std::string Fp8E5M2_to_Fp16 = "{                           \n"
                                     "}";
 #endif
 
-
 #ifdef USE_ROCM
-
-// static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
-//   Location loc, ConversionPatternRewriter &rewriter, Value v) {
-//   auto fp8x2VecTy = vec_ty(i8_ty, 2);
-//   Value a = undef(fp8x2VecTy);
-//   a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
-//   a = insert_element(fp8x2VecTy, a, v, i32_val(1));
-//   a = bitcast(a, i16_ty);
-
-//   auto e = and_(i16_ty, a, int_val(16, 0x7C00));
-//   auto m = and_(i16_ty, a, int_val(16, 0x0300));
-//   auto sign = and_(i16_ty, a, int_val(16, 0x8000));
-
-//   // check whether all exponents are zeros
-//   auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
-
-//   // case 1, e is zero, need to move m right by 1 bit
-//   auto m1 = lshr(i16_ty, m, int_val(16, 1));
-//   auto o0 = or_(i16_ty, sign, m1);
-
-//   // case 2, e is nonzero, sub exponent by 1
-//   auto e1 = sub(i16_ty, e, int_val(16, 0x0400));
-
-//   auto e_is_one = icmp_eq(e, int_val(16, 0x0400));
-//   auto m2 = add(i16_ty, m1, int_val(16, 0x0200));
-
-//   auto o1 = or_(i16_ty, sign, or_(i16_ty, m, e1));
-//   auto o2 = or_(i16_ty, sign, m2);
-
-//   auto o12 = select(e_is_one, o2, o1);
-//   auto o = select(e_is_zero, o0, o12);
-
-//   return bitcast(o, f16_ty);
-// }
 
 static Value convert_val_Fp8E5M2FNUZ_to_Fp16(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
-  GCNBuilder builder;
-  auto &cvt = *builder.create("v_cvt_pk_f32_bf8");
-  auto res = builder.newOperand("=v");
-  auto operand = builder.newOperand(v, "v");
-  cvt(res, operand);
-  auto tmp = builder.launch(rewriter, loc, f32_ty, false);
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  Value a = undef(fp8x2VecTy);
+  a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
+  a = insert_element(fp8x2VecTy, a, v, i32_val(1));
+  a = bitcast(a, i16_ty);
 
-  GCNBuilder builder1;
-  auto &cvt1 = *builder1.create("v_cvt_f16_f32");
-  auto res1 = builder1.newOperand("=v");
-  auto operand1 = builder1.newOperand(tmp, "v");
-  cvt(res1, operand1);
-  return builder1.launch(rewriter, loc, f16_ty, false);
+  auto e = and_(i16_ty, a, int_val(16, 0x7C00));
+  auto m = and_(i16_ty, a, int_val(16, 0x0300));
+  auto sign = and_(i16_ty, a, int_val(16, 0x8000));
+
+  // check whether all exponents are zeros
+  auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
+
+  // case 1, e is zero, need to move m right by 1 bit
+  auto m1 = lshr(i16_ty, m, int_val(16, 1));
+  auto o0 = or_(i16_ty, sign, m1);
+
+  // case 2, e is nonzero, sub exponent by 1
+  auto e1 = sub(i16_ty, e, int_val(16, 0x0400));
+
+  auto e_is_one = icmp_eq(e, int_val(16, 0x0400));
+  auto m2 = add(i16_ty, m1, int_val(16, 0x0200));
+
+  auto o1 = or_(i16_ty, sign, or_(i16_ty, m, e1));
+  auto o2 = or_(i16_ty, sign, m2);
+
+  auto o12 = select(e_is_one, o2, o1);
+  auto o = select(e_is_zero, o0, o12);
+
+  return bitcast(o, f16_ty);
 }
 
 static SmallVector<Value>
@@ -1317,29 +1297,13 @@ struct FpToFpOpConversion
     auto operand = builder.newOperand(v, "v");
     cvt(res, operand);
     return builder.launch(rewriter, loc, f32_ty, false);
-    // auto v1 = builder.launch(rewriter, loc, f32_ty, false);
-
-    // GCNBuilder builder1;
-    // auto &cvta1 = *builder1.create("v_cvt_f16_f32");
-    // auto r1 = builder1.newOperand("=v");
-    // auto i1 = builder1.newOperand(v1, "v");
-    // cvta1(r1, i1);
-    // auto v2 = builder1.launch(rewriter, loc, f16_ty, false);
-
-    // GCNBuilder builder2;
-    // auto &cvta2 = *builder2.create("v_cvt_f32_f16");
-    // auto r2 = builder2.newOperand("=v");
-    // auto i2 = builder2.newOperand(v2, "v");
-    // cvta2(r2, i2);
-    // return builder2.launch(rewriter, loc, f32_ty, false);
-
 #else
     PTXBuilder builder;
     auto &cvt = *builder.create("cvt.f32.f16");
     auto res = builder.newOperand("=r");
     auto operand = builder.newOperand(v, "h");
     cvt(res, operand);
-    return 
+    return builder.launch(rewriter, loc, f32_ty, false);
 #endif
   }
 

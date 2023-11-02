@@ -346,10 +346,6 @@ bool canFoldIntoConversion(Operation *op, Attribute targetEncoding) {
              triton::MakeRangeOp, triton::SplatOp, triton::ViewOp>(op);
 }
 
-//
-
-// Replace ForOp with a new ForOp with extra operands. The YieldOp is not
-// updated and needs to be updated separatly for the loop to be correct.
 scf::ForOp replaceForOpWithNewSignature(OpBuilder &rewriter, scf::ForOp loop,
                                         ValueRange newIterOperands) {
   OpBuilder::InsertionGuard g(rewriter);

@@ -43,6 +43,7 @@ def vecadd(a: torch.tensor, b: torch.tensor):
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
 
+    a_type = tl.float8e5b16
     # Allocates output.
     c = torch.empty_like(b, dtype=torch.float32)
     n_elements = c.numel()
@@ -50,7 +51,7 @@ def vecadd(a: torch.tensor, b: torch.tensor):
     grid = lambda META: (
         triton.cdiv(n_elements, META['BLOCK_SIZE']),)
     add_kernel[grid](
-        a, b, c,
+        triton.reinterpret(a, a_type), b, c,
         n_elements, BLOCK_SIZE = 1024,
     )
 
@@ -69,25 +70,20 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
     print("testing sizes: SIZE: {}, ab type: {}, a_is_f8: {}".format(SIZE, ab_type, a_is_f8))
 
     if a_is_f8:
-        f8_tensor = torch.randn((SIZE,), dtype=torch.float32, device='cuda') * 10
-        # f8_tensor = f8_tensor.to(torch.int8)
-        # # f32_to_f8 doesn't handle nan, so we make sure f8_tensor doesn't contain any nan
-        # all_exp_ones = (f8_tensor & 0b01111100) == 128 - 2**a_type.fp_mantissa_width
-        # f8_tensor[all_exp_ones] = 0
-        a = f8_tensor.to(torch.float8_e5m2fnuz)
-        a_f16 = a.to(torch.float32)
+        a_type = tl.float8e5b16
+        raw_data = torch.randn((SIZE,), dtype=torch.float32, device='cuda') * 10
+        a = torch.empty_like(raw_data, dtype=torch.int8)
+        a_f32 = raw_data
 
-        # n_elements = f8_tensor.numel()
-        # # grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
-        # a_f16 = torch.empty_like(f8_tensor, dtype=torch.float32)
-        # copy_kernel[grid](triton.reinterpret(f8_tensor, a_type), a_f16, n_elements, BLOCK_SIZE=1024)
-        b_f16 = torch.randn((SIZE,), device = 'cuda', dtype=torch.float32)
+        n_elements = raw_data.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        copy_kernel[grid](raw_data, triton.reinterpret(a, a_type), n_elements, BLOCK_SIZE=1024)
+        b_f32 = torch.randn((SIZE,), device = 'cuda', dtype=torch.float32)
 
-        print(f'a = {a_f16}')
-        print(f'b = {b_f16}')
-        # print(f'f8_a = {f8_tensor}')
-        golden = torch.add(a_f16, b_f16)
-        c = vecadd(a, b_f16)
+        print(f'a = {a_f32}')
+        print(f'b = {b_f32}')
+        golden = torch.add(a_f32, b_f32)
+        c = vecadd(a, b_f32)
 
         print(f'gold = {golden}')
         print(f'c = {c}')

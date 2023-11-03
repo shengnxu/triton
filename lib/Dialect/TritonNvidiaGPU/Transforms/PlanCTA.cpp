@@ -628,12 +628,13 @@ bool CTAPlanner::isElementwiseOp(Operation *op) const {
                 arith::CeilDivUIOp, arith::DivFOp, arith::DivSIOp,
                 arith::DivUIOp, arith::ExtFOp, arith::ExtSIOp, arith::ExtUIOp,
                 arith::FloorDivSIOp, arith::FPToSIOp, arith::FPToUIOp,
-                arith::MaxFOp, arith::MaxSIOp, arith::MaxUIOp, arith::MinFOp,
-                arith::MinSIOp, arith::MinUIOp, arith::MulFOp, arith::MulIOp,
-                arith::NegFOp, arith::OrIOp, arith::RemFOp, arith::RemSIOp,
-                arith::RemUIOp, arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
-                arith::SIToFPOp, arith::SubFOp, arith::SubIOp, arith::TruncFOp,
-                arith::TruncIOp, arith::UIToFPOp, arith::XOrIOp>(op))
+                arith::MaximumFOp, arith::MaxSIOp, arith::MaxUIOp,
+                arith::MinimumFOp, arith::MinSIOp, arith::MinUIOp,
+                arith::MulFOp, arith::MulIOp, arith::NegFOp, arith::OrIOp,
+                arith::RemFOp, arith::RemSIOp, arith::RemUIOp, arith::ShLIOp,
+                arith::ShRSIOp, arith::ShRUIOp, arith::SIToFPOp, arith::SubFOp,
+                arith::SubIOp, arith::TruncFOp, arith::TruncIOp,
+                arith::UIToFPOp, arith::XOrIOp>(op))
     return true;
   if (llvm::isa<math::AbsFOp, math::AbsIOp, math::AtanOp, math::Atan2Op,
                 math::CeilOp, math::CopySignOp, math::CosOp, math::SinOp,
@@ -648,7 +649,7 @@ bool CTAPlanner::isElementwiseOp(Operation *op) const {
     return true;
   if (auto externElementwiseOp = dyn_cast<triton::ExternElementwiseOp>(op))
     return externElementwiseOp.getPure();
-  if (llvm::isa<ttg::CmpIOp, ttg::CmpFOp, ttg::SelectOp>(op))
+  if (llvm::isa<arith::CmpIOp, arith::CmpFOp, arith::SelectOp>(op))
     return true;
   return false;
 }

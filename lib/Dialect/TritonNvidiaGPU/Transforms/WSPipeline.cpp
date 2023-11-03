@@ -162,7 +162,7 @@ scf::ForOp appendPipelineIdxToLoopArgs(scf::ForOp forOp, int numStages,
 
   // Copy iter operands of forOp
   SmallVector<Value> newLoopArgs;
-  for (auto operand : forOp.getIterOperands())
+  for (auto operand : llvm::to_vector(forOp.getInitArgs()))
     newLoopArgs.push_back(operand);
 
   // Append initial value of pipelineIdx to newLoopArgs
@@ -193,6 +193,117 @@ scf::ForOp appendPipelineIdxToLoopArgs(scf::ForOp forOp, int numStages,
   newForOp.getRegion().takeBody(forOp.getRegion());
 
   // Replace forOp with newForOp
+  for (unsigned i = 0; i < forOp.getNumResults(); ++i)
+    forOp.getResult(i).replaceAllUsesWith(newForOp.getResult(i));
+  forOp.erase();
+
+  return newForOp;
+}
+
+// for(...) -> for(..., phase, pipelineIdx)
+scf::ForOp createNewMathLoop(scf::ForOp forOp, int numStages,
+                             scf::ForOp &parentForOp) {
+  auto loc = forOp.getLoc();
+  Block *body = forOp.getBody();
+
+  // The agentId set of pipelineIdx is the union of agentId sets of all ops in
+  // the for loop
+  OpBuilderWithAgentIds builder(forOp.getContext());
+  builder.setAgentIdsFromArray(collectAgentIds(forOp));
+
+  builder.setInsertionPoint(forOp);
+  Value numStagesVal =
+      builder.createWithAgentIds<arith::ConstantIntOp>(loc, numStages, 32);
+
+  // 0. Append pipelineIdx to block arguments
+  Value phase =
+      body->insertArgument(body->getNumArguments(), builder.getI1Type(), loc);
+  Value pipelineIdx =
+      body->insertArgument(body->getNumArguments(), builder.getI32Type(), loc);
+
+  // 1. prepare index and phase for next iteration
+  // nextIdx = curIdx + 1
+  // nextPhase = ((nextIdx < numStages && curPhase) || (nextIdx >= numStages &&
+  // curPhase^1))
+  // nextIdx = nextIdx >= numStages ? 0 : nextIdx
+  auto yieldOp = llvm::cast<scf::YieldOp>(body->getTerminator());
+  builder.setInsertionPoint(yieldOp);
+  Value one = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 1, 32);
+  Value zero = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 0, 32);
+  Value _1_1b = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 1, 1);
+  // generate index for next iter
+  Value nextPipelineIdx =
+      builder.createWithAgentIds<arith::AddIOp>(loc, pipelineIdx, one);
+  Value pipelineGECond = builder.createWithAgentIds<arith::CmpIOp>(
+      loc, arith::CmpIPredicate::uge, nextPipelineIdx, numStagesVal);
+  Value pipelineLTCond = builder.createWithAgentIds<arith::CmpIOp>(
+      loc, arith::CmpIPredicate::ult, nextPipelineIdx, numStagesVal);
+  Value cyclePipelineIdx = builder.createWithAgentIds<arith::SubIOp>(
+      loc, nextPipelineIdx, numStagesVal);
+  nextPipelineIdx = builder.createWithAgentIds<mlir::arith::SelectOp>(
+      loc, pipelineGECond, cyclePipelineIdx, nextPipelineIdx);
+  // generate phase for next iter
+  Value flipPhase =
+      builder.createWithAgentIds<mlir::arith::XOrIOp>(loc, phase, _1_1b);
+  Value cond0 = builder.createWithAgentIds<mlir::arith::AndIOp>(
+      loc, pipelineGECond, flipPhase);
+  Value cond1 = builder.createWithAgentIds<mlir::arith::AndIOp>(
+      loc, pipelineLTCond, phase);
+  Value nextPhase =
+      builder.createWithAgentIds<mlir::arith::OrIOp>(loc, cond0, cond1);
+
+  // 2. Append pipelineIdx to yield operands
+  yieldOp->insertOperands(yieldOp.getNumOperands(),
+                          {nextPhase, nextPipelineIdx});
+
+  // 3. create newLoopArgs
+  SmallVector<Value> newLoopArgs;
+  for (auto operand : forOp.getInitArgs())
+    newLoopArgs.push_back(operand);
+
+  builder.setInsertionPoint(forOp);
+  Value initPipelineIdx, initEmptyIdx, initPhase;
+  zero = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 0, 32);
+  if (parentForOp) {
+    // Make sure prior pipelineIdx is inserted in the end of parentForOp
+    initPipelineIdx = parentForOp.getBody()->getArguments().back();
+    Value numSteps = builder.createWithAgentIds<arith::SubIOp>(
+        loc, forOp.getUpperBound(), forOp.getLowerBound());
+    numSteps = builder.createWithAgentIds<arith::AddIOp>(loc, numSteps,
+                                                         forOp.getStep());
+    Value one = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 1, 32);
+    Value two = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 2, 32);
+    numSteps = builder.createWithAgentIds<arith::SubIOp>(loc, numSteps, one);
+    numSteps = builder.createWithAgentIds<arith::DivUIOp>(loc, numSteps,
+                                                          forOp.getStep());
+    // initPipelineIdx = (parentForOp.pipelineIdx * numSteps) % numStages
+    // initPhase = ((parentForOp.pipelineIdx * numSteps) / numStages) & 1
+    initPipelineIdx = builder.createWithAgentIds<arith::MulIOp>(
+        loc, initPipelineIdx, numSteps);
+    Value pipelineIdx = builder.createWithAgentIds<arith::DivUIOp>(
+        loc, initPipelineIdx, numStagesVal);
+    initPipelineIdx = builder.createWithAgentIds<arith::SubIOp>(
+        loc, initPipelineIdx,
+        builder.createWithAgentIds<arith::MulIOp>(loc, pipelineIdx,
+                                                  numStagesVal));
+    pipelineIdx =
+        builder.createWithAgentIds<arith::AndIOp>(loc, pipelineIdx, one);
+    initPhase = builder.createWithAgentIds<arith::TruncIOp>(
+        loc, builder.getI1Type(), pipelineIdx);
+  } else {
+    // phase init to false and pipelineIdx init to 0
+    initPipelineIdx = zero;
+    initPhase = builder.createWithAgentIds<arith::ConstantIntOp>(loc, 0, 1);
+  }
+  newLoopArgs.append({initPhase, initPipelineIdx});
+
+  // 4. Create newForOp and take the region of forOp
+  auto newForOp = builder.createWithAgentIds<scf::ForOp>(
+      loc, forOp.getLowerBound(), forOp.getUpperBound(), forOp.getStep(),
+      newLoopArgs);
+  newForOp.getRegion().takeBody(forOp.getRegion());
+
+  // 5. Replace forOp with newForOp
   for (unsigned i = 0; i < forOp.getNumResults(); ++i)
     forOp.getResult(i).replaceAllUsesWith(newForOp.getResult(i));
   forOp.erase();
@@ -302,7 +413,7 @@ DenseMap<AgentId, scf::ForOp> createForOpsForEachAgentId(scf::ForOp forOp) {
     // Prepare newLoopArgs
     SmallVector<Value> newLoopArgs;
     for (unsigned argNumber : usedArgs)
-      newLoopArgs.push_back(forOp.getIterOperands()[argNumber]);
+      newLoopArgs.push_back(forOp.getInitArgs()[argNumber]);
 
     // Create newForOp
     builder.setAgentIdsFromArray({agentId});
@@ -341,7 +452,9 @@ DenseMap<AgentId, scf::ForOp> createForOpsForEachAgentId(scf::ForOp forOp) {
     for (unsigned i = 0; i < usedArgs.size(); ++i) {
       auto oldResult = forOp.getResult(usedArgs[i]);
       auto newResult = newForOp.getResult(i);
-      oldResult.replaceAllUsesWith(newResult);
+      oldResult.replaceUsesWithIf(newResult, [&](OpOperand &operand) -> bool {
+        return hasAgentId(operand.getOwner(), agentId);
+      });
     }
 
     agentsToForOp[agentId] = newForOp;
@@ -642,6 +755,30 @@ void buildAsyncComm(const DenseMap<Operation *, SmallVector<Channel *>> &map,
     agentsPC.insert(agentsPC.end(), agentP.begin(), agentP.end());
     agentsPC.insert(agentsPC.end(), agentC.begin(), agentC.end());
   };
+
+  // Don't pipeline dots that depend on ops other than scf.yield and scf.for.
+  // Because the DotOp will be replaced by a DotAsyncOp, which will be issued in
+  // iter_i but waited in iter_i+1. The use of DotAsyncOp should not be ops
+  // other than scf.for and scf.yield because the result of DotAsyncOp is not
+  // ready in iter_i.
+  auto getValidDot = [&](const SmallVector<Channel *> &block) -> Operation * {
+    Operation *headConsumer = block.front()->dstOp;
+    if (block.size() == 2 &&
+        isa<triton::DotOp>(*headConsumer->getUsers().begin()) &&
+        headConsumer->getParentOfType<scf::ForOp>()) {
+      auto dotOp = cast<triton::DotOp>(*headConsumer->getUsers().begin());
+      auto dot = dotOp.getResult();
+      auto resTy = dot.getType().dyn_cast<RankedTensorType>();
+      auto cArg = dotOp.getOperand(2).dyn_cast<BlockArgument>();
+      if (auto resEnc = resTy.getEncoding().dyn_cast<ttg::MmaEncodingAttr>())
+        if (resEnc.isHopper() && dot.hasOneUse() &&
+            isa<scf::YieldOp>(*dot.getUsers().begin()) && cArg &&
+            cArg.hasOneUse())
+          return dotOp.getOperation();
+    }
+    return nullptr;
+  };
+
   // TODO: try to optimize locations of arriving and waiting token
   // for fused-attention
   for (auto kv : map) {
@@ -694,12 +831,71 @@ void buildAsyncComm(const DenseMap<Operation *, SmallVector<Channel *>> &map,
     builder.createWithAgentIds<ttng::ConsumerWaitOp>(headConsumer->getLoc(),
                                                      token, pipelineIdx);
 
-    // insert ConsumerReleaseOp
-    auto consumerReleasePoint =
-        consumerReleaseHeutistic(tailProducer, tailConsumer);
-    builder.setInsertionPointAfter(consumerReleasePoint);
-    builder.createWithAgentIds<ttng::ConsumerReleaseOp>(
-        consumerReleasePoint->getLoc(), token, pipelineIdx);
+    /// async launch dots
+    if (auto cvg = getValidDot(kv.second)) {
+      auto dotOp = cast<triton::DotOp>(cvg);
+      auto dot = dotOp.getResult();
+      auto loc = dot.getLoc();
+      auto forOp = cvg->getParentOfType<scf::ForOp>();
+
+      auto agentIds = collectAgentIds(dotOp);
+      OpBuilderWithAgentIds builder(dotOp.getContext());
+      builder.setAgentIdsFromArray(agentIds);
+      builder.setInsertionPoint(dotOp);
+
+      // 0. replace Dot with DotAsync
+      auto dotAsync =
+          builder.createWithAgentIds<triton::nvidia_gpu::DotAsyncOp>(
+              loc, dotOp.getA(), dotOp.getB(), dotOp.getC(),
+              dotOp.getAllowTF32(), dotOp.getMaxNumImpreciseAcc());
+      dot.replaceAllUsesWith(dotAsync.getResult());
+
+      // 1. insert ConsumerReleaseOp for DotAsyncOps
+      Value cond = builder.createWithAgentIds<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::sgt, forOp.getInductionVar(),
+          forOp.getLowerBound());
+      auto ifOp =
+          builder.createWithAgentIds<scf::IfOp>(loc, ArrayRef<Type>{}, cond,
+                                                /*hasElse*/ false);
+      builder.setInsertionPointToStart(ifOp.thenBlock());
+      Value one = builder.createWithAgentIds<arith::ConstantIntOp>(
+          headConsumer->getLoc(), 1, 32);
+      auto oriIdx = forOp.getBody()->getArguments().back();
+      Value consumerReleaseIdx =
+          builder.createWithAgentIds<arith::SubIOp>(loc, oriIdx, one);
+      consumerReleaseIdx = builder.createWithAgentIds<arith::RemSIOp>(
+          loc, consumerReleaseIdx, numStagesVal);
+      builder.createWithAgentIds<ttng::ConsumerReleaseOp>(loc, token,
+                                                          consumerReleaseIdx);
+      setAgentIds(ifOp.thenYield().getOperation(), agentIds);
+
+      // 2. If there's any outstanding DotAsyncOps, we need to wait for them.
+      builder.setInsertionPointAfter(forOp);
+      unsigned resultIndex = dotAsync->getUses().begin()->getOperandNumber();
+      Value result = forOp->getResult(resultIndex);
+      auto dotWait = builder.createWithAgentIds<triton::nvidia_gpu::DotWaitOp>(
+          forOp.getLoc(), result, 0);
+      result.replaceAllUsesExcept(dotWait.getResult(), dotWait);
+
+      // 3. insert ConsumerReleaseOp for outstanding DotAsyncOps
+      Value one_ = builder.createWithAgentIds<arith::ConstantIntOp>(
+          headConsumer->getLoc(), 1, 32);
+      consumerReleaseIdx = forOp.getResults().back();
+      consumerReleaseIdx = builder.createWithAgentIds<arith::SubIOp>(
+          loc, consumerReleaseIdx, one_);
+      consumerReleaseIdx = builder.createWithAgentIds<arith::RemSIOp>(
+          loc, consumerReleaseIdx, numStagesVal);
+      builder.createWithAgentIds<ttng::ConsumerReleaseOp>(loc, token,
+                                                          consumerReleaseIdx);
+      dotOp->erase();
+    } else {
+      // insert ConsumerReleaseOp
+      auto consumerReleasePoint =
+          consumerReleaseHeutistic(tailProducer, tailConsumer);
+      builder.setInsertionPointAfter(consumerReleasePoint);
+      builder.createWithAgentIds<ttng::ConsumerReleaseOp>(
+          consumerReleasePoint->getLoc(), token, pipelineIdx);
+    }
 
     /*****************Buffer related*****************/
     /// splitLoadsInForLoop

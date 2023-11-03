@@ -111,6 +111,9 @@ bool isExpensiveLoadOrStore(Operation *op);
 
 bool canFoldIntoConversion(Operation *op, Attribute targetEncoding);
 
+scf::ForOp replaceForOpWithNewSignature(OpBuilder &rewriter, scf::ForOp loop,
+                                        ValueRange newIterOperands);
+
 Operation *cloneWithInferType(mlir::OpBuilder &rewriter, Operation *op,
                               IRMapping &mapping);
 
@@ -140,13 +143,6 @@ Value linearize(OpBuilder &b, Location loc, ArrayRef<Value> multiDim,
 
 Value linearize(OpBuilder &b, Location loc, ArrayRef<Value> multiDim,
                 ArrayRef<unsigned> shape);
-
-// Returns null if the op is not inside a agent region (warp specialization
-// mode). Note that there should be at most one agent id attached to the
-// operation.
-std::optional<int> getWSAgentId(Operation *op);
-std::optional<int> getWSRoleId(Operation *op);
-void setRoleId(Operation *op, int roleId);
 
 } // namespace mlir
 

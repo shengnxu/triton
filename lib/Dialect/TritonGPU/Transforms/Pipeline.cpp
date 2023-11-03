@@ -347,7 +347,7 @@ LogicalResult LoopPipeliner::collectOps(SetVector<Operation *> &ops) {
 void LoopPipeliner::collectValueDep(Value v, int stage,
                                     SetVector<Value> &deps) {
   // Loop-invariant value, skip
-  if (v.getParentRegion() != &forOp.getLoopBody())
+  if (v.getParentRegion() != &forOp.getRegion())
     return;
 
   // Since we only need to peel the loop numStages-1 times, don't worry
@@ -652,10 +652,12 @@ void LoopPipeliner::createBufferTypes() {
                             .getEncoding()
                             .dyn_cast<ttg::DotOperandEncodingAttr>()) {
       // MMAv1 and MMAv2
+      bool needTrans = dyn_cast_or_null<tt::TransOp>(
+          cvt.getDefiningOp()->getOperand(0).getDefiningOp());
       unsigned bitWidth = ty.getElementType().getIntOrFloatBitWidth();
       sharedEnc = ttg::SharedEncodingAttr::get(
           ty.getContext(), dotOpEnc, ty.getShape(),
-          ttg::getOrder(ty.getEncoding()), CTALayout, bitWidth);
+          ttg::getOrder(ty.getEncoding()), CTALayout, bitWidth, needTrans);
     } else {
       // MMAv3
       sharedEnc = ttg::SharedEncodingAttr::get(ty.getContext(), ty.getShape(),
@@ -669,7 +671,7 @@ void LoopPipeliner::createBufferTypes() {
 }
 
 void LoopPipeliner::createOrderedDeps() {
-  for (Operation &op : forOp.getLoopBody().front()) {
+  for (Operation &op : *forOp.getBody()) {
     if (depOps.contains(&op))
       orderedDeps.push_back(&op);
     else if (op.getNumResults() > 0 && validLoads.contains(op.getResult(0)))
@@ -1005,7 +1007,7 @@ SmallVector<Value> LoopPipeliner::collectNewLoopArgs() {
   // We need this to update operands for yield
   // original block arg => new arg's idx
   SmallVector<Value> newLoopArgs;
-  for (auto v : forOp.getIterOperands())
+  for (auto v : forOp.getInitArgs())
     newLoopArgs.push_back(v);
 
   bufferIdx = newLoopArgs.size();
@@ -1591,7 +1593,8 @@ void PipelinePass::asyncLaunchDots(scf::ForOp forOp) {
 
   /// XXX(Keren): Clean up the following duplicate code with checkDotOp
   /// dots to be pipelined
-  SetVector<Value> dots;
+  SmallVector<tt::DotOp> dots;
+  SmallVector<unsigned> resultNeedSync;
   for (Operation &op : *loop) {
     if (auto dotOp = dyn_cast<tt::DotOp>(&op)) {
       auto resTy = dotOp.getResult().getType().dyn_cast<RankedTensorType>();
@@ -1613,8 +1616,11 @@ void PipelinePass::asyncLaunchDots(scf::ForOp forOp) {
           if (!CArg || !CArg.hasOneUse())
             valid = false;
 
-          if (valid)
-            dots.insert(dotOp);
+          if (valid) {
+            dots.push_back(dotOp);
+            resultNeedSync.push_back(
+                dotOp->getUses().begin()->getOperandNumber());
+          }
         }
       }
     }
@@ -1626,37 +1632,28 @@ void PipelinePass::asyncLaunchDots(scf::ForOp forOp) {
 
   OpBuilder builder(forOp);
 
-  // 0. insert dot_wait after the last dot in the loop
-  Value dot = dots.back();
-  auto loc = dot.getLoc();
-  builder.setInsertionPointAfter(dot.getDefiningOp());
-  auto dotWait = builder.create<tt::nvidia_gpu::DotWaitOp>(loc, dots.size());
-
   // 1. replace Dot with DotAsync
   for (size_t idx = 0; idx < dots.size(); ++idx) {
-    Value dot = dots[idx];
-    auto dotOp = cast<tt::DotOp>(dot.getDefiningOp());
-    builder.setInsertionPoint(dot.getDefiningOp());
+    tt::DotOp dotOp = dots[idx];
+    builder.setInsertionPoint(dotOp);
     auto dotAsync = builder.create<tt::nvidia_gpu::DotAsyncOp>(
-        loc, dotOp.getA(), dotOp.getB(), dotOp.getC(), dotOp.getAllowTF32());
-    dot.replaceAllUsesWith(dotAsync.getResult());
-    updateConsumerReleaseInfo(dot.getDefiningOp(), dotWait, /*stage=*/1);
-    dot.getDefiningOp()->erase();
+        dotOp.getLoc(), dotOp.getA(), dotOp.getB(), dotOp.getC(),
+        dotOp.getAllowTF32(), dotOp.getMaxNumImpreciseAcc());
+    dotOp.replaceAllUsesWith(dotAsync.getResult());
+    updateConsumerReleaseInfo(dotOp, dotAsync, /*stage=*/1);
+    dotOp->erase();
   }
 
   // 2. If there's any outstanding DotAsyncOps, we need to wait for them.
   builder.setInsertionPointAfter(forOp);
-  Value loopNotEmpty = builder.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::slt, forOp.getLowerBound(),
-      forOp.getUpperBound());
-  // TODO[goostavz]: it's a workaround to put the DotWaitOp in an IfOp for
-  // a bug in ptxas which mistakenly analysis the control flow and turn the GMMA
-  // into synchronuous implementation for safety.
-  // Remove this If once the bug is fixed.
-  auto ifOp = builder.create<scf::IfOp>(loc, ArrayRef<Type>{}, loopNotEmpty,
-                                        /*hasElse*/ false);
-  builder.setInsertionPointToStart(ifOp.thenBlock());
-  builder.create<tt::nvidia_gpu::DotWaitOp>(forOp.getLoc(), 0);
+  for (unsigned resultIndex : resultNeedSync) {
+    Value result = forOp->getResult(resultIndex);
+    if (result.use_empty())
+      continue;
+    auto dotWait =
+        builder.create<tt::nvidia_gpu::DotWaitOp>(forOp.getLoc(), result, 0);
+    result.replaceAllUsesExcept(dotWait.getResult(), dotWait);
+  }
 }
 
 Value PipelinePass::getRemoteCTAId(OpBuilder &b, Location loc,
@@ -1752,7 +1749,7 @@ void PipelinePass::emitConsumerRelease(Value mbarTensor,
                        std::accumulate(CTASplitNum.begin(), CTASplitNum.end(),
                                        1, std::multiplies{});
   auto numConsumerThreads =
-      isa<ttng::DotWaitOp>(lastUserWithLargestStage) ? 128 : 32;
+      isa<ttng::DotAsyncOp>(lastUserWithLargestStage) ? 128 : 32;
   Value _0 = b.create<arith::ConstantIntOp>(loc, 0, 32);
   Value numArrives = b.create<arith::ConstantIntOp>(
       loc, numConsumerThreads / numRemoteCTAs, 32);

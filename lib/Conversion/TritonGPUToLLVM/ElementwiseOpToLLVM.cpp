@@ -375,8 +375,8 @@ const std::string Fp16_to_Fp8E4M3B15(bool has_minx2) {
          ".reg .b16 c<4>;                        \n"
          ".reg .b16 max_val_f16;                 \n"
          ".reg .b32 max_val_f16x2;               \n"
-         "mov.b16 max_val_f16,   0x3F80;         \n"
-         "mov.b32 max_val_f16x2, 0x3F803F80;     \n"
+         "mov.b16 max_val_f16,   0x3F00;         \n"
+         "mov.b32 max_val_f16x2, 0x3F003F00;     \n"
          "and.b32 a0, $1, 0x7fff7fff;            \n"
          "and.b32 a1, $2, 0x7fff7fff;            \n";
   if (has_minx2)
@@ -784,8 +784,32 @@ const std::string Fp16_to_Fp8E4M3Nv = "{ \n"
                                       "cvt.rn.satfinite.e4m3x2.f16x2 $0, $1; \n"
                                       "}";
 
-/* ----- Packed integer to BF16 ------ */
 #ifndef USE_ROCM
+// Fp8E4M3 (x2) -> Fp16 (x2) (packed)
+const std::string Fp8E4M3Nv_to_Bf16 =
+    "{                                       \n"
+    ".reg .b32 a;                            \n"
+    ".reg .f16 a<2>;                         \n"
+    ".reg .b16 b<2>;                         \n"
+    "cvt.rn.f16x2.e4m3x2 a, $1;              \n"
+    "mov.b32 {a0, a1}, a;                    \n"
+    "cvt.bf16.f16 b0, a0;                    \n"
+    "cvt.bf16.f16 b1, a1;                    \n"
+    "mov.b32 $0, {b0, b1};                   \n"
+    "}";
+
+// Bf16 (x2) -> Fp8E4M3 (x2) (packed)
+const std::string Bf16_to_Fp8E4M3Nv =
+    "{                                       \n"
+    ".reg .b16 a<2>;                         \n"
+    ".reg .f32 b<2>;                         \n"
+    "mov.b32 {a0, a1}, $1;                   \n"
+    "cvt.f32.bf16 b0, a0;                    \n"
+    "cvt.f32.bf16 b1, a1;                    \n"
+    "cvt.rn.satfinite.e4m3x2.f32 $0, b0, b1; \n"
+    "}";
+
+/* ----- Packed integer to BF16 ------ */
 const std::string S8_to_Bf16 =
     "{                                           \n"
     ".reg .s8 s<4>;                              \n"
@@ -1243,10 +1267,15 @@ struct FpToFpOpConversion
         {{F16TyID, F8E5M2TyID}, Fp16_to_Fp8E5M2},
         // F8 -> BF16
         {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
+#ifndef USE_ROCM
+        {{F8E4M3TyID, BF16TyID}, Fp8E4M3Nv_to_Bf16},
+#endif
         // BF16 -> F8
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
+#ifndef USE_ROCM
+        {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},
+#endif
     };
-
     int inVecWidthBits = 32;
     int outVecWidthBits = 32;
     if (srcTy.isFloat8E4M3FNUZ()) {
@@ -1287,26 +1316,28 @@ struct FpToFpOpConversion
                                    Location loc) const {
     auto srcElementType = getElementType(op.getFrom());
     auto dstElementType = getElementType(op.getResult());
-    int numElements = 4;
+
+    size_t numElements = 4;
     if (srcElementType.isFloat8E4M3FNUZ() ||
         dstElementType.isFloat8E4M3FNUZ()) {
       numElements = 2;
     }
-    assert(operands.size() % numElements == 0 &&
-           "FP8 casting only support tensors with aligned sizes");
     bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
                                      isDstFP32 ? f16_ty : dstElementType);
     SmallVector<Value> inVals;
-    for (unsigned i = 0; i < numElements; i++) {
+    for (unsigned i = 0; i < std::min(numElements, operands.size()); i++) {
       inVals.push_back(operands[i][0]);
     }
     if (isSrcFP32)
       for (Value &v : inVals)
         v = convertFp32ToFp16(loc, rewriter, v);
+    inVals.resize(numElements,
+                  undef(typeConverter->convertType(srcElementType)));
     SmallVector<Value> outVals = cvtFunc(loc, rewriter, inVals);
     assert(outVals.size() == inVals.size());
+    outVals.resize(std::min(numElements, operands.size()));
     if (isDstFP32)
       for (Value &v : outVals)
         v = convertFp16ToFp32(loc, rewriter, v);
@@ -1329,18 +1360,17 @@ Value EmitDualBF16ElementwiseOp(Location loc,
 }
 
 struct CmpIOpConversion
-    : public ElementwiseOpConversionBase<triton::gpu::CmpIOp,
-                                         CmpIOpConversion> {
-  using Base =
-      ElementwiseOpConversionBase<triton::gpu::CmpIOp, CmpIOpConversion>;
+    : public ElementwiseOpConversionBase<arith::CmpIOp, CmpIOpConversion> {
+  using Base = ElementwiseOpConversionBase<arith::CmpIOp, CmpIOpConversion>;
   using Base::Base;
   using Adaptor = typename Base::OpAdaptor;
 
   // An interface to support variant DestOp builder.
-  SmallVector<LLVM::ICmpOp>
-  createDestOps(triton::gpu::CmpIOp op, OpAdaptor adaptor,
-                ConversionPatternRewriter &rewriter, Type elemTy,
-                MultipleOperandsRange operands, Location loc) const {
+  SmallVector<LLVM::ICmpOp> createDestOps(arith::CmpIOp op, OpAdaptor adaptor,
+                                          ConversionPatternRewriter &rewriter,
+                                          Type elemTy,
+                                          MultipleOperandsRange operands,
+                                          Location loc) const {
     return {rewriter.create<LLVM::ICmpOp>(
         loc, elemTy, ArithCmpIPredicateToLLVM(op.getPredicate()),
         operands[0][0], operands[0][1])};
@@ -1371,16 +1401,14 @@ struct CmpIOpConversion
 };
 
 struct CmpFOpConversion
-    : public ElementwiseOpConversionBase<triton::gpu::CmpFOp,
-                                         CmpFOpConversion> {
-  using Base =
-      ElementwiseOpConversionBase<triton::gpu::CmpFOp, CmpFOpConversion>;
+    : public ElementwiseOpConversionBase<arith::CmpFOp, CmpFOpConversion> {
+  using Base = ElementwiseOpConversionBase<arith::CmpFOp, CmpFOpConversion>;
   using Base::Base;
   using Adaptor = typename Base::OpAdaptor;
 
   // An interface to support variant DestOp builder.
   static SmallVector<LLVM::FCmpOp>
-  createDestOps(triton::gpu::CmpFOp op, OpAdaptor adaptor,
+  createDestOps(arith::CmpFOp op, OpAdaptor adaptor,
                 ConversionPatternRewriter &rewriter, Type elemTy,
                 MultipleOperandsRange operands, Location loc) {
     return {rewriter.create<LLVM::FCmpOp>(
@@ -1939,7 +1967,6 @@ void populateElementwiseOpToLLVMPatterns(
     int computeCapability, PatternBenefit benefit) {
 #define POPULATE_TERNARY_OP(SRC_OP, DST_OP)                                    \
   patterns.add<ElementwiseOpConversion<SRC_OP, DST_OP>>(typeConverter, benefit);
-  POPULATE_TERNARY_OP(triton::gpu::SelectOp, LLVM::SelectOp)
   POPULATE_TERNARY_OP(arith::SelectOp, LLVM::SelectOp)
 #undef POPULATE_TERNARY_OP
 
@@ -1953,18 +1980,18 @@ void populateElementwiseOpToLLVMPatterns(
   POPULATE_BINARY_OP(arith::RemFOp, LLVM::FRemOp) // %
   POPULATE_BINARY_OP(arith::RemSIOp, LLVM::SRemOp)
   POPULATE_BINARY_OP(arith::RemUIOp, LLVM::URemOp)
-  POPULATE_BINARY_OP(arith::AndIOp, LLVM::AndOp)    // &
-  POPULATE_BINARY_OP(arith::OrIOp, LLVM::OrOp)      // |
-  POPULATE_BINARY_OP(arith::XOrIOp, LLVM::XOrOp)    // ^
-  POPULATE_BINARY_OP(arith::ShLIOp, LLVM::ShlOp)    // <<
-  POPULATE_BINARY_OP(arith::ShRSIOp, LLVM::AShrOp)  // >>
-  POPULATE_BINARY_OP(arith::ShRUIOp, LLVM::LShrOp)  // >>
-  POPULATE_BINARY_OP(arith::MinFOp, LLVM::MinNumOp) // fmin
-  POPULATE_BINARY_OP(arith::MaxFOp, LLVM::MaxNumOp) // fmax
-  POPULATE_BINARY_OP(arith::MinSIOp, LLVM::SMinOp)  // smin
-  POPULATE_BINARY_OP(arith::MaxSIOp, LLVM::SMaxOp)  // smax
-  POPULATE_BINARY_OP(arith::MinUIOp, LLVM::UMinOp)  // umin
-  POPULATE_BINARY_OP(arith::MaxUIOp, LLVM::UMaxOp)  // umax
+  POPULATE_BINARY_OP(arith::AndIOp, LLVM::AndOp)        // &
+  POPULATE_BINARY_OP(arith::OrIOp, LLVM::OrOp)          // |
+  POPULATE_BINARY_OP(arith::XOrIOp, LLVM::XOrOp)        // ^
+  POPULATE_BINARY_OP(arith::ShLIOp, LLVM::ShlOp)        // <<
+  POPULATE_BINARY_OP(arith::ShRSIOp, LLVM::AShrOp)      // >>
+  POPULATE_BINARY_OP(arith::ShRUIOp, LLVM::LShrOp)      // >>
+  POPULATE_BINARY_OP(arith::MinimumFOp, LLVM::MinNumOp) // fmin
+  POPULATE_BINARY_OP(arith::MaximumFOp, LLVM::MaxNumOp) // fmax
+  POPULATE_BINARY_OP(arith::MinSIOp, LLVM::SMinOp)      // smin
+  POPULATE_BINARY_OP(arith::MaxSIOp, LLVM::SMaxOp)      // smax
+  POPULATE_BINARY_OP(arith::MinUIOp, LLVM::UMinOp)      // umin
+  POPULATE_BINARY_OP(arith::MaxUIOp, LLVM::UMaxOp)      // umax
 #undef POPULATE_BINARY_OP
 
 #define POPULATE_UNARY_OP(SRC_OP, DST_OP)                                      \
@@ -2009,162 +2036,4 @@ void populateElementwiseOpToLLVMPatterns(
   // ElementwiseOpConversion<math::ExpOp, math::ExpOp> defined below will call
   // __nv_expf for higher-precision calculation
   patterns.add<ExpOpConversionApprox>(typeConverter, benefit);
-}
-
-struct FPExtOpConversion
-    : ElementwiseOpConversionBase<LLVM::FPExtOp, FPExtOpConversion> {
-  using Base = ElementwiseOpConversionBase<LLVM::FPExtOp, FPExtOpConversion>;
-  using Base::Base;
-  using Adaptor = typename Base::OpAdaptor;
-
-  static bool isLegalOp(LLVM::FPExtOp op) {
-    auto retTy = op.getResult().getType();
-    auto srcTy = op.getOperand().getType();
-    if (retTy.isF32() && srcTy.isF16()) {
-      return false;
-    }
-    return true;
-  }
-
-  SmallVector<Value> createDestOps(LLVM::FPExtOp op, OpAdaptor adaptor,
-                                   ConversionPatternRewriter &rewriter,
-                                   Type elemTy, MultipleOperandsRange operands,
-                                   Location loc) const {
-    return {
-        FpToFpOpConversion::convertFp16ToFp32(loc, rewriter, operands[0][0])};
-  }
-};
-
-struct FPTruncOpConversion
-    : ElementwiseOpConversionBase<LLVM::FPTruncOp, FPTruncOpConversion> {
-  using Base =
-      ElementwiseOpConversionBase<LLVM::FPTruncOp, FPTruncOpConversion>;
-  using Base::Base;
-  using Adaptor = typename Base::OpAdaptor;
-
-  static bool isLegalOp(LLVM::FPTruncOp op) {
-    auto retTy = op.getResult().getType();
-    auto srcTy = op.getOperand().getType();
-    if (retTy.isF16() && srcTy.isF32()) {
-      return false;
-    }
-    return true;
-  }
-
-  SmallVector<Value> createDestOps(LLVM::FPTruncOp op, OpAdaptor adaptor,
-                                   ConversionPatternRewriter &rewriter,
-                                   Type elemTy, MultipleOperandsRange operands,
-                                   Location loc) const {
-    return {
-        FpToFpOpConversion::convertFp32ToFp16(loc, rewriter, operands[0][0])};
-  }
-};
-
-struct TruncOpConversion
-    : ElementwiseOpConversionBase<LLVM::TruncOp, TruncOpConversion> {
-  using Base = ElementwiseOpConversionBase<LLVM::TruncOp, TruncOpConversion>;
-  using Base::Base;
-  using Adaptor = typename Base::OpAdaptor;
-
-  static bool isLegalOp(LLVM::TruncOp op) {
-    auto retTy = op.getResult().getType();
-    auto srcTy = op.getOperand().getType();
-    if (retTy.isInteger(16) && srcTy.isInteger(32)) {
-      return false;
-    }
-    return true;
-  }
-
-  SmallVector<Value> createDestOps(LLVM::TruncOp op, OpAdaptor adaptor,
-                                   ConversionPatternRewriter &rewriter,
-                                   Type elemTy, MultipleOperandsRange operands,
-                                   Location loc) const {
-    PTXBuilder builder;
-    auto &cvt = *builder.create("cvt.u16.u32");
-    auto res = builder.newOperand("=h");
-    auto operand = builder.newOperand(operands[0][0], "r");
-    cvt(res, operand);
-    return {builder.launch(rewriter, loc, i16_ty, false)};
-  }
-};
-
-struct SExtOpConversion
-    : ElementwiseOpConversionBase<LLVM::SExtOp, SExtOpConversion> {
-  using Base = ElementwiseOpConversionBase<LLVM::SExtOp, SExtOpConversion>;
-  using Base::Base;
-  using Adaptor = typename Base::OpAdaptor;
-
-  static bool isLegalOp(LLVM::SExtOp op) {
-    auto retTy = op.getResult().getType();
-    auto srcTy = op.getOperand().getType();
-    if (retTy.isInteger(32) && srcTy.isInteger(16)) {
-      return false;
-    }
-    return true;
-  }
-
-  SmallVector<Value> createDestOps(LLVM::SExtOp op, OpAdaptor adaptor,
-                                   ConversionPatternRewriter &rewriter,
-                                   Type elemTy, MultipleOperandsRange operands,
-                                   Location loc) const {
-    PTXBuilder builder;
-    auto &cvt = *builder.create("cvt.s32.s16");
-    auto res = builder.newOperand("=r");
-    auto operand = builder.newOperand(operands[0][0], "h");
-    cvt(res, operand);
-    return {builder.launch(rewriter, loc, i32_ty, false)};
-  }
-};
-
-struct ZExtOpConversion
-    : ElementwiseOpConversionBase<LLVM::ZExtOp, ZExtOpConversion> {
-  using Base = ElementwiseOpConversionBase<LLVM::ZExtOp, ZExtOpConversion>;
-  using Base::Base;
-  using Adaptor = typename Base::OpAdaptor;
-
-  static bool isLegalOp(LLVM::ZExtOp op) {
-    auto retTy = op.getResult().getType();
-    auto srcTy = op.getOperand().getType();
-    if (retTy.isInteger(32) && srcTy.isInteger(16)) {
-      return false;
-    }
-    return true;
-  }
-
-  SmallVector<Value> createDestOps(LLVM::ZExtOp op, OpAdaptor adaptor,
-                                   ConversionPatternRewriter &rewriter,
-                                   Type elemTy, MultipleOperandsRange operands,
-                                   Location loc) const {
-    PTXBuilder builder;
-    auto &cvt = *builder.create("cvt.u32.u16");
-    auto res = builder.newOperand("=r");
-    auto operand = builder.newOperand(operands[0][0], "h");
-    cvt(res, operand);
-    return {builder.launch(rewriter, loc, i32_ty, false)};
-  }
-};
-
-bool isLegalElementwiseOp(Operation *op) {
-  if (isa<LLVM::FPExtOp>(op)) {
-    return FPExtOpConversion::isLegalOp(cast<LLVM::FPExtOp>(op));
-  } else if (isa<LLVM::FPTruncOp>(op)) {
-    return FPTruncOpConversion::isLegalOp(cast<LLVM::FPTruncOp>(op));
-  } else if (isa<LLVM::TruncOp>(op)) {
-    return TruncOpConversion::isLegalOp(cast<LLVM::TruncOp>(op));
-  } else if (isa<LLVM::SExtOp>(op)) {
-    return SExtOpConversion::isLegalOp(cast<LLVM::SExtOp>(op));
-  } else if (isa<LLVM::ZExtOp>(op)) {
-    return ZExtOpConversion::isLegalOp(cast<LLVM::ZExtOp>(op));
-  }
-  return true;
-}
-
-void populateElementwiseOpToPTXPatterns(
-    TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
-    PatternBenefit benefit) {
-  patterns.add<FPExtOpConversion>(typeConverter, benefit);
-  patterns.add<FPTruncOpConversion>(typeConverter, benefit);
-  patterns.add<TruncOpConversion>(typeConverter, benefit);
-  patterns.add<SExtOpConversion>(typeConverter, benefit);
-  patterns.add<ZExtOpConversion>(typeConverter, benefit);
 }

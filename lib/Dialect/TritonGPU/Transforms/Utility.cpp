@@ -348,6 +348,31 @@ bool canFoldIntoConversion(Operation *op, Attribute targetEncoding) {
 
 //
 
+// Replace ForOp with a new ForOp with extra operands. The YieldOp is not
+// updated and needs to be updated separatly for the loop to be correct.
+scf::ForOp replaceForOpWithNewSignature(OpBuilder &rewriter, scf::ForOp loop,
+                                        ValueRange newIterOperands) {
+  OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPoint(loop);
+
+  // Create a new loop before the existing one, with the extra operands.
+  auto operands = llvm::to_vector<4>(loop.getInitArgs());
+  operands.append(newIterOperands.begin(), newIterOperands.end());
+  scf::ForOp newLoop = rewriter.create<scf::ForOp>(
+      loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(), loop.getStep(),
+      operands);
+  newLoop.getBody()->erase();
+  newLoop.getRegion().getBlocks().splice(
+      newLoop.getRegion().getBlocks().begin(), loop.getRegion().getBlocks());
+  for (Value operand : newIterOperands)
+    newLoop.getBody()->addArgument(operand.getType(), operand.getLoc());
+
+  for (auto it : llvm::zip(loop.getResults(), newLoop.getResults().take_front(
+                                                  loop.getNumResults())))
+    std::get<0>(it).replaceAllUsesWith(std::get<1>(it));
+  return newLoop;
+}
+
 Operation *cloneWithInferType(mlir::OpBuilder &rewriter, Operation *op,
                               IRMapping &mapping) {
   Operation *newOp = rewriter.clone(*op, mapping);
@@ -492,30 +517,6 @@ Value linearize(OpBuilder &b, Location loc, ArrayRef<Value> multiDim,
   return linear;
 }
 
-std::optional<int> getWSAgentId(Operation *op) {
-  int prevAgentId = -1;
-  if (auto attr = op->getAttrOfType<DenseIntElementsAttr>("async_agent")) {
-    for (auto agentId : attr.getValues<int>()) {
-      assert(prevAgentId == -1 && "support at most one agent id");
-      prevAgentId = agentId;
-    }
-  }
-  if (prevAgentId == -1)
-    return std::nullopt;
-  return prevAgentId;
-}
-
-std::optional<int> getWSRoleId(Operation *op) {
-  if (!op->hasAttr("agent.mutex_role"))
-    return std::nullopt;
-  return op->getAttrOfType<IntegerAttr>("agent.mutex_role").getInt();
-}
-
-void setRoleId(Operation *op, int roleId) {
-  auto attr = IntegerAttr::get(IntegerType::get(op->getContext(), 32), roleId);
-  op->setAttr("agent.mutex_role", attr);
-}
-
 namespace {
 
 /// Detect dead arguments in scf.for op by assuming all the values are dead and
@@ -597,7 +598,7 @@ struct ForOpDeadArgElimination : public OpRewritePattern<scf::ForOp> {
         Value yieldOperand =
             forOwner.getBody()->getTerminator()->getOperand(iterIdx);
         markLive(yieldOperand);
-        markLive(forOwner.getIterOperands()[iterIdx]);
+        markLive(forOwner.getInitArgs()[iterIdx]);
       }
     }
     SmallVector<unsigned> deadArg;

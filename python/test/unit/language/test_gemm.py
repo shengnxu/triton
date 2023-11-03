@@ -146,3 +146,8 @@ def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLO
 
     torch.set_printoptions(profile="full")
     assert_close(c, golden, rtol=max(1e-4, 1.5 * golden_rel_err), atol=max(1e-4, 1.5 * golden_abs_err), check_dtype=False)
+
+
+
+
+test_gemm(32, 32, 128, 4, 32, 32, 128)

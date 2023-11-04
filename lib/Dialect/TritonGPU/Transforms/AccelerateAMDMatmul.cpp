@@ -105,11 +105,21 @@ public:
       if (elemType.isBF16()) {
         if (mfmaVersion == 1)
           kDim = 4;
-        if (mfmaVersion == 2)
+        if (mfmaVersion >= 2)
           kDim = 8;
       }
-      if (elemType.isInteger(8))
-        kDim = 8;
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim = 16;
+      }
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 16;
+        }
+        else {
+          kDim = 8;
+        }
+      }
     } else {
       if (elemType.isF32())
         kDim = 4;
@@ -118,11 +128,21 @@ public:
       if (elemType.isBF16()) {
         if (mfmaVersion == 1)
           kDim = 8;
-        if (mfmaVersion == 2)
+        if (mfmaVersion >= 2)
           kDim = 16;
       }
-      if (elemType.isInteger(8))
-        kDim = 16;
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim = 32;
+      }
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 32;
+        }
+        else {
+          kDim = 16;
+        }
+      }      
     }
     assert(kDim != -1);
     assert(nonKDim != -1);
@@ -234,7 +254,8 @@ public:
     ModuleOp m = getOperation();
 
     mlir::RewritePatternSet patterns(context);
-    if (matrixCoreVersion == 1 || matrixCoreVersion == 2)
+    if (matrixCoreVersion == 1 || matrixCoreVersion == 2 ||
+        matrixCoreVersion == 3)
       patterns.add<::BlockedToMFMA>(context, matrixCoreVersion,
                                     matrixInstructionSize);
     if (applyPatternsAndFoldGreedily(m, std::move(patterns)).failed()) {

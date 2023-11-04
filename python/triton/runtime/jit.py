@@ -247,7 +247,13 @@ class JITFunction(KernelInterface[T]):
         tys = {
             "bool": "i1",
             "float8e4nv": "fp8e4nv",
+            "float8_e4m3fn": "fp8e4nv",
+            "float8e4b8": "fp8e4b8",
+            "float8_e4m3fnuz": "fp8e4b8",
             "float8e5": "fp8e5",
+            "float8_e5m2": "fp8e5",
+            "float8e5b16": "fp8e5b16",
+            "float8_e5m2fnuz": "fp8e5b16",
             "float8e4b15": "fp8e4b15",
             "float8e4b15x4": "fp8e4b15x4",
             "float16": "fp16",
@@ -383,20 +389,20 @@ def {self.fn.__name__}({args_signature}grid=None, num_warps=None, num_ctas=1, nu
         device_type = self._conclude_device_type(device_types, {pinned_memory_flags})
 
     device_backend = None
-    if device_type not in ['cuda', 'hip']:
+    if device_type not in ['cuda']:
         device_backend = get_backend(device_type)
         if device_backend is None:
             raise ValueError('Cannot find backend for ' + device_type)
 
     if device is None:
-        if device_type in ['cuda', 'hip']:
+        if device_type in ['cuda']:
             device = get_current_device()
             set_current_device(device)
         else:
             device = device_backend.get_current_device()
             device_backend.set_current_device(device)
     if stream is None and not warmup:
-        if device_type in ['cuda', 'hip']:
+        if device_type in ['cuda']:
             stream = get_cuda_stream(device)
         else:
             stream = device_backend.get_stream()

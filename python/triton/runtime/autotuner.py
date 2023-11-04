@@ -100,7 +100,7 @@ class Autotuner(KernelInterface):
                 key_values.append(kwargs[name])
             key = tuple(key_values)
 
-        return self.cache[key] if key in self.cache else Config({})
+        return self.best_config
 
 
     def run(self, *args, **kwargs):
@@ -208,11 +208,12 @@ class Config:
         for k, v in self.kwargs.items():
             res.append(f'{k}: {v}')
         res.append(f'num_warps: {self.num_warps}')
-        res.append(f'num_ctas: {self.num_ctas}')
+        ## Comment out Hopper specific parameters
+        #res.append(f'num_ctas: {self.num_ctas}')
         res.append(f'num_stages: {self.num_stages}')
-        res.append(
-            f'enable_warp_specialization: {self.enable_warp_specialization}')
-        res.append(f'enable_persistent: {self.enable_persistent}')
+        #res.append(
+        #    f'enable_warp_specialization: {self.enable_warp_specialization}')
+        #res.append(f'enable_persistent: {self.enable_persistent}')
         return ', '.join(res)
 
 

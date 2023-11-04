@@ -71,13 +71,14 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
 
     if a_is_f8:
         a_type = tl.float8e5b16
-        raw_data = torch.randn((SIZE,), dtype=torch.float32, device='cuda') * 10
+        raw_data = torch.randn((SIZE,), dtype=torch.float32, device='cuda')
         a = torch.empty_like(raw_data, dtype=torch.int8)
-        a_f32 = raw_data
+        a_f32 = torch.empty_like(raw_data)
 
         n_elements = raw_data.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
         copy_kernel[grid](raw_data, triton.reinterpret(a, a_type), n_elements, BLOCK_SIZE=1024)
+        copy_kernel[grid](triton.reinterpret(a, a_type), a_f32, n_elements, BLOCK_SIZE=1024)
         b_f32 = torch.randn((SIZE,), device = 'cuda', dtype=torch.float32)
 
         print(f'a = {a_f32}')

@@ -463,11 +463,11 @@ inout_dtype = {
         x_vals = get_x_vals(),
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
-        line_vals=['rocblas', 'triton(fp16)', 'triton(int8)', 'triton(fp8e4)', 'triton(fp8e5)'],
+        line_vals=['rocblas', 'triton(fp16)', 'triton(bf16)', 'triton(int8)', 'triton(fp8e4)', 'triton(fp8e5)'],
         # Label name for the lines
-        line_names=["rocBLAS", "Triton.Fp16", "Triton.Int8", "Triton.Fp8E4", "Triton.Fp8E5"],
+        line_names=["rocBLAS.Fp16", "Triton.Bf16", "Triton.Fp16", "Triton.Int8", "Triton.Fp8E4", "Triton.Fp8E5"],
         # Line styles
-        styles=[('green', '-'), ('blue', '-'), ('red', 'dashed'), ('yellow', 'solid'), ('black', 'dotted')],
+        styles=[('green', '-'), ('purple', '-'), ('blue', '-'), ('red', 'dashed'), ('yellow', 'solid'), ('black', 'dotted')],
         ylabel="TFLOPS",  # Label name for the y-axis
         plot_name="matmul-performance",  # Name for the plot, used also as a file name for saving the plot.
         args={},

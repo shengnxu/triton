@@ -437,10 +437,10 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
 
 def get_type(provider):
     res = re.findall(r'\(.*?\)', provider)
-    return res[1:-1]
+    return res[0][1:-1]
 
 def get_x_vals():
-    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 15)]
 
     return x_vals
 
@@ -461,9 +461,9 @@ inout_dtype = {
         # Possible values for `line_arg`
         line_vals=['rocblas', 'triton(fp16)', 'triton(int8)', 'triton(fp8e4)', 'triton(fp8e5)'],
         # Label name for the lines
-        line_names=["rocBLAS", "Fp16", "Int8", "Fp8E4", "Fp8E5"],
+        line_names=["rocBLAS", "Triton.Fp16", "Triton.Int8", "Triton.Fp8E4", "Triton.Fp8E5"],
         # Line styles
-        styles=[('green', '-'), ('blue', '-'), ('red', '+'), ('yellow', '*'), ('black', '#')],
+        styles=[('green', '-'), ('blue', '-'), ('red', 'dashed'), ('yellow', 'solid'), ('black', 'dotted')],
         ylabel="TFLOPS",  # Label name for the y-axis
         plot_name="matmul-performance",  # Name for the plot, used also as a file name for saving the plot.
         args={},

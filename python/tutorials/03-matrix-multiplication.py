@@ -157,6 +157,7 @@ import triton.language as tl
 import sys
 import argparse
 import pytest
+import re
 
 # input_type = torch.float8_e4m3fnuz
 # input_type = torch.float8_e5m2fnuz
@@ -314,7 +315,7 @@ def leaky_relu(x):
 # and (1) checks any shape constraint; (2) allocates the output; (3) launches the above kernel.
 
 
-def matmul(a, b, c, activation="", dtype="float16"):
+def matmul(a, b, c, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     # assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -334,45 +335,57 @@ def matmul(a, b, c, activation="", dtype="float16"):
         ACTIVATION=activation,
     )
 
+TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E4B8 = hasattr(torch, 'float8_e4m3fnuz')
+tl_to_torch_types = {
+    tl.float16: torch.float16,
+    tl.bfloat16: torch.bfloat16,
+    tl.float32: torch.float32,
+    tl.int8: torch.int8,
+}
+if TORCH_HAS_FP8E5B16:
+    tl_to_torch_types[tl.float8e5b16] = torch.float8_e5m2fnuz
+if TORCH_HAS_FP8E4B8:
+    tl_to_torch_types[tl.float8e4b8] = torch.float8_e4m3fnuz
 
-name_to_torch_types = {
-    'int8': torch.int8,
-    'float16': torch.float16,
-    'float32': torch.float32,
-    'bfloat16': torch.bfloat16,
-    # 'fp8e4b8': torch.float8_e4m3fnuz,
-    # 'fp8e5b16': torch.float8_e5m2fnuz,
-    # 'fp8e4': torch.float8_e4m3fn,
-    # 'fp8e5': torch.float8_e5m2,
+name_to_tl_types = {
+    'int8': tl.int8,
+    'fp16': tl.float16,
+    'fp32': tl.float32,
+    'bf16': tl.bfloat16,
+    'fp8e4': tl.float8e4b8,
+    'fp8e5': tl.float8e5b16,
 }
 
-def gen_input(M, N, d_type, seed, device='cuda'):
-    name_to_triton_types = {
-        'int8': tl.int8,
-        'float16': tl.float16,
-        'float32': tl.float32,
-        'bfloat16': tl.bfloat16,
-        # 'fp8e4b8': tl.float8e4b8,
-        # 'fp8e5b16': tl.float8e5b16,
-        'fp8e4': tl.float8e4nv,
-        'fp8e5': tl.float8e5,
-    }
-    
+def gen_input(M, N, ty_name, seed, device='cuda'):
+    d_type = name_to_tl_types[ty_name]
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
     raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
-    if 'fp8' in d_type: # d_type is float8
-        assert d_type in name_to_torch_types
-        torch_f8 = raw_data.to(name_to_torch_types[d_type])
-        # input = torch_f8
-        input = triton.reinterpret(torch_f8, name_to_triton_types[d_type])
-        input_f16 = torch_f8.to(torch.float16)
-    else:
-        input = raw_data.to(name_to_torch_types[d_type])
+    if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
+        (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) or not d_type.is_fp8():
+        input = raw_data.to(tl_to_torch_types[d_type])
         input_f16 = input.to(torch.float16)
+    else:
+        f8_tensor = raw_data.to(torch.int8)
+        # keep only two bits of exponent to avoid overflow
+        f8_tensor = f8_tensor & 0b00111111
+        input = triton.reinterpret(f8_tensor, d_type)
+        input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        n_elements = raw_data.numel()
+        copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
 
     return input, input_f16
-
 
 # %%
 # Unit Test
@@ -389,14 +402,18 @@ def gen_input(M, N, d_type, seed, device='cuda'):
                                 ('bfloat16', 'bfloat16'),
                                 ('float16', 'float32'),
                                 ('float32', 'float32'),
-                                ('int8', 'int8')]]
+                                ('fp8e4b8', 'float16'),
+                                ('fp8e5b16', 'float16'),
+                                ('int8', 'int8'),
+                                ('int8', 'int32')]]
 )
 def test_correctness(M, N, K, in_dtype, out_dtype):
     a, a_fp16 = gen_input(M, K, in_dtype, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, in_dtype, 2, device='cuda')
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[out_dtype])
-    matmul(a, b, c, activation="", dtype=in_dtype)
+    tl_out_dtype = name_to_tl_types[out_dtype]
+    c = torch.empty((M, N), device=a.device, dtype=tl_to_torch_types[tl_out_dtype])
+    matmul(a, b, c, activation="")
     torch_output = torch.matmul(a_fp16, b_fp16)
     print(f"triton_output={c}")
     print(f"torch_output={torch_output}")
@@ -418,14 +435,23 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
 # We can now compare the performance of our kernel against that of cuBLAS. Here we focus on square matrices,
 # but feel free to arrange this script as you wish to benchmark any other matrix shape.
 
-global verbose
-verbose = False
+def get_type(provider):
+    res = re.findall(r'\(.*?\)', provider)
+    return res[1:-1]
 
 def get_x_vals():
     x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
 
     return x_vals
 
+inout_dtype = {
+    'int8': torch.int8,
+    'fp16': torch.float16,
+    'fp32': torch.float32,
+    'bf16': torch.bfloat16,
+    'fp8e4': torch.float16,
+    'fp8e5': torch.float16,
+}
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -433,27 +459,36 @@ def get_x_vals():
         x_vals = get_x_vals(),
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot
         # Possible values for `line_arg`
-        line_vals=['rocblas', 'triton'],
+        line_vals=['rocblas', 'triton(fp16)', 'triton(int8)', 'triton(fp8e4)', 'triton(fp8e5)'],
         # Label name for the lines
-        line_names=["rocBLAS", "Triton"],
+        line_names=["rocBLAS", "Fp16", "Int8", "Fp8E4", "Fp8E5"],
         # Line styles
-        styles=[('green', '-'), ('blue', '-')],
+        styles=[('green', '-'), ('blue', '-'), ('red', '+'), ('yellow', '*'), ('black', '#')],
         ylabel="TFLOPS",  # Label name for the y-axis
         plot_name="matmul-performance",  # Name for the plot, used also as a file name for saving the plot.
         args={},
     )
 )
 def benchmark(M, N, K, provider):
-    input_datatype = 'int8'
-    a, a_fp16 = gen_input(M, K, input_datatype, 1, device='cuda')
-    b, b_fp16 = gen_input(K, N, input_datatype, 2, device='cuda')
+    if provider == "rocblas":
+        in_dtype = "fp16"
+    else:
+        assert "triton" in provider
+        in_dtype = get_type(provider)
+    out_dtype = inout_dtype[in_dtype]
+
+    a, a_fp16 = gen_input(M, K, in_dtype, 1, device='cuda')
+    b, b_fp16 = gen_input(K, N, in_dtype, 2, device='cuda')
+
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=name_to_torch_types[input_datatype])
+    c = torch.empty((M, N), device=a.device, dtype=out_dtype)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'rocblas':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: torch.matmul(a_fp16, b_fp16), quantiles=quantiles)
-    if provider == 'triton':
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, activation="", dtype=input_datatype), quantiles=quantiles)
+    else: # triton, different data types
+        assert "triton" in provider
+
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: matmul(a, b, c, activation=""), quantiles=quantiles)
         global verbose
         if verbose:
             print(f'SIZE: {M},{N},{K}   Best tuning config: ({matmul_kernel.get_best_config(M, N, K)})')

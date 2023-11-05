@@ -398,12 +398,12 @@ def gen_input(M, N, ty_name, seed, device='cuda'):
                   (128, 128, 64), (64, 128, 128), (32, 128, 64),
                   (64, 64, 32), (32, 32, 128), (128, 128, 64),
                    (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
-    for in_dtype, out_dtype in [('float16', 'float16'),
-                                ('bfloat16', 'bfloat16'),
-                                ('float16', 'float32'),
-                                ('float32', 'float32'),
-                                ('fp8e4b8', 'float16'),
-                                ('fp8e5b16', 'float16'),
+    for in_dtype, out_dtype in [('fp16', 'fp16'),
+                                ('bf16', 'bf16'),
+                                ('fp16', 'fp32'),
+                                ('fp32', 'fp32'),
+                                ('fp8e4', 'fp16'),
+                                ('fp8e5', 'fp16'),
                                 ('int8', 'int8'),
                                 ('int8', 'int32')]]
 )

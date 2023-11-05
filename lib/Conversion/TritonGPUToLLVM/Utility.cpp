@@ -282,14 +282,6 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
                             Value val, Value i, int strideInt, NVVM::ShflKind mode,
                             Value clamp, Value laneId = Value()) {
   unsigned bits = val.getType().getIntOrFloatBitWidth();
-  //int stride = i.cast<unsigned>();
-  //int stride = i.dyn_cast<int>();
-  //int stride = i.cast<int>().getValue().getSExtValue();
-  //int stride = i.Value();
-  //constantOp.getValue().cast<IntegerAttr>().getValue().getSExtValue();
-  //unsigned strideint = i.cast<IntegerAttr>().getValue().getSExtValue();
-  //auto intAttr = i.dyn_cast_or_null<IntegerAttr>();
-  //auto strideint = intAttr.getValue().getSExtValue();
 
 #ifdef USE_ROCM
   //On AMD, the ds_swizzle_b32 and ds_permute_b32 instructions work on 32bit/dwords

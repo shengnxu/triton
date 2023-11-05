@@ -442,7 +442,9 @@ def get_type(provider):
     return res[0][1:-1]
 
 def get_x_vals():
-    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 15)]
+    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+
+    x_vals += [(4864, 4096, 8192), (9728, 8192, 65536)]
 
     return x_vals
 

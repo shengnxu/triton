@@ -309,13 +309,13 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
 #ifdef USE_ROCM
   GCNBuilder builder;
 
-  auto permute = [&](Value lineId, StringRef permuteInstStr) {
+  auto permute = [&](Value lane, StringRef permuteInstStr) {
     assert(permuteInstStr == "ds_permute_b32" ||
            permuteInstStr == "ds_bpermute_b32");
     // Multiple lineId by 4. (More on permute instruction semantics:
     // https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi200-cdna2-instruction-set-architecture.pdf#page=180
     Value byteOffset = i32_val(2);
-    Value permuteAddr = shl(lineId, byteOffset);
+    Value permuteAddr = shl(lane, byteOffset);
     auto shfl = builder.create(permuteInstStr.str());
     auto dOpr = builder.newOperand("=v");
     auto addrOpr = builder.newOperand(permuteAddr, "v");

@@ -89,17 +89,7 @@ class Autotuner(KernelInterface):
         except OutOfResources:
             return [float('inf'), float('inf'), float('inf')]
 
-    def get_best_config(self, *args, **kwargs):
-        if len(args) > 0:
-            key = tuple(args)
-        else:
-            key_names = [self.arg_names[i] for i in self.key_idx]
-            key_values = []
-            for name in key_names:
-                assert (name in kwargs)
-                key_values.append(kwargs[name])
-            key = tuple(key_values)
-
+    def get_best_config(self):
         return self.best_config
 
 

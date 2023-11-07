@@ -1352,8 +1352,8 @@ def dot(lhs: tl.tensor,
     # hip for now converts fp8 to fp16 for mixed input
     if is_hip():
         fp8_supported = gpu_matrix_core_version() == 3
-        lhs_fp8 = lhs.type.scalar.is_fp8()
-        rhs_fp8 = rhs.type.scalar.is_fp8()
+        lhs_fp8 = lhs.type.scalar.is_fp8e4b8() or lhs.type.scalar.is_fp8e5b16()
+        rhs_fp8 = rhs.type.scalar.is_fp8e4b8() or rhs.type.scalar.is_fp8e5b16()
         supported_fp8_dot = fp8_supported and lhs_fp8 and rhs_fp8
         if not supported_fp8_dot and lhs_fp8:
             lhs = cast(lhs, tl.float16, builder)

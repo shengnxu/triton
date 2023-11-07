@@ -1075,15 +1075,16 @@ if TORCH_HAS_FP8E5B16:
 if TORCH_HAS_FP8E4B8:
     tl_to_torch_types[tl.float8e4b8] = torch.float8_e4m3fnuz
 
-@triton.jit
-def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    input = tl.load(input_ptr + offsets, mask=mask)
-    output = input
-    tl.store(output_ptr + offsets, output, mask=mask)
 
 def gen_input(M, N, d_type, seed, device='cuda'):
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     if d_type == tl.float16:

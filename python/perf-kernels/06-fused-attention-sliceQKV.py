@@ -22,61 +22,6 @@ import triton.language as tl
 def max_fn(x, y):
     return tl.math.max(x, y)
 
-@triton.jit
-def _attn_fwd_inner(
-    acc, l_i, m_i, q,
-    K_block_ptr, V_block_ptr,
-    start_m,
-    BLOCK_M: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    STAGE: tl.constexpr, # == 3
-    offs_m: tl.constexpr,
-    offs_n: tl.constexpr,
-    N_CTX,
-    pre_load_v: tl.constexpr,
-):
-    # range of values handled by this stage
-    #if STAGE == 1:
-    #    lo, hi = 0, start_m * BLOCK_M
-    #elif STAGE == 2:
-    #    lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
-    #    lo = tl.multiple_of(lo, BLOCK_M)
-    #    K_block_ptr = tl.advance(K_block_ptr, (0, lo))
-    #    V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
-    # causal = False
-    #else:
-    lo, hi = 0, N_CTX
-    # loop over k, v and update accumulator
-    for start_n in range(lo, hi, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
-        # -- compute qk ----
-        k = tl.load(K_block_ptr)
-        if pre_load_v:
-            v = tl.load(V_block_ptr)
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        #if STAGE == 2:
-        #    mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-        #    qk = tl.where(mask, qk, float("-inf"))
-        qk += tl.dot(q, k)
-        m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        qk = qk - m_ij[:, None]
-        p = tl.math.exp2(qk)
-        # -- update output accumulator --
-        alpha = tl.math.exp2(m_i - m_ij)
-        acc = acc * alpha[:, None]
-        if not pre_load_v:
-            v = tl.load(V_block_ptr)
-        acc += tl.dot(p.to(tl.float16), v)
-        # -- update m_i and l_i
-        l_ij = tl.sum(p, 1)
-        l_i = l_i * alpha + l_ij
-        # update m_i and l_i
-        m_i = m_ij
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i
-
 
 @triton.autotune(
    configs=[

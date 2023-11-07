@@ -132,9 +132,11 @@ class Autotuner(KernelInterface):
         full_nargs = {**self.nargs, **kwargs, **self.best_config.kwargs}
         if config.pre_hook is not None:
             config.pre_hook(full_nargs)
-        return self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages,
-                           num_ctas=config.num_ctas,
-                           enable_warp_specialization=config.enable_warp_specialization, **kwargs, **config.kwargs)
+        ret = self.fn.run(*args, num_warps=config.num_warps, num_stages=config.num_stages,
+                          num_ctas=config.num_ctas,
+                          enable_warp_specialization=config.enable_warp_specialization, **kwargs, **config.kwargs)
+        self.nargs = None
+        return ret
 
     def prune_configs(self, kwargs):
         pruned_configs = self.configs
@@ -208,11 +210,12 @@ class Config:
         for k, v in self.kwargs.items():
             res.append(f'{k}: {v}')
         res.append(f'num_warps: {self.num_warps}')
-        res.append(f'num_ctas: {self.num_ctas}')
+        ## Comment out Hopper specific parameters
+        #res.append(f'num_ctas: {self.num_ctas}')
         res.append(f'num_stages: {self.num_stages}')
-        res.append(
-            f'enable_warp_specialization: {self.enable_warp_specialization}')
-        res.append(f'enable_persistent: {self.enable_persistent}')
+        #res.append(
+        #    f'enable_warp_specialization: {self.enable_warp_specialization}')
+        #res.append(f'enable_persistent: {self.enable_persistent}')
         return ', '.join(res)
 
 

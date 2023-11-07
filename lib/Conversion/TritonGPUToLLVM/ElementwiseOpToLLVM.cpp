@@ -4,6 +4,10 @@ using namespace mlir;
 using namespace mlir::triton;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 
+typedef std::function<SmallVector<Value>(Location, ConversionPatternRewriter &,
+                                         const SmallVector<Value> &)>
+    ConverterT;
+
 /* ----- FP8E5M2 ------ */
 // This data-type is the standard FP8E5M2 format
 
@@ -127,7 +131,7 @@ static SmallVector<Value> convert_val_Fp8_to_Fp16(
 #endif
 
 #ifdef USE_ROCM
-static Value convert_Fp16_to_Fp8E5M2FNUZ_SW(
+static Value Fp16_to_Fp8E5M2FNUZ_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto vi16 = bitcast(v, i16_ty);
   auto e = and_(i16_ty, vi16, int_val(16, 0x7C00));
@@ -154,31 +158,28 @@ static Value convert_Fp16_to_Fp8E5M2FNUZ_SW(
   return extract_element(i8_ty, res, i32_val(1));
 }
 
-static SmallVector<Value> convert_Fp16_to_Fp8E5M2FNUZ_HW(
-  Location loc, ConversionPatternRewriter &rewriter, Value v0, Value v1) {
-  return convert_val_Fp16_to_Fp8(loc, rewriter, v0, v1, "bf8");
+static SmallVector<Value>
+Fp16_to_Fp8E5M2FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  SmallVector<Value> result(4);
+  result[0] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[1]);
+  result[2] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[2]);
+  result[3] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[3]);
+  return result;
 }
 
-static SmallVector<Value>
-Fp16_to_Fp8E5M2FNUZ(Location loc, ConversionPatternRewriter &rewriter,
-                   const SmallVector<Value> &v) {
+static SmallVector<Value> Fp16_to_Fp8E5M2FNUZ_HW(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  const SmallVector<Value>& v) {
+  auto r01 = convert_val_Fp16_to_Fp8(loc, rewriter, v[0], v[1], "bf8");
+  auto r23 = convert_val_Fp16_to_Fp8(loc, rewriter, v[2], v[3], "bf8");
 
+  return {r01[0], r01[1], r23[0], r23[1]};
+}
 
-  SmallVector<Value> result(4);
-  auto ret01 = convert_Fp16_to_Fp8E5M2FNUZ_HW(loc, rewriter, v[0], v[1]);
-  auto ret23 = convert_Fp16_to_Fp8E5M2FNUZ_HW(loc, rewriter, v[2], v[3]);
-  result[0] = ret01[0];
-  result[1] = ret01[1];
-  result[2] = ret23[0];
-  result[3] = ret23[1];
-  return result;
-
-
-  result[0] = convert_Fp16_to_Fp8E5M2FNUZ_SW(loc, rewriter, v[0]);
-  result[1] = convert_Fp16_to_Fp8E5M2FNUZ_SW(loc, rewriter, v[1]);
-  result[2] = convert_Fp16_to_Fp8E5M2FNUZ_SW(loc, rewriter, v[2]);
-  result[3] = convert_Fp16_to_Fp8E5M2FNUZ_SW(loc, rewriter, v[3]);
-  return result;
+ConverterT Fp16_to_Fp8E5M2FNUZ(int computeCapability) {
+  return computeCapability >= 300 ? Fp16_to_Fp8E5M2FNUZ_HW : Fp16_to_Fp8E5M2FNUZ_SW;
 }
 #endif
 
@@ -218,7 +219,7 @@ const std::string Fp8E5M2_to_Fp16 = "{                           \n"
 #endif
 
 #ifdef USE_ROCM
-static Value convert_Fp8E5M2FNUZ_to_Fp16_SW(
+static Value Fp8E5M2FNUZ_to_Fp16_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto fp8x2VecTy = vec_ty(i8_ty, 2);
   Value a = undef(fp8x2VecTy);
@@ -252,29 +253,28 @@ static Value convert_Fp8E5M2FNUZ_to_Fp16_SW(
   return bitcast(o, f16_ty);
 }
 
-static SmallVector<Value> convert_Fp8E5M2FNUZ_to_Fp16_HW(
-  Location loc, ConversionPatternRewriter &rewriter, Value v0, Value v1) {
-  return convert_val_Fp8_to_Fp16(loc, rewriter, v0, v1, "bf8");
+static SmallVector<Value>
+Fp8E5M2FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  SmallVector<Value> result(4);
+  result[0] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[1]);
+  result[2] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[2]);
+  result[3] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[3]);
+  return result;
 }
 
+
 static SmallVector<Value>
-Fp8E5M2FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
+Fp8E5M2FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
+  auto r01 convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "bf8");
+  auto r23 convert_val_Fp8_to_Fp16(loc, rewriter, v[2], v[3], "bf8");
+  return {r01[0], r01[1], r23[0], r23[1]};
+}
 
-  SmallVector<Value> result(4);
-  auto r01 = convert_Fp8E5M2FNUZ_to_Fp16_HW(loc, rewriter, v[0], v[1]);
-  auto r23 = convert_Fp8E5M2FNUZ_to_Fp16_HW(loc, rewriter, v[2], v[3]);
-  result[0] = r01[0];
-  result[1] = r01[1];
-  result[2] = r23[0];
-  result[3] = r23[1];
-
-  result[0] = convert_Fp8E5M2FNUZ_to_Fp16_SW(loc, rewriter, v[0]);
-  result[1] = convert_Fp8E5M2FNUZ_to_Fp16_SW(loc, rewriter, v[1]);
-  result[2] = convert_Fp8E5M2FNUZ_to_Fp16_SW(loc, rewriter, v[2]);
-  result[3] = convert_Fp8E5M2FNUZ_to_Fp16_SW(loc, rewriter, v[3]);
-
-  return result;
+converterT Fp8E5M2FNUZ_to_Fp16(int computeCapability) {
+  return (computeCapability >= 300) ? Fp8E5M2FNUZ_to_Fp16_HW : Fp8E5M2FNUZ_to_Fp16_SW;
 }
 #endif
 
@@ -700,7 +700,7 @@ const std::string Fp16_to_Fp8E4M3B15x4 =
 // more than a single NaN values.
 
 #ifdef USE_ROCM
-static Value convert_Fp8E4M3FNUZ_to_Fp16_SW(
+static Value Fp8E4M3FNUZ_to_Fp16_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto fp8x2VecTy = vec_ty(i8_ty, 2);
   Value a = undef(fp8x2VecTy);
@@ -731,21 +731,24 @@ static Value convert_Fp8E4M3FNUZ_to_Fp16_SW(
   return bitcast(io, f16_ty);
 }
 
-static Value convert_Fp8E4M3FNUZ_to_Fp16_HW(
-  Location loc, ConversionPatternRewriter &rewriter, Value v0, Value v1) {
-  return convert_val_Fp8_to_Fp16(loc, rewriter, v0, v1, "fp8");  
+static SmallVector<Value>
+Fp8E4M3FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
+		   const SmallVector<Value> &v) {
+  SmallVector<Value> result(2);
+  result[0] = Fp8E4M3FNUZ_to_Fp16_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp8E4M3FNUZ_to_Fp16_oneValue(loc, rewriter, v[1]);
+  return result;
 }
 
-// Fp8E4M3FNUZ -> Fp16 (packed)
 static SmallVector<Value>
-Fp8E4M3FNUZ_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
+Fp8E4M3FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  return convert_Fp8E4M3FNUZ_to_Fp16_HW(loc, rewriter, v[0], v[1]);
+  return convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "fp8");  
+}
 
-  SmallVector<Value> result(2);
-  result[0] = convert_Fp8E4M3FNUZ_to_Fp16_SW(loc, rewriter, v[0]);
-  result[1] = convert_Fp8E4M3FNUZ_to_Fp16_SW(loc, rewriter, v[1]);
-  return result;
+static ConverterT
+Fp8E4M3FNUZ_to_Fp16(int computeCapability) {
+  return computeCapability >= 300 ? Fp8E4M3FNUZ_to_Fp16_HW : Fp8E4M3FNUZ_to_Fp16_SW;
 }
 #else
 const std::string Fp8E4M3FNUZ_to_Fp16 =
@@ -767,7 +770,7 @@ const std::string Fp8E4M3FNUZ_to_Fp16 =
 
 // Fp16 -> Fp8E4M3 (packed)
 #ifdef USE_ROCM
-static Value convert_Fp16_to_Fp8E4M3FNUZ_SW(
+static Value Fp16_to_Fp8E4M3FNUZ_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto vi16 = bitcast(v, i16_ty);
   auto e10 = and_(vi16, int_val(16, 0x7C00));
@@ -798,22 +801,25 @@ static Value convert_Fp16_to_Fp8E4M3FNUZ_SW(
 
   return extract_element(i8_ty, res, i32_val(1));
 }
+static SmallVector<Value>
+Fp16_to_Fp8E4M3FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
+		   const SmallVector<Value> &v) {
+  SmallVector<Value> result(2);
+  result[0] = Fp16_to_Fp8E4M3FNUZ_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp16_to_Fp8E4M3FNUZ_oneValue(loc, rewriter, v[1]);
 
-static Value convert_Fp16_to_Fp8E4M3FNUZ_HW(
-  Location loc, ConversionPatternRewriter &rewriter, Value v0, Value v1) {
-  return convert_val_Fp16_to_Fp8(loc, rewriter, v0, v1, "fp8");  
+  return result;
 }
 
 static SmallVector<Value>
-Fp16_to_Fp8E4M3FNUZ(Location loc, ConversionPatternRewriter &rewriter,
+Fp16_to_Fp8E4M3FNUZ_HW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  return convert_Fp16_to_Fp8E4M3FNUZ_HW(loc, rewriter, v0, v1);
+  return convert_val_Fp16_to_Fp8(loc, rewriter, v0, v1, "fp8");  
+}
 
-  SmallVector<Value> result(2);
-  result[0] = convert_Fp16_to_Fp8E4M3FNUZ_SW(loc, rewriter, v[0]);
-  result[1] = convert_Fp16_to_Fp8E4M3FNUZ_SW(loc, rewriter, v[1]);
-
-  return result;
+static ConverterT
+Fp16_to_Fp8E4M3FNUZ(int computeCapability) {
+  return computeCapability >= 300 ? Fp16_to_Fp8E4M3FNUZ_HW : Fp16_to_Fp8E4M3FNUZ_SW;
 }
 #else
 const std::string Fp16_to_Fp8E4M3FNUZ =
@@ -1172,10 +1178,6 @@ inline SmallVector<Value> packI32(const SmallVector<Value> &inValues,
   return outValues;
 }
 
-typedef std::function<SmallVector<Value>(Location, ConversionPatternRewriter &,
-                                         const SmallVector<Value> &)>
-    ConverterT;
-
 static ConverterT makeConverterFromPtx(const std::string &ptxAsm, Type inType,
                                        Type outType,
                                        const int inVecWidthBits = 32,
@@ -1466,27 +1468,36 @@ struct FpToFpOpConversion
         // F8 -> F16
         {{F8E4M3B15TyID, F16TyID}, Fp8E4M3B15_to_Fp16},
         {{F8E4M3FNTyID, F16TyID}, Fp8E4M3B15x4_to_Fp16},
-        {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3FNUZ_to_Fp16},
         {{F8E5M2TyID, F16TyID}, Fp8E5M2_to_Fp16},
 #ifdef USE_ROCM
-        {{F8E5M2FNUZTyID, F16TyID}, Fp8E5M2FNUZ_to_Fp16},
-        // F16 -> F8
+        {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3FNUZ_to_Fp16(computeCapability)},
+        {{F8E5M2FNUZTyID, F16TyID}, Fp8E5M2FNUZ_to_Fp16(computeCapability)},
         {{F16TyID, F8E4M3B15TyID}, Fp16_to_Fp8E4M3B15},
+        {{F16TyID, F8E5M2FNUZTyID}, Fp16_to_Fp8E5M2FNUZ(computeCapability)},
+        {{F16TyID, F8E4M3FNUZTyID}, Fp16_to_Fp8E4M3FNUZ(computeCapability)},
 #else
+        {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3FNUZ_to_Fp16},
         {{F16TyID, F8E4M3B15TyID}, Fp16_to_Fp8E4M3B15(computeCapability >= 80)},
+        {{F16TyID, F8E4M3FNUZTyID}, Fp16_to_Fp8E4M3FNUZ},
 #endif
         {{F16TyID, F8E4M3FNTyID}, Fp16_to_Fp8E4M3B15x4},
-        {{F16TyID, F8E4M3FNUZTyID}, Fp16_to_Fp8E4M3FNUZ},
         {{F16TyID, F8E5M2TyID}, Fp16_to_Fp8E5M2},
-#ifdef USE_ROCM
-        {{F16TyID, F8E5M2FNUZTyID}, Fp16_to_Fp8E5M2FNUZ},
-#endif
+
         // F8 -> BF16
         {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
         // BF16 -> F8
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
     };
 
+    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
+    if (srcMap.count(key) == 0) {
+      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
+                   << "\n";
+      llvm_unreachable("");
+    }
+#ifdef USE_ROCM
+    return srcMap.lookup(key);
+#else
     int inVecWidthBits = 32;
     int outVecWidthBits = 32;
     if (srcTy.isFloat8E4M3FNUZ()) {
@@ -1498,15 +1509,6 @@ struct FpToFpOpConversion
       outVecWidthBits = 16;
     }
 
-    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
-    if (srcMap.count(key) == 0) {
-      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
-                   << "\n";
-      llvm_unreachable("");
-    }
-#ifdef USE_ROCM
-    return srcMap.lookup(key);
-#else
     if (computeCapability < 90 &&
         (srcTy.isFloat8E4M3FNUZ() || dstTy.isFloat8E4M3FNUZ())) {
       llvm::errs() << "Conversion from/to f8e4m3nv is only supported on "

@@ -48,7 +48,9 @@ def ttir_compute_capability_rewrite(mod, arch):
     if _is_cuda(arch):
         pm.add_rewrite_tensor_pointer_pass(arch, False)
     elif is_hip():
-        capability = 90
+        # capability is needed to indicate whether use
+        # HW instruction for type conversion
+        capability = gpu_matrix_core_version() * 100
         pm.add_rewrite_tensor_pointer_pass(capability, True)
     else:
         assert(False, "unsupported target")

@@ -22,6 +22,7 @@ using ttg::SliceEncodingAttr;
 
 SmallVector<unsigned, 2>
 warpsPerTileMFMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
+  return {(unsigned)numWarps, 1};
   // TODO: needs to be updated with appropriate shapePerWarp etc.
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
@@ -186,7 +187,7 @@ public:
 
     bool isTransposed = isChainDot(dotOp);
     mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,
-                                         warpsPerTile, isTransposed, CTALayout);
+                                         warpsPerTile, true, CTALayout);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);

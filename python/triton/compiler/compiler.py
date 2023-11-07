@@ -50,7 +50,8 @@ def ttir_compute_capability_rewrite(mod, arch):
     elif is_hip():
         # capability is needed to indicate whether use
         # HW instruction for type conversion
-        capability = gpu_matrix_core_version() * 100
+        # capability = gpu_matrix_core_version() * 100
+        capability = 90
         pm.add_rewrite_tensor_pointer_pass(capability, True)
     else:
         assert(False, "unsupported target")

@@ -128,7 +128,7 @@ def main():
     print(f'element_num = {SIZE}')
 
     try:
-        test_vec_add(SIZE, torch.float16, a_is_f8 = a_is_fp8)
+        test_vec_add(SIZE, torch.float32, a_is_f8 = a_is_fp8)
     except:
         traceback.print_exc()
         print("FAILED!")

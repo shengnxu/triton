@@ -77,8 +77,8 @@ static SmallVector<Value> convert_val_Fp16_to_Fp8(
   assert(fp8_format == "fp8" or fp8_format == "bf8");
   std::string ins_str = "v_cvt_pk_" + fp8_format + "_f32";
 
-  auto f32_0 = convertFp16ToFp321(loc, rewriter, v0);
-  auto f32_1 = convertFp16ToFp321(loc, rewriter, v1);
+  auto f32_0 = cvtFp16ToFp32(loc, rewriter, v0);
+  auto f32_1 = cvtFp16ToFp32(loc, rewriter, v1);
 
   GCNBuilder builder;
   auto &cvt = *builder.create(ins_str);
@@ -123,8 +123,8 @@ static SmallVector<Value> convert_val_Fp8_to_Fp16(
   auto f32_1 = extract_element(f32_ty, fp32x2Vec, i32_val(1));
 
   SmallVector<Value> ret(2);
-  ret[0] = convertFp32ToFp161(loc, rewriter, f32_0);
-  ret[1] = convertFp32ToFp161(loc, rewriter, f32_1);
+  ret[0] = cvtFp32ToFp16(loc, rewriter, f32_0);
+  ret[1] = cvtFp32ToFp16(loc, rewriter, f32_1);
 
   return ret;
 }
@@ -268,12 +268,12 @@ Fp8E5M2FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
 static SmallVector<Value>
 Fp8E5M2FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  auto r01 convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "bf8");
-  auto r23 convert_val_Fp8_to_Fp16(loc, rewriter, v[2], v[3], "bf8");
+  auto r01 = convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "bf8");
+  auto r23 = convert_val_Fp8_to_Fp16(loc, rewriter, v[2], v[3], "bf8");
   return {r01[0], r01[1], r23[0], r23[1]};
 }
 
-converterT Fp8E5M2FNUZ_to_Fp16(int computeCapability) {
+ConverterT Fp8E5M2FNUZ_to_Fp16(int computeCapability) {
   return (computeCapability >= 300) ? Fp8E5M2FNUZ_to_Fp16_HW : Fp8E5M2FNUZ_to_Fp16_SW;
 }
 #endif
@@ -814,7 +814,7 @@ Fp16_to_Fp8E4M3FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
 static SmallVector<Value>
 Fp16_to_Fp8E4M3FNUZ_HW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  return convert_val_Fp16_to_Fp8(loc, rewriter, v0, v1, "fp8");  
+  return convert_val_Fp16_to_Fp8(loc, rewriter, v[0], v[1], "fp8");  
 }
 
 static ConverterT

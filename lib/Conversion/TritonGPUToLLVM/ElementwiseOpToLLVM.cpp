@@ -161,21 +161,16 @@ static Value Fp16_to_Fp8E5M2FNUZ_oneValue(
 static SmallVector<Value>
 Fp16_to_Fp8E5M2FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  SmallVector<Value> result(4);
+  SmallVector<Value> result(2);
   result[0] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[0]);
   result[1] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[1]);
-  result[2] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[2]);
-  result[3] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[3]);
   return result;
 }
 
 static SmallVector<Value> Fp16_to_Fp8E5M2FNUZ_HW(
   Location loc, ConversionPatternRewriter &rewriter, 
   const SmallVector<Value>& v) {
-  auto r01 = convert_val_Fp16_to_Fp8(loc, rewriter, v[0], v[1], "bf8");
-  auto r23 = convert_val_Fp16_to_Fp8(loc, rewriter, v[2], v[3], "bf8");
-
-  return {r01[0], r01[1], r23[0], r23[1]};
+  return convert_val_Fp16_to_Fp8(loc, rewriter, v[0], v[1], "bf8");
 }
 
 ConverterT Fp16_to_Fp8E5M2FNUZ(int computeCapability) {
@@ -257,11 +252,9 @@ static Value Fp8E5M2FNUZ_to_Fp16_oneValue(
 static SmallVector<Value>
 Fp8E5M2FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  SmallVector<Value> result(4);
+  SmallVector<Value> result(2);
   result[0] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[0]);
   result[1] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[1]);
-  result[2] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[2]);
-  result[3] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[3]);
   return result;
 }
 
@@ -269,9 +262,7 @@ Fp8E5M2FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
 static SmallVector<Value>
 Fp8E5M2FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  auto r01 = convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "bf8");
-  auto r23 = convert_val_Fp8_to_Fp16(loc, rewriter, v[2], v[3], "bf8");
-  return {r01[0], r01[1], r23[0], r23[1]};
+  return convert_val_Fp8_to_Fp16(loc, rewriter, v[0], v[1], "bf8");
 }
 
 ConverterT Fp8E5M2FNUZ_to_Fp16(int computeCapability) {
@@ -1508,6 +1499,16 @@ struct FpToFpOpConversion
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},
 #endif
     };
+
+    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
+    if (srcMap.count(key) == 0) {
+      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
+                   << "\n";
+      llvm_unreachable("");
+    }
+#ifdef USE_ROCM
+    return srcMap.lookup(key);
+#else
     int inVecWidthBits = 32;
     int outVecWidthBits = 32;
     if (srcTy.isFloat8E4M3FNUZ()) {
@@ -1519,15 +1520,6 @@ struct FpToFpOpConversion
       outVecWidthBits = 16;
     }
 
-    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
-    if (srcMap.count(key) == 0) {
-      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
-                   << "\n";
-      llvm_unreachable("");
-    }
-#ifdef USE_ROCM
-    return srcMap.lookup(key);
-#else
     if (computeCapability < 90 &&
         (srcTy.isFloat8E4M3FNUZ() || dstTy.isFloat8E4M3FNUZ())) {
       llvm::errs() << "Conversion from/to f8e4m3nv is only supported on "
@@ -1551,7 +1543,9 @@ struct FpToFpOpConversion
 
     size_t numElements = 4;
     if (srcElementType.isFloat8E4M3FNUZ() ||
-        dstElementType.isFloat8E4M3FNUZ()) {
+        srcElementType.isFloat8E5M2FNUZ() ||
+        dstElementType.isFloat8E4M3FNUZ() ||
+        dstElementType.isFloat8E5M2FNUZ()) {
       numElements = 2;
     }
     bool isSrcFP32 = srcElementType.isF32();

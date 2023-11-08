@@ -1343,10 +1343,18 @@ def dot(lhs: tl.tensor,
         builder: ir.builder) -> tl.tensor:
     def assert_dtypes_valid(lhs_dtype, rhs_dtype, target):
         # Checks for non-cuda archs
-        if not _is_cuda(target):
+        if is_hip():
             assert lhs.dtype == rhs.dtype or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp16()) or \
                 (lhs.type.scalar.is_fp16() and rhs.type.scalar.is_fp8()) or (lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8()), \
                 f"First input ({lhs.dtype}) and second input ({rhs.dtype}) must have the same dtype!"
+            if lhs.type.scalar.is_fp8() and rhs.type.scalar.is_fp8():
+                assert lhs.type.scalar.is_fp8e4b8() or lhs.type.scalar.is_fp8e5b16() or lhs.type.scalar.is_fp8e5(),\
+                    f"Only hip fp8 or f8e5 types are accepted for both inputs of fp8"
+                assert rhs.type.scalar.is_fp8e4b8() or rhs.type.scalar.is_fp8e5b16() or rhs.type.scalar.is_fp8e5(),\
+                    f"Only hip fp8 or f8e5 types are accepted for both inputs of fp8"
+            return
+
+        if not _is_cuda(target):
             return
 
         # Checks for cuda archs
@@ -1382,12 +1390,15 @@ def dot(lhs: tl.tensor,
     # hip for now converts fp8 to fp16 for mixed input
     if is_hip():
         fp8_supported = gpu_matrix_core_version() == 3
+        # gfx940 data type
+        lhs_hip_fp8 = lhs.type.scalar.is_fp8e4b8() or lhs.type.scalar.is_fp8e5b16()
+        rhs_hip_fp8 = rhs.type.scalar.is_fp8e4b8() or rhs.type.scalar.is_fp8e5b16()
         lhs_fp8 = lhs.type.scalar.is_fp8()
         rhs_fp8 = rhs.type.scalar.is_fp8()
-        supported_fp8_dot = fp8_supported and lhs_fp8 and rhs_fp8
-        if not supported_fp8_dot and lhs_fp8:
+        supported_fp8_dot = fp8_supported and lhs_hip_fp8 and rhs_hip_fp8
+        if (not supported_fp8_dot) and lhs_fp8:
             lhs = cast(lhs, tl.float16, builder)
-        if not supported_fp8_dot and rhs_fp8:
+        if (not supported_fp8_dot) and rhs_fp8:
             rhs = cast(rhs, tl.float16, builder)
 
     if lhs.type.scalar.is_int():

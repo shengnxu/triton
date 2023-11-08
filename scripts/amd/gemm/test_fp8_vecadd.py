@@ -38,7 +38,7 @@ def add_kernel(
     # Write x + y back to DRAM.
     tl.store(output_ptr + offsets, output, mask=mask)
 
-fp8_type = tl.float8e4b8
+fp8_type = tl.float8e5b16
 
 def vecadd(a: torch.tensor, b: torch.tensor, a_is_fp8 = False):
     assert a.shape[0] == b.shape[0], "Incompatible dimensions"

@@ -273,6 +273,30 @@ def get_amdgcn_bitcode_paths(gfx_arch: str):
     return amdgcn_bitcode_paths
 
 
+def gpu_matrix_core_version() -> int:
+    """ Determine matrix core type available on current GPU.
+
+        0 means no tensor cores are available
+        1 corresponds to MFMA in CDNA 1 architecture
+        2 corresponds to MFMA in CDNA 2 architecture
+        3 corresponds to MFMA in CDNA 3 architecture
+    """
+
+    arch_info = _triton.get_arch_info()
+    gfx_arch_details = re.search('amd.*', arch_info)
+    if gfx_arch_details is None:
+        return 0
+    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
+    gpu_name = gfx_arch_details[1].split(':')[0]
+    if gpu_name in ['gfx908']:
+        return 1
+    if gpu_name in ['gfx90a']:
+        return 2
+    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
+        return 3
+    return 0
+
+
 def get_amdgpu_arch_fulldetails():
     # print("get_amdgpu_arch_fulldetails")
     """
@@ -299,30 +323,6 @@ def get_amdgpu_arch_fulldetails():
         return {"gfx_triple": arch_triple, "gfx_arch": gfx_arch, "gfx_features": arch_features, "capability": capability}
     except BaseException:
         return None
-
-
-def gpu_matrix_core_version() -> int:
-    """ Determine matrix core type available on current GPU.
-
-        0 means no tensor cores are available
-        1 corresponds to MFMA in CDNA 1 architecture
-        2 corresponds to MFMA in CDNA 2 architecture
-        3 corresponds to MFMA in CDNA 3 architecture
-    """
-
-    arch_info = _triton.get_arch_info()
-    gfx_arch_details = re.search('amd.*', arch_info)
-    if gfx_arch_details is None:
-        return 0
-    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
-    gpu_name = gfx_arch_details[1].split(':')[0]
-    if gpu_name in ['gfx908']:
-        return 1
-    if gpu_name in ['gfx90a']:
-        return 2
-    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
-        return 3
-    return 0
 
 
 def get_kernel_name(src: str, pattern: str) -> str:

@@ -67,11 +67,7 @@ def ttir_compute_capability_rewrite(mod, target):
     if _is_cuda(target):
         pm.add_rewrite_tensor_pointer_pass(target.capability, False)
     elif is_hip():
-        # capability is needed to indicate whether use
-        # HW instruction for type conversion
-        # capability = gpu_matrix_core_version() * 100
-        capability = 90
-        pm.add_rewrite_tensor_pointer_pass(capability, True)
+        pm.add_rewrite_tensor_pointer_pass(target["capability"], True)
     else:
         assert(False, "unsupported target")
     pm.run(mod)
@@ -193,7 +189,7 @@ def ttgir_to_llir(mod, extern_libs, target, tma_infos, waves_per_eu=0):
     if _is_cuda(target):
         return translate_triton_gpu_to_llvmir(mod, target.capability, tma_infos, runtime.TARGET.NVVM, waves_per_eu)
     else:
-        return translate_triton_gpu_to_llvmir(mod, 0, TMAInfos(), runtime.TARGET.ROCDL, waves_per_eu)
+        return translate_triton_gpu_to_llvmir(mod, target["capability"], TMAInfos(), runtime.TARGET.ROCDL, waves_per_eu)
 
 
 # PTX translation

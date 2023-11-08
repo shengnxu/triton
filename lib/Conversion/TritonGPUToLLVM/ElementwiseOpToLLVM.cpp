@@ -10,7 +10,6 @@ typedef std::function<SmallVector<Value>(Location, ConversionPatternRewriter &,
 
 /* ----- FP8E5M2 ------ */
 // This data-type is the standard FP8E5M2 format
-
 #ifdef USE_ROCM
 static SmallVector<Value>
 Fp16_to_Fp8E5M2(Location loc, ConversionPatternRewriter &rewriter,
@@ -48,6 +47,7 @@ const std::string Fp16_to_Fp8E5M2 =
     "}";
 #endif
 
+// ROCM utility functions for data type conversion
 #ifdef USE_ROCM
 static Value cvtFp16ToFp32(Location loc,
                                 ConversionPatternRewriter &rewriter,
@@ -111,7 +111,7 @@ static SmallVector<Value> convert_val_Fp8_to_Fp16(
   auto i32v = bitcast(fp8x4Vec, i32_ty);
 
   GCNBuilder builder1;
-  auto &cvt = *builder1.create("ins_str");
+  auto &cvt = *builder1.create(ins_str);
   auto res = builder1.newOperand("=v");
   auto operand = builder1.newOperand(i32v, "v");
   cvt(res, operand);
@@ -182,6 +182,7 @@ ConverterT Fp16_to_Fp8E5M2FNUZ(int computeCapability) {
   return computeCapability >= 300 ? Fp16_to_Fp8E5M2FNUZ_HW : Fp16_to_Fp8E5M2FNUZ_SW;
 }
 #endif
+
 
 #ifdef USE_ROCM
 static SmallVector<Value>
@@ -801,6 +802,7 @@ static Value Fp16_to_Fp8E4M3FNUZ_oneValue(
 
   return extract_element(i8_ty, res, i32_val(1));
 }
+
 static SmallVector<Value>
 Fp16_to_Fp8E4M3FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
@@ -1405,13 +1407,7 @@ struct FpToFpOpConversion
                                  ConversionPatternRewriter &rewriter,
                                  const Value &v) {
 #ifdef USE_ROCM
-    return convertFp16ToFp32(loc, rewriter, v);
-    // GCNBuilder builder;
-    // auto &cvt = *builder.create("v_cvt_f32_f16");
-    // auto res = builder.newOperand("=v");
-    // auto operand = builder.newOperand(v, "v");
-    // cvt(res, operand);
-    // return builder.launch(rewriter, loc, f32_ty, false);
+    return cvtFp16ToFp32(loc, rewriter, v);
 #else
     PTXBuilder builder;
     auto &cvt = *builder.create("cvt.f32.f16");
@@ -1458,12 +1454,6 @@ struct FpToFpOpConversion
                                  const Value &v) {
 #ifdef USE_ROCM
     return cvtFp32ToFp16(loc, rewriter, v);
-    // GCNBuilder builder;
-    // auto &cvt = *builder.create("v_cvt_f16_f32");
-    // auto res = builder.newOperand("=v");
-    // auto operand = builder.newOperand(v, "v");
-    // cvt(res, operand);
-    // return builder.launch(rewriter, loc, f16_ty, false);
 #else
     PTXBuilder builder;
     auto &cvt = *builder.create("cvt.rn.f16.f32");
@@ -1493,6 +1483,7 @@ struct FpToFpOpConversion
         {{F8E4M3B15TyID, F16TyID}, Fp8E4M3B15_to_Fp16},
         {{F8E4M3FNTyID, F16TyID}, Fp8E4M3B15x4_to_Fp16},
         {{F8E5M2TyID, F16TyID}, Fp8E5M2_to_Fp16},
+        // F16 -> F8
 #ifdef USE_ROCM
         {{F8E4M3FNUZTyID, F16TyID}, Fp8E4M3FNUZ_to_Fp16(computeCapability)},
         {{F8E5M2FNUZTyID, F16TyID}, Fp8E5M2FNUZ_to_Fp16(computeCapability)},
@@ -1506,7 +1497,6 @@ struct FpToFpOpConversion
 #endif
         {{F16TyID, F8E4M3FNTyID}, Fp16_to_Fp8E4M3B15x4},
         {{F16TyID, F8E5M2TyID}, Fp16_to_Fp8E5M2},
-
         // F8 -> BF16
         {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
 #ifndef USE_ROCM
@@ -1518,16 +1508,6 @@ struct FpToFpOpConversion
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},
 #endif
     };
-
-    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
-    if (srcMap.count(key) == 0) {
-      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
-                   << "\n";
-      llvm_unreachable("");
-    }
-#ifdef USE_ROCM
-    return srcMap.lookup(key);
-#else
     int inVecWidthBits = 32;
     int outVecWidthBits = 32;
     if (srcTy.isFloat8E4M3FNUZ()) {
@@ -1539,6 +1519,15 @@ struct FpToFpOpConversion
       outVecWidthBits = 16;
     }
 
+    std::pair<TypeID, TypeID> key = {srcTy.getTypeID(), dstTy.getTypeID()};
+    if (srcMap.count(key) == 0) {
+      llvm::errs() << "Unsupported conversion from " << srcTy << " to " << dstTy
+                   << "\n";
+      llvm_unreachable("");
+    }
+#ifdef USE_ROCM
+    return srcMap.lookup(key);
+#else
     if (computeCapability < 90 &&
         (srcTy.isFloat8E4M3FNUZ() || dstTy.isFloat8E4M3FNUZ())) {
       llvm::errs() << "Conversion from/to f8e4m3nv is only supported on "

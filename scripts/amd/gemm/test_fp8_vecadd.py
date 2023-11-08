@@ -38,12 +38,17 @@ def add_kernel(
     # Write x + y back to DRAM.
     tl.store(output_ptr + offsets, output, mask=mask)
 
-def vecadd(a: torch.tensor, b: torch.tensor):
+fp8_type = tl.float8e4b8
+
+def vecadd(a: torch.tensor, b: torch.tensor, a_is_fp8 = False):
     assert a.shape[0] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
 
-    a_type = tl.float8e5b16
+    a_type = fp8_type
+    a_input = a
+    if a_is_fp8:
+        a_input = triton.reinterpret(a, a_type)
     # Allocates output.
     c = torch.empty_like(b, dtype=torch.float32)
     n_elements = c.numel()
@@ -51,7 +56,7 @@ def vecadd(a: torch.tensor, b: torch.tensor):
     grid = lambda META: (
         triton.cdiv(n_elements, META['BLOCK_SIZE']),)
     add_kernel[grid](
-        triton.reinterpret(a, a_type), b, c,
+        a_input, b, c,
         n_elements, BLOCK_SIZE = 1024,
     )
 
@@ -70,7 +75,7 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
     print("testing sizes: SIZE: {}, ab type: {}, a_is_f8: {}".format(SIZE, ab_type, a_is_f8))
 
     if a_is_f8:
-        a_type = tl.float8e5b16
+        a_type = fp8_type
         raw_data = torch.randn((SIZE,), dtype=torch.float32, device='cuda')
         a = torch.empty_like(raw_data, dtype=torch.int8)
         a_f32 = torch.empty_like(raw_data)
@@ -84,7 +89,7 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
         print(f'a = {a_f32}')
         print(f'b = {b_f32}')
         golden = torch.add(a_f32, b_f32)
-        c = vecadd(a, b_f32)
+        c = vecadd(a, b_f32, a_is_f8)
 
         print(f'gold = {golden}')
         print(f'c = {c}')
@@ -93,7 +98,7 @@ def test_vec_add(SIZE, ab_type, a_is_f8 = False):
         a = torch.randn((SIZE,), device='cuda', dtype=ab_type)
         b = torch.randn((SIZE,), device='cuda', dtype=ab_type)
         golden = torch.add(a, b)
-        c = vecadd(a, b)
+        c = vecadd(a, b, a_is_f8)
         print(f'gold = {golden}')
         print(f'c = {c}')
     

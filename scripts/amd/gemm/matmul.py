@@ -435,7 +435,7 @@ def main():
             TRITON_DIR = os.getenv('TRITON_DIR')
             if TRITON_DIR is not None:
                 driver = os.path.join(TRITON_DIR, 'scripts/amd/gemm', driver)
-            run_cmd = f'python {driver} -m {m} -n {n} -k {k} \
+            run_cmd = f'python3 {driver} -m {m} -n {n} -k {k} \
                         -block_m {block_m} -block_n {block_n} -block_k {block_k} \
                         -group_m {group_m} -split_k {split_k} -num_stages {num_stages} \
                         -num_warps {num_warps} -dtype {dtype_str}'

@@ -3,11 +3,7 @@ set -x
 cd python
 pip uninstall -y triton
 
-bash scripts/amd/clean.sh
-
-export MLIR_ENABLE_DUMP=1
-export LLVM_IR_ENABLE_DUMP=1
-export AMDGCN_ENABLE_DUMP=1
+# bash scripts/amd/clean.sh
 
 export TRITON_USE_ROCM=ON
 

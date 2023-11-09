@@ -1,4 +1,4 @@
-name: AMD Offline Tests
+name: AMD Tests
 
 on:
   workflow_dispatch:
@@ -7,13 +7,34 @@ on:
       - main
       - triton-mlir
 
-jobs:
-  Integration-Tests:
-    runs-on: "ubuntu-latest"
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
 
-    container:
-      image: ubuntu:22.04
-      options: --user root
+jobs:
+  Runner-Preparation:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-required: ${{ steps.set-matrix.outputs.matrix-required }}
+    steps:
+      - name: Prepare runner matrix
+        id: set-matrix
+        run: |
+          if [ x"${{ github.repository }}" == x"ROCmSoftwarePlatform/triton" ]; then
+            echo '::set-output name=matrix-required::[["self-hosted", "rocm"]]'
+          else
+            echo '::set-output name=matrix-required::["ubuntu-latest"]'
+          fi
+
+  Fork-Tests:
+    if: true
+    needs: Runner-Preparation
+
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-required)}}
 
     steps:
       - name: Checkout
@@ -22,39 +43,52 @@ jobs:
       - name: Clear cache
         run: |
           rm -rf ~/.triton
+          rm -rf python/triton.egg-info
+          rm -rf python/.pytest_cache
+          rm -rf python/tests/__pycache__
+          rm -rf python/build
+          rm -rf /tmp/tmp*
+          rm -rf /tmp/triton_upstream
+          rm -rf .pytest_cache
+          rm -rf ./venv_triton_rocm
 
       - name: Update PATH
         run: |
           echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
 
-      - name: Prerequisite
+      - name: Clean runner
         run: |
-          apt update
-          apt install -y libpython3-dev python3-pip git wget
-          # get rocm related utilities
-          wget https://repo.radeon.com/amdgpu-install/5.5/ubuntu/jammy/amdgpu-install_5.5.50500-1_all.deb
-          apt-get install -y ./amdgpu-install_5.5.50500-1_all.deb
-          amdgpu-install -y --usecase=rocm --no-dkms
-          # remove unused packages to free some disk space
-          cp /opt/rocm/llvm/bin/ld.lld .
-          apt purge -y rocblas rocm-llvm
-          mkdir -p /opt/rocm/llvm/bin
-          mv ld.lld /opt/rocm/llvm/bin/ld.lld
-          # install pytorch
-          pip3 install torch==2.0.1 --index-url https://download.pytorch.org/whl/rocm5.4.2
-          # uninstall system triton to eliminate conflicts with testing version
-          pip3 uninstall -y pytorch-triton-rocm
+          pip3 uninstall -y triton
+
+      - name: Set up Python Virtual Environment
+        run: |
+          python3 -m venv ./venv_triton_rocm
+          source ./venv_triton_rocm/bin/activate
+  
+      - name: Install Dependencies
+        run: |
+          source ./venv_triton_rocm/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install ninja wheel pytest pytest-xdist numpy lit autopep8 flake8 isort
+          python -m pip install scipy>=1.7.1
+          python -m pip install cmake==3.24
+          python -m pip install torch==1.13.1 --index-url https://download.pytorch.org/whl/rocm5.2 # important for detecting ROCM!
 
       - name: Install Triton
         run: |
+          source ./venv_triton_rocm/bin/activate
           cd python
-          pip3 install ninja
           # Install in system, because need to override system triton. Otherwise lit tests will use wrong version
-          DEBUG=TRUE TRITON_USE_ROCM=TRUE TRITON_USE_ASSERT_ENABLED_LLVM=TRUE python3 -m pip install --no-build-isolation -vvv -e .
-
+          DEBUG=TRUE TRITON_USE_ROCM=TRUE TRITON_USE_ASSERT_ENABLED_LLVM=TRUE python -m pip install --no-build-isolation -vvv -e .
+      
+      - name: Run Unit Tests
+        run: |
+          source ./venv_triton_rocm/bin/activate
+          pytest -n 32 --capture=tee-sys -rfs --verbose "python/test/unit/language/test_core_amd.py" "python/test/unit/language/test_subprocess.py"
+    
       - name: Run lit tests
         run: |
-          python3 -m pip install lit
+          source ./venv_triton_rocm/bin/activate
           cd python
           LIT_TEST_DIR="build/$(ls build | grep -i cmake)/test"
           if [ ! -d "${LIT_TEST_DIR}" ]; then
@@ -64,6 +98,133 @@ jobs:
 
       - name: Run CXX unittests
         run: |
+          source ./venv_triton_rocm/bin/activate
           cd python
           cd "build/$(ls build | grep -i cmake)"
           ctest
+
+  Upstream-Tests:
+    if: true
+    needs: Runner-Preparation
+
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-required)}}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Clear cache
+        run: |
+          rm -rf ~/.triton
+          rm -rf python/triton.egg-info
+          rm -rf python/.pytest_cache
+          rm -rf python/tests/__pycache__
+          rm -rf python/build
+          rm -rf /tmp/tmp*
+          rm -rf /tmp/triton_upstream
+          rm -rf .pytest_cache
+          rm -rf ./venv_triton_upstream
+
+      - name: Update PATH
+        run: |
+          echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
+
+
+      - name: Clean runner
+        run: |
+          pip3 uninstall -y triton
+
+      - name: Set up Python Virtual Environment
+        run: |
+          python3 -m venv ./venv_triton_upstream
+          source ./venv_triton_upstream/bin/activate
+  
+      - name: Install Dependencies
+        run: |
+          source ./venv_triton_upstream/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install ninja wheel pytest pytest-xdist numpy lit autopep8 flake8 isort
+          python -m pip install scipy>=1.7.1
+          python -m pip install cmake==3.24
+          python -m pip install torch==1.13.1 --index-url https://download.pytorch.org/whl/rocm5.2 # important for detecting ROCM!
+      
+      - name: Check pre-commit
+        # TODO: enable pre-commit tests
+        if: false
+        run: |
+          python -m pip install --upgrade pre-commit
+          python -m pre_commit run --all-files --verbose
+
+      - name: Set branch name
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "BRANCH_NAME=${{ github.head_ref }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          fi
+
+
+      
+      - name: Build Upstream with Branch as Backend
+        run: |
+          source ./venv_triton_upstream/bin/activate
+          set -x
+          ROOT_DIR=`realpath "."`
+          SCRIPT_PATH=$ROOT_DIR/scripts/amd
+
+          # get current branch
+          BRANCH_NAME=${{ env.BRANCH_NAME }}
+          echo $BRANCH_NAME
+          
+          # get the last commit that AMD's fork shares with upstream triton
+          pip install gitpython
+          output=$(python $SCRIPT_PATH/diff_upstream.py --upstream https://github.com/openai/triton --fork https://github.com/ROCmSoftwarePlatform/triton)
+          upstreamcommit_hash_line=$(echo "$output" | grep 'SHARED_COMMIT_HASH=')
+          UPSTREAM_COMMIT_HASH=$(echo "$upstreamcommit_hash_line" | cut -d '=' -f2)
+          echo $UPSTREAM_COMMIT_HASH
+          
+          # check out the upstream at shared last commit
+          UPSTREAM_REPO_DIR=$ROOT_DIR/triton_upstream
+          rm -rf $UPSTREAM_REPO_DIR
+          # git clone --recurse-submodules --branch update_backend_current_ifu https://github.com/micmelesse/triton $UPSTREAM_REPO_DIR
+          git clone --recurse-submodules https://github.com/openai/triton $UPSTREAM_REPO_DIR
+          cd $UPSTREAM_REPO_DIR
+          git checkout $UPSTREAM_COMMIT_HASH
+          git log -1 --pretty=format:"%H, %an, %ad, %s"
+          git apply $SCRIPT_PATH/0001-Use-Gen-Backend-with-Dots-working.patch # apply patch until upstreamed
+          git status
+          
+          # checkout backend in upstream
+          cd $UPSTREAM_REPO_DIR/third_party/amd_hip_backend
+          echo `pwd`
+          git fetch --all
+          git checkout $BRANCH_NAME
+          git log -1 --pretty=format:"%H, %an, %ad, %s"
+          
+          # build upstream with this branch as a backend
+          cd $UPSTREAM_REPO_DIR
+          cd $UPSTREAM_REPO_DIR/python
+          pip uninstall -y triton
+          # pip install -U matplotlib pandas filelock tabulate
+          
+          echo `pwd`
+          export TRITON_CODEGEN_AMD_HIP_BACKEND=1
+          python -m pip install --no-build-isolation -vvv -e .
+
+          # check installation
+          python $SCRIPT_PATH/check_triton.py
+         
+      - name: Test Upstream
+        run: |
+          source ./venv_triton_upstream/bin/activate
+          set -x
+          ROOT_DIR=`realpath "."`
+          cd $ROOT_DIR/triton_upstream
+          git status
+          pytest -n 32 --capture=tee-sys -rfs --verbose "python/test/unit/language/test_core.py"
+
+

@@ -1,0 +1,4 @@
+add_subdirectory(TritonROCM)
+add_subdirectory(TritonGPUROCM)
+add_subdirectory(TritonNvidiaGPUROCM)
+add_subdirectory(NVGPUROCM)

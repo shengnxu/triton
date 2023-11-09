@@ -3,16 +3,19 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # FLAGS
 message(STATUS "HIP_BACKEND_MODE = ${HIP_BACKEND_MODE}")
 set(ROCM_DEFAULT_DIR "/opt/rocm")
-add_definitions( -DROCM_DEFAULT_DIR="${ROCM_DEFAULT_DIR}")
 set(ROCM_LIBRARIES
   ${CMAKE_CURRENT_SOURCE_DIR}/lib/hsa/libhsa-runtime64.so
 )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/include) # Tablegen'd files
+# Preprocessor Defines
+add_definitions( -DROCM_DEFAULT_DIR="${ROCM_DEFAULT_DIR}")
+add_definitions( -DTRITONGPU_DEFAULT_WARPSIZE=64)
 
-add_subdirectory(include)
-add_subdirectory(lib)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gen/include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/gen/include) # Tablegen'd files
+
+add_subdirectory(gen/include)
+add_subdirectory(gen/lib)
 
 
 # shows dependecy of targets
@@ -21,8 +24,8 @@ set_property(GLOBAL PROPERTY GLOBAL_DEPENDS_DEBUG_MODE 1)
 # Python module
 if(TRITON_BUILD_PYTHON_MODULE)
     message(STATUS "Adding HIP Backend Python module")
-    set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-    set(PYTHON_SRC ${PYTHON_SRC_PATH}/rocm_backend_for_triton.cc)
+    set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/gen)
+    set(PYTHON_SRC ${PYTHON_SRC_PATH}/rocm_backend_for_triton.cc ${PYTHON_SRC_PATH}/triton_rocm.cc)
     include_directories("." ${PYTHON_SRC_PATH})
     include_directories(../include)
 
@@ -40,16 +43,25 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
     set(ROCM_EXTENSION_LIBRARIES
             TritonAnalysisROCM
-            TritonTransforms
-            TritonHSACO
-
+            
             # ${dialect_libs}
+            TritonROCMIR
+            TritonROCMTransforms
             TritonGPUROCMIR
             TritonGPUROCMTransforms
+            TritonNvidiaGPUROCMIR
+            TritonNvidiaGPUROCMTransforms
+            NVGPUROCMIR
 
             # ${conversion_libs}
             TritonToTritonGPUROCM
             TritonGPUROCMToLLVM
+            NVGPUROCMToLLVM
+
+            # $(target libs)
+            TritonLLVMROCMIR
+            TritonHSACO
+            TritonPTXROCM
 
             # tests
             # TritonTestAnalysis

@@ -265,7 +265,7 @@ private:
         // benzh@maybe alignment should be passed in.
         // Software swizzling calculates phase based on offset, while hardware
         // swizzling do that based on physical address. Thus only by setting the
-        // alignment to 1024 can ensure the correctness. 
+        // alignment to 1024 can ensure the correctness.
         if (bytes > 256)
           kAlignment = 1024;
         allocation->addBuffer<BufferT::BufferKind::Explicit>(result, bytes,

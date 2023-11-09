@@ -99,7 +99,7 @@ def TTG_InsertSliceOp : TTG_Op<"insert_slice",
   let summary = "insert slice";
 
   let description = [{
-      This operation inserts a tensor `$src` into another tensor `$dst` as specified by the operation’s
+      This operation inserts a tensor `$src` into another tensor `$dst` as specified by the operation's
       `$index` argument and `$axis` attribute.
 
       It returns a copy of `$dst` with the proper slice updated with the value of `$src`.
@@ -255,7 +255,7 @@ def TTG_InsertSliceAsyncOp : TTG_Op<"insert_slice_async",
   let summary = "insert slice async";
 
   let description = [{
-      This operation inserts a tensor `$src` into another tensor `$dst` as specified by the operation’s
+      This operation inserts a tensor `$src` into another tensor `$dst` as specified by the operation's
       `$index` argument and `$axis` attribute.
 
       It returns a copy of `$dst` with the proper slice updated asynchronously with the value of `$src`.

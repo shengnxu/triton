@@ -691,7 +691,7 @@ def FuncOp : TT_Op<"func", [AffineScope, AutomaticAllocationScope, CallableOpInt
     attribute like SymbolRefAttr). An external function declaration (used when
     referring to a function declared in some other module) has no body. While
     the MLIR textual form provides a nice inline syntax for function arguments,
-    they are internally represented as “block arguments” to the first block in
+    they are internally represented as "block arguments" to the first block in
     the region.
 
     Only dialect attribute names may be specified in the attribute dictionaries

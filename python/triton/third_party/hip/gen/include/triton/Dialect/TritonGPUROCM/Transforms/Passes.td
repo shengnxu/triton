@@ -1,0 +1,205 @@
+#ifndef TRITONGPUROCM_PASSES
+#define TRITONGPUROCM_PASSES
+
+include "mlir/Pass/PassBase.td"
+
+def TritonGPUROCMPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
+  let summary = "pipeline";
+
+  let description = [{
+    Replace `LoadOp` in loops by `InsertSliceAsyncOp` instructions that asynchronously construct the data
+    needed at the next iteration
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMPipelinePass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::nvidia_gpu::TritonNvidiaGPUROCMDialect",
+                           "mlir::scf::SCFDialect",
+                           "mlir::arith::ArithDialect"];
+
+  let options = [
+    Option<"numStages", "num-stages",
+           "int32_t", /*default*/"3",
+           "number of pipeline stages">,
+    Option<"numWarps", "num-warps",
+           "int32_t", /*default*/"4",
+           "number of warps per block">,
+    Option<"numCTAs", "num-ctas",
+           "int32_t", /*default*/"1",
+           "number of CTAs per CGA">,
+    Option<"computeCapability", "compute-capability",
+           "int32_t", /*default*/"80",
+           "device compute capability">
+  ];
+}
+
+def TritonGPUROCMStreamPipeline : Pass<"tritongpu-stream-pipeline", "mlir::ModuleOp"> {
+  let summary = "pipeline";
+
+  let description = [{
+    Pipeline global loads through registers to shared memory while computing on previous
+    tile
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMStreamPipelinePass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::scf::SCFDialect",
+                           "mlir::arith::ArithDialect"];
+}
+
+def TritonGPUROCMPrefetch : Pass<"tritongpu-prefetch", "mlir::ModuleOp"> {
+  let summary = "prefetch";
+
+  let description = [{
+    Decompose `DotOp` instructions in loops into several finer-grained `DotOp`
+    that may have their operands constructed at the end of the previous iteration
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMPrefetchPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::scf::SCFDialect",
+                           "mlir::arith::ArithDialect"];
+}
+
+def TritonGPUROCMAccelerateMatmul : Pass<"tritongpu-accelerate-matmul", "mlir::ModuleOp"> {
+  let summary = "accelerate matmul";
+
+  let description = [{
+    Optimize the input/output layout of `dot` instruction to make them compatible hardware accelerators
+    (e.g., Nvidia tensor cores)
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMAccelerateMatmulPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::nvidia_gpu::TritonNvidiaGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+
+  let options = [
+    Option<"computeCapability", "compute-capability",
+           "int32_t", /*default*/"80",
+           "device compute capability">
+  ];
+}
+
+def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir::ModuleOp"> {
+  let summary = "accelerate matmul";
+
+  let description = [{
+    Optimize the input/output layout of `dot` instruction to make them compatible hardware accelerators
+    (e.g., AMD matrix cores)
+  }];
+
+  let constructor = "mlir::createTritonAMDGPUAccelerateMatmulPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+
+  let options = [
+    Option<"archGenerationName", "arch-generation-name",
+           "std::string", /*default=*/"std::string{}",
+           "GFX generation name of target device.">,
+    Option<"matrixInstructionSize", "matrix-instruction-size",
+           "int32_t", /*default*/"0",
+           "enforce matrix instruction MN size">,
+    Option<"enableWmmaTransform", "enable-wmma-transform",
+           "bool", /*default*/"false",
+           "temporary option, required for lit tests only">
+  ];
+}
+
+def TritonGPUROCMOptimizeDotOperands : Pass<"tritongpu-optimize-dot-operands", "mlir::ModuleOp"> {
+  let summary = "fuse transpositions";
+
+  let description = [{
+    Re-arranged layouts of tensors used as matrix multiplication operands so as to promote the use of
+    hardware-accelerated transpositions.
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMOptimizeDotOperandsPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::nvidia_gpu::TritonNvidiaGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+}
+
+def TritonGPUROCMCoalesce: Pass<"tritongpu-coalesce", "mlir::ModuleOp"> {
+  let summary = "coalesce";
+
+  let description = [{
+    TODO
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMCoalescePass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect"];
+}
+
+
+def TritonGPUROCMRemoveLayoutConversions : Pass<"tritongpu-remove-layout-conversions", "mlir::ModuleOp"> {
+  let summary = "remove superfluous layout conversions";
+
+  let description = [{
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMRemoveLayoutConversionsPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+
+}
+
+def TritonGPUROCMOptimizeEpilogue : Pass<"tritongpu-optimize-epilogue", "mlir::ModuleOp"> {
+  let summary = "Optimize epilogue: (1) Store accumulators directly without going thorough SMEM in epilogue.";
+
+  let description = [{
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMOptimizeEpiloguePass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+
+}
+
+def TritonGPUROCMOptimizeThreadLocality : Pass<"tritongpu-optimize-thread-locality", "mlir::ModuleOp"> {
+  let summary = "Reduce the cost of synchronization between threads in an SM";
+
+  let description = [{
+    Today, this optimizes reduction yielded by loop to be thread-local until after the loop completes.
+  }];
+
+  let constructor = "mlir::createTritonGPUROCMOptimizeThreadLocalityPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+}
+
+def TritonGPUROCMReorderInstructions: Pass<"tritongpu-reorder-instructions", "mlir::ModuleOp"> {
+  let summary = "Reorder instructions";
+
+  let description = "This pass reorder instructions so as to (1) decrease register pressure (e.g., by moving "
+                    "conversions from shared memory before their first use) and (2) promote LLVM instruction "
+                    "order more friendly to `ptxas`.";
+
+  let constructor = "mlir::createTritonGPUROCMReorderInstructionsPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+}
+
+def TritonGPUROCMDecomposeConversions: Pass<"tritongpu-decompose-conversions", "mlir::ModuleOp"> {
+  let summary = "Decompose convert[distributed -> dotOperand] into convert[distributed -> shared -> dotOperand]";
+
+  let description = "Decomposing conversions this way makes it possible to use CSE and re-use #shared tensors";
+
+  let constructor = "mlir::createTritonGPUROCMDecomposeConversionsPass()";
+
+  let dependentDialects = ["mlir::triton_rocm::gpu_rocm::TritonGPUROCMDialect",
+                           "mlir::triton_rocm::TritonROCMDialect"];
+}
+
+#endif

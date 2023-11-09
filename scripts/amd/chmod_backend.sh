@@ -1,0 +1,1 @@
+chmod -R 777 python/triton/third_party/hip

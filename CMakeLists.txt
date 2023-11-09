@@ -1,14 +1,23 @@
 cmake_minimum_required(VERSION 3.18)
 
-# build third_party backend for upstream and exit
-# TODO: check if this is working in CI
-if(HIP_BACKEND_MODE)
+# ///////////////////////////////////////////////////// Triton AMD backend Build ///////////////////////////////////////////////////////////////////
+# print all env variables
+execute_process(COMMAND "${CMAKE_COMMAND}" -E environment OUTPUT_VARIABLE ENV_VARS)
+message(STATUS "Environment Variables:\n${ENV_VARS}")
+
+# set a CMake variable to the value of the environment variable
+set(TRITON_CODEGEN_AMD_HIP_BACKEND $ENV{TRITON_CODEGEN_AMD_HIP_BACKEND})
+
+# check if the CMake variable is set and equal to "1"
+if(TRITON_CODEGEN_AMD_HIP_BACKEND AND TRITON_CODEGEN_AMD_HIP_BACKEND STREQUAL "1")
     message(STATUS "ROCM Third Party Backend Mode is ON")
+    set(ENV{TRITONGPU_DEFAULT_WARPSIZE} "64")
     add_subdirectory(python/triton/third_party/hip)
     return()
 endif()
 
-# stand alone build
+
+# ///////////////////////////////////////////////////// Triton AMD Standalone Build ///////////////////////////////////////////////////////////////////
 if(POLICY CMP0116)
 # Introduced in cmake 3.20
 # https://cmake.org/cmake/help/latest/policy/CMP0116.html

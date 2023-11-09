@@ -1,5 +1,6 @@
 #include "triton/Conversion/TritonToTritonGPU/TritonToTritonGPUPass.h"
 
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -42,6 +43,147 @@ template <class Op> struct GenericOpPattern : public OpConversionPattern<Op> {
     rewriter.replaceOpWithNewOp<Op>(op, retTypes, adaptor.getOperands(),
                                     op->getAttrs());
 
+    return success();
+  }
+};
+
+class ArithShLIPattern : public OpConversionPattern<arith::ShLIOp> {
+public:
+  using OpConversionPattern<mlir::arith::ShLIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(mlir::arith::ShLIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto lhs = adaptor.getLhs();
+    auto rhs = adaptor.getRhs();
+
+    mlir::Type elementType = mlir::getElementTypeOrSelf(lhs.getType());
+    unsigned typeWidth = elementType.getIntOrFloatBitWidth();
+    auto constValue = rewriter.create<mlir::arith::ConstantIntOp>(
+        loc, typeWidth, elementType);
+    auto zeroConst =
+        rewriter.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
+
+    if (lhs.getType().isIntOrIndex()) {
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+      auto shiftValue =
+          rewriter.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, zeroConst);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    } else {
+      auto splatValue = rewriter.create<mlir::tensor::SplatOp>(
+          loc, lhs.getType(), constValue);
+      auto zeroValue = rewriter.create<mlir::tensor::SplatOp>(
+          loc, lhs.getType(), zeroConst);
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+      auto shiftValue =
+          rewriter.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, zeroValue);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    }
+    return success();
+  }
+};
+
+class ArithShRUIOpattern : public OpConversionPattern<arith::ShRUIOp> {
+public:
+  using OpConversionPattern<mlir::arith::ShRUIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(mlir::arith::ShRUIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto lhs = adaptor.getLhs();
+    auto rhs = adaptor.getRhs();
+
+    mlir::Type elementType = mlir::getElementTypeOrSelf(lhs.getType());
+    unsigned typeWidth = elementType.getIntOrFloatBitWidth();
+    auto constValue = rewriter.create<mlir::arith::ConstantIntOp>(
+        loc, typeWidth, elementType);
+    auto zeroConst =
+        rewriter.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
+
+    if (lhs.getType().isIntOrIndex()) {
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+      auto shiftValue =
+          rewriter.create<mlir::arith::ShRUIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, zeroConst);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    } else {
+      auto splatValue = rewriter.create<mlir::tensor::SplatOp>(
+          loc, lhs.getType(), constValue);
+      auto zeroValue = rewriter.create<mlir::tensor::SplatOp>(
+          loc, lhs.getType(), zeroConst);
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+      auto shiftValue =
+          rewriter.create<mlir::arith::ShRUIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, zeroValue);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    }
+    return success();
+  }
+};
+
+class ArithShRSIOpPattern : public OpConversionPattern<arith::ShRSIOp> {
+public:
+  using OpConversionPattern<mlir::arith::ShRSIOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(mlir::arith::ShRSIOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto lhs = adaptor.getLhs();
+    auto rhs = adaptor.getRhs();
+
+    mlir::Type elementType = getElementTypeOrSelf(lhs.getType());
+    unsigned typeWidth = elementType.getIntOrFloatBitWidth();
+    auto constValue =
+        rewriter.create<mlir::arith::ConstantIntOp>(loc, typeWidth, elementType);
+    auto zeroConst =
+        rewriter.create<mlir::arith::ConstantIntOp>(loc, 0, elementType);
+    uint64_t ones_val = 0xFFFFFFFFFFFFFFFF;
+    auto onesConst =
+        rewriter.create<mlir::arith::ConstantIntOp>(loc, ones_val, elementType);
+
+    if (lhs.getType().isIntOrIndex()) {
+      auto negativeCmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::slt, lhs, zeroConst);
+      auto otherValue = mlir::Value(rewriter.create<mlir::arith::SelectOp>(
+          loc, negativeCmpValue, onesConst, zeroConst));
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, constValue);
+      auto shiftValue =
+          rewriter.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, otherValue);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    } else {
+      auto splatValue = rewriter.create<mlir::tensor::SplatOp>(
+          loc, lhs.getType(), constValue);
+      auto zeroValue =
+          rewriter.create<mlir::tensor::SplatOp>(loc, lhs.getType(), zeroConst);
+      auto onesValue =
+          rewriter.create<mlir::tensor::SplatOp>(loc, lhs.getType(), onesConst);
+      auto negativeCmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::slt, lhs, zeroValue);
+      auto otherValue = mlir::Value(rewriter.create<mlir::arith::SelectOp>(
+          loc, negativeCmpValue, onesValue, zeroValue));
+      auto cmpValue = rewriter.create<mlir::arith::CmpIOp>(
+          loc, mlir::arith::CmpIPredicate::ult, rhs, splatValue);
+      auto shiftValue = rewriter.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
+      auto selectOp = rewriter.create<mlir::arith::SelectOp>(
+          loc, cmpValue, shiftValue, otherValue);
+      rewriter.replaceOp(op, {selectOp.getResult()});
+    }
     return success();
   }
 };
@@ -93,8 +235,10 @@ void populateArithPatternsAndLegality(TritonGPUTypeConverter &typeConverter,
       GenericOpPattern<arith::FloorDivSIOp>, GenericOpPattern<arith::RemUIOp>,
       GenericOpPattern<arith::RemSIOp>, GenericOpPattern<arith::AndIOp>,
       GenericOpPattern<arith::OrIOp>, GenericOpPattern<arith::XOrIOp>,
-      GenericOpPattern<arith::ShLIOp>, GenericOpPattern<arith::ShRUIOp>,
-      GenericOpPattern<arith::ShRSIOp>, // NegFOp
+      // Shift ops
+      ArithShLIPattern,
+      ArithShRUIOpattern,
+      ArithShRSIOpPattern, // NegFOp
       // Floating point
       GenericOpPattern<arith::AddFOp>, GenericOpPattern<arith::SubFOp>,
       // MaxMin

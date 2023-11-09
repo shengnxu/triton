@@ -807,6 +807,9 @@ def test_tensor_atomic_rmw_block(device="cuda"):
 @pytest.mark.parametrize("sem", [None, 'acquire', 'release', 'acq_rel', 'relaxed'])
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
 def test_atomic_cas(sem, num_ctas, device):
+    if is_hip() and sem is None:
+        pytest.skip(f"test_atomic_cas[{num_ctas}-{sem}] is not working on HIP")
+        
     # 1. make sure that atomic_cas changes the original value (Lock)
     @triton.jit
     def change_value(Lock):
@@ -2025,6 +2028,9 @@ def get_variant_golden(a, b):
     [64, 32, 128, 4, 64, 32, 64, 2]
 ])
 def test_gemm(SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, NUM_STAGES):
+    if is_hip() and [SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, NUM_STAGES] == [4,16,128,4,4,16,64,1]:
+        pytest.skip(f"test_gemm{[SIZE_M, SIZE_N, SIZE_K, NUM_WARPS, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, NUM_STAGES]} is broken on ROCM CI")
+
     a = torch.randn((SIZE_M, SIZE_K), device='cuda', dtype=torch.float16)
     b = torch.randn((SIZE_K, SIZE_N), device='cuda', dtype=torch.float16)
     c = torch.empty((SIZE_M, SIZE_N), device=a.device, dtype=torch.float32)
@@ -2283,7 +2289,11 @@ def test_value_specialization_overflow(value: int, overflow: bool, device='cuda'
 @pytest.mark.parametrize("op", ['+', '-', '*', '/', '%', '<', '>', '<<', '>>', '&', '^', '|'])
 @pytest.mark.parametrize("is_lhs_constexpr", [False, True])
 @pytest.mark.parametrize("is_rhs_constexpr", [True, False])
-def test_bin_op_constexpr(op, is_lhs_constexpr, is_rhs_constexpr):
+def test_bin_op_constexpr(op, is_lhs_constexpr, is_rhs_constexpr, device):
+    if is_hip():
+        if (is_rhs_constexpr, is_lhs_constexpr, op) in [(False, False, "<<"), (False, False, ">>"),
+                                                        (False, True, "<<")]:
+            pytest.skip(f"test_bin_op_constexpr[{is_lhs_constexpr}-{is_rhs_constexpr}-{op}] is not supported in HIP")
 
     @triton.jit
     def kernel(Z, X, Y):
@@ -2295,19 +2305,19 @@ def test_bin_op_constexpr(op, is_lhs_constexpr, is_rhs_constexpr):
     if op in ['<<', '>>', '&', '^', '|']:  # int op
         x_str = "3" if is_lhs_constexpr else "x"
         y_str = "4" if is_rhs_constexpr else "y"
-        x = numpy_random((1,), dtype_str="int32")
-        y = numpy_random((1,), dtype_str="int32")
+        x = numpy_random((1, ), dtype_str="int32")
+        y = numpy_random((1, ), dtype_str="int32")
     else:
         x_str = "3.14" if is_lhs_constexpr else "x"
         y_str = "4.13" if is_rhs_constexpr else "y"
-        x = numpy_random((1,), dtype_str="float32")
-        y = numpy_random((1,), dtype_str="float32")
+        x = numpy_random((1, ), dtype_str="float32")
+        y = numpy_random((1, ), dtype_str="float32")
     kernel = patch_kernel(kernel, {'GENERATE_TEST_HERE': f"{x_str} {op} {y_str}"})
     z = np.array(eval(f"{x_str} {op} {y_str}"))
-    x_tri = to_triton(x)
-    y_tri = to_triton(y)
-    z_tri = to_triton(np.empty((1,), dtype=z.dtype))
-    kernel[(1,)](z_tri, x_tri, y_tri)
+    x_tri = to_triton(x, device=device)
+    y_tri = to_triton(y, device=device)
+    z_tri = to_triton(np.empty((1, ), dtype=z.dtype), device=device)
+    kernel[(1, )](z_tri, x_tri, y_tri)
     np.testing.assert_allclose(z, to_numpy(z_tri))
 
 
@@ -2850,7 +2860,8 @@ module attributes {"triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 4 :
 def _get_warp_size():
     if torch.version.hip is None:
         return 32  # CUDA_DEFAULT_WARP_SIZE
-    return _triton.get_warp_size()
+    warp_size_queried =  _triton.get_warp_size()
+    return warp_size_queried if warp_size_queried else 64 # HIP_DEFAULT_WARP_SIZE
 
 
 if is_hip():

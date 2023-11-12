@@ -272,7 +272,7 @@ def get_amdgcn_bitcode_paths(gfx_arch: str):
     else:
         warnings.warn(f"gfx_{gfx_arch_id} bitcode is missing")
 
-    print(f"amdgcn_bitcode_paths: {amdgcn_bitcode_paths}")
+    # print(f"amdgcn_bitcode_paths: {amdgcn_bitcode_paths}")
     return amdgcn_bitcode_paths
 
 

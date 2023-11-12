@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Any, Tuple
 
@@ -268,8 +269,10 @@ def get_amdgcn_bitcode_paths(gfx_arch: str):
     bc_gfx_path = bitcode_path_dir + gpu_arch_specific_bitcode_library
     if os.path.exists(bc_gfx_path):
         amdgcn_bitcode_paths['library_' + str(i)] = bc_gfx_path
+    else:
+        warnings.warn(f"gfx_{gfx_arch_id} bitcode is missing")
 
-    # print(f"amdgcn_bitcode_paths: {amdgcn_bitcode_paths}")
+    print(f"amdgcn_bitcode_paths: {amdgcn_bitcode_paths}")
     return amdgcn_bitcode_paths
 
 

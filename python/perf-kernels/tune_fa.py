@@ -117,11 +117,8 @@ def main():
         #f_results.write(f'# TFLOPS: {formatted_tflops} time(us): {minTime:.2f}\n')
 
         ## remove generated files if asked to
-        #if not keepTmp:
-        #    for fi in range(ngpus):
-        #        os.remove(f"generated_kernel{M}{N}{K}-{fi}.py")
-        #        for f in glob.glob(f"results-{fi}.*"):
-        #            os.remove(f)
+        for f in glob.glob(f"fa-rocprof.*"):
+            os.remove(f)
 
         ## Check correctness if asked to
         #if args.compare:

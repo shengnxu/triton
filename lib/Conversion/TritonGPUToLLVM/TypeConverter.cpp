@@ -159,6 +159,7 @@ Type TritonGPUToLLVMTypeConverter::getElementTypeForStruct(
   auto ctx = type.getContext();
   Attribute layout = type.getEncoding();
   Type elemTy = convertType(type.getElementType());
+  if(!layout){}
   auto dotOpLayout = layout.dyn_cast<DotOperandEncodingAttr>();
   if (!dotOpLayout)
     return elemTy;
@@ -193,6 +194,7 @@ Type TritonGPUToLLVMTypeConverter::convertTritonTensorType(
   SmallVector<int64_t> shape(type.getShape().begin(), type.getShape().end());
   Type eltType = getElementTypeForStruct(type);
 
+  type.dump();
   if (auto shared_layout = layout.dyn_cast<SharedEncodingAttr>()) {
     SmallVector<Type, 4> types;
     // base ptr

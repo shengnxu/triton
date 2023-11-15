@@ -42,8 +42,8 @@ add_definitions( -DROCM_DEFAULT_DIR="${ROCM_DEFAULT_DIR}")
 # used conditionally in this file and by lit tests
 
 # Customized release build type with assertions: TritonRelBuildWithAsserts
-set(CMAKE_C_FLAGS_TRITONRELBUILDWITHASSERTS "-O0 -g")
-set(CMAKE_CXX_FLAGS_TRITONRELBUILDWITHASSERTS "-O0 -g")
+set(CMAKE_C_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
+set(CMAKE_CXX_FLAGS_TRITONRELBUILDWITHASSERTS "-O2 -g")
 
 # Default build type
 if(NOT CMAKE_BUILD_TYPE)

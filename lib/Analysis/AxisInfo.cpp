@@ -982,6 +982,20 @@ unsigned ModuleAxisInfoAnalysis::getPtrContiguity(Value ptr) {
   return contiguity;
 }
 
+void AxisInfoAnalysis::visitForOpInductionVar(
+    scf::ForOp op, ArrayRef<dataflow::Lattice<AxisInfo> *> argLattices) {
+  auto lb = getLatticeElementFor(op, op.getLowerBound())->getValue();
+  auto step = getLatticeElementFor(op, op.getStep())->getValue();
+
+  AxisInfo::DimVectorT knownContiguity(1, 1);
+  AxisInfo::DimVectorT knownDivisibility(1, 1);
+  AxisInfo::DimVectorT knownConstancy(1, 1);
+  knownDivisibility[0] = gcd(lb.getDivisibility(0), step.getDivisibility(0));
+  auto inductionVar =
+      AxisInfo(knownContiguity, knownDivisibility, knownConstancy);
+  (void)argLattices[0]->join(inductionVar);
+}
+
 unsigned ModuleAxisInfoAnalysis::getPtrAlignment(Value ptr) {
   auto tensorTy = ptr.getType().dyn_cast<RankedTensorType>();
   if (!tensorTy)

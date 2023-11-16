@@ -182,6 +182,7 @@ class CMakeBuild(build_ext):
             os.path.join(
                 os.path.dirname(__file__),
                 os.pardir))
+        self.cmake_build_dir = os.getenv('TRITON_BUILD_DIR')
 
     def finalize_options(self):
         build_ext.finalize_options(self)
@@ -201,6 +202,8 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def get_cmake_dir(self):
+        if self.cmake_build_dir is not None:
+            return self.cmake_build_dir
         plat_name = sysconfig.get_platform()
         python_version = sysconfig.get_python_version()
         dir_name = f"cmake.{plat_name}-{sys.implementation.name}-{python_version}"

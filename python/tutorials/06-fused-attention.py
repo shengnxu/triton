@@ -63,7 +63,7 @@ def _attn_fwd_inner(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if STAGE == 2:
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk = el.where(mask, qk, float("-inf"))
+            qk = tl.where(mask, qk, float("-inf"))
         qk += tl.dot(q, k)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
@@ -695,7 +695,7 @@ def bench_flash_attention(
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        if mode == "fwd" and TORCH_HAD_FP8:
+        if mode == "fwd" and TORCH_HAS_FP8:
             q = q.to(torch_dtype)
             k = k.to(torch_dtype)
         sm_scale = 1.3

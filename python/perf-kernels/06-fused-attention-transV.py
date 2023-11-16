@@ -13,14 +13,15 @@ Extra Credits:
 
 import pytest
 import torch
+import itertools
 
 import triton
 import triton.language as tl
 
-torch_dtype:tl.constexpr = torch.float16
-TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if TORCH_HAS_FP8E5:
-    torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+torch_dtype:tl.constexpr = torch.bfloat16
+# TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
+# if TORCH_HAS_FP8E5:
+#     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
 @triton.jit
 def max_fn(x, y):
@@ -71,7 +72,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         if not pre_load_v:
             v = tl.load(V_block_ptr)
-        acc += tl.dot(p.to(tl.float16), v)
+        acc += tl.dot(p.to(v.dtype), v)
         # -- update m_i and l_i
         l_ij = tl.sum(p, 1)
         l_i = l_i * alpha + l_ij
@@ -651,7 +652,7 @@ attention = _attention.apply
                           #(4, 48, 16384, 64)
                           ])
 @pytest.mark.parametrize('causal', [False, True])
-def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.bfloat16):
     torch.manual_seed(20)
     q = (
         torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
@@ -689,7 +690,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
                           (4, 48, 4096, 64),
                           (1, 16, 8192, 64),
                           ])
-def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
+def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.bfloat16):
     torch.manual_seed(20)
     causal = True
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
@@ -746,17 +747,18 @@ for mode in ['fwd']:
         for causal in [False, True]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
-                        (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
-                        ],
+                x_vals=[s for s in sorted(itertools.product([1, 2, 4, 8, 16], [8], [4096, 8192, 16384]))],
+                # x_vals=[(16, 16, 1024),
+                #         (8, 16, 2048),
+                #         (4, 16, 4096),
+                #         (2, 16, 8192),
+                #         (1, 16, 16384),
+                #         (4, 48, 1024),
+                #         (4, 48, 2048),
+                #         (4, 48, 4096),
+                #         (4, 48, 8192),
+                #         (4, 48, 16384),
+                #         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
                 line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
@@ -772,7 +774,7 @@ for mode in ['fwd']:
 
 
 @triton.testing.perf_report(configs)
-def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"):
+def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.bfloat16, device="cuda"):
     assert mode in ['fwd', 'bwd']
     warmup = 25
     rep = 100

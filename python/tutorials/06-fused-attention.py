@@ -13,14 +13,16 @@ Extra Credits:
 
 import pytest
 import torch
+import itertools
 
 import triton
 import triton.language as tl
 
-torch_dtype:tl.constexpr = torch.float16
-TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if TORCH_HAS_FP8E5:
-    torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+# torch_dtype:tl.constexpr = torch.float16
+torch_dtype:tl.constexpr = torch.bfloat16
+# TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
+# if TORCH_HAS_FP8E5:
+#     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
 @triton.jit
 def _attn_fwd_inner(
@@ -545,25 +547,27 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 
+
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [(4, 48, 1024, 64),
-                          (4, 48, 2048, 64),
-                          (4, 48, 4096, 64),
-                          (4, 48, 1024, 128),
-                          (4, 48, 2048, 128),
-                          (4, 48, 4096, 128),
-                          #(4, 48, 8192, 64),
-                          #(4, 48, 16384, 64)
-                          ])
+                          shapes=[s for s in sorted(itertools.product([1, 2, 4, 8, 16], [8], [4096, 8192, 16384], [128]))])
+                        #  [(4, 48, 1024, 64),
+                        #   (4, 48, 2048, 64),
+                        #   (4, 48, 4096, 64),
+                        #   (4, 48, 1024, 128),
+                        #   (4, 48, 2048, 128),
+                        #   (4, 48, 4096, 128),
+                        #   #(4, 48, 8192, 64),
+                        #   #(4, 48, 16384, 64)
+                        #   ])
 @pytest.mark.parametrize('causal', [False, True])
-def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.bfloat16):
     torch.manual_seed(20)
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    if TORCH_HAS_FP8E5:
-        q = q.to(torch_dtype)
-        k = k.to(torch_dtype)
+    # if TORCH_HAS_FP8E5:
+    #     q = q.to(torch_dtype)
+    #     k = k.to(torch_dtype)
     sm_scale = 0.5
     dout = torch.randn_like(q, dtype=torch.float16)
     # reference implementation
@@ -585,7 +589,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
                           (4, 48, 4096, 64),
                           (1, 16, 8192, 64),
                           ])
-def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
+def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.bfloat16):
     torch.manual_seed(20)
     causal = True
     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
@@ -634,7 +638,7 @@ except BaseException:
 # vary seq length for fixed head and batch=4
 configs = []
 for mode in ['fwd', 'bwd']:
-    for D_HEAD in [128, 64]:
+    for D_HEAD in [128]:
         if mode == 'bwd' and D_HEAD == 128:
             continue
         for causal in [False, True]:
@@ -642,17 +646,18 @@ for mode in ['fwd', 'bwd']:
                 continue
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
-                        (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
-                        ],
+                x_vals=[s for s in sorted(itertools.product([1, 2, 4, 8, 16], [8], [4096, 8192, 16384]))],
+                # x_vals=[(16, 16, 1024),
+                #         (8, 16, 2048),
+                #         (4, 16, 4096),
+                #         (2, 16, 8192),
+                #         (1, 16, 16384),
+                #         (4, 48, 1024),
+                #         (4, 48, 2048),
+                #         (4, 48, 4096),
+                #         (4, 48, 8192),
+                #         (4, 48, 16384),
+                #         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
                 line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
@@ -669,7 +674,7 @@ for mode in ['fwd', 'bwd']:
 
 @triton.testing.perf_report(configs)
 def bench_flash_attention(
-    BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"
+    BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.bfloat16, device="cuda"
 ):
     assert mode in ["fwd", "bwd"]
     warmup = 25
@@ -683,9 +688,9 @@ def bench_flash_attention(
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        if mode == "fwd":
-            q = q.to(torch_dtype)
-            k = k.to(torch_dtype)
+        # if mode == "fwd":
+        #     q = q.to(torch_dtype)
+        #     k = k.to(torch_dtype)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':

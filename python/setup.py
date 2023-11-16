@@ -158,6 +158,9 @@ def get_base_dir():
 
 
 def get_cmake_dir():
+    env_build_dir = os.getenv('TRITON_BUILD_DIR')
+    if env_build_dir is not None:
+        return env_build_dir
     plat_name = sysconfig.get_platform()
     python_version = sysconfig.get_python_version()
     dir_name = f"cmake.{plat_name}-{sys.implementation.name}-{python_version}"

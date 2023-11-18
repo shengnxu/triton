@@ -1181,13 +1181,6 @@ def atomic_xchg(ptr: tl.tensor, val: tl.tensor, mask: tl.tensor, sem: str, scope
 #                               Linear Algebra
 # ===----------------------------------------------------------------------===//
 
-def is_hip():
-    try:
-        import torch
-    except ImportError:
-        raise ImportError("Triton requires PyTorch to be installed")
-    return torch.version.hip is not None
-
 def mfma_supported_granularity(m, n, k) -> bool:
     # todo make this gran_type matrix element type sensitive
     for gran_type in [(32, 32, 8), (16, 16, 16), (4, 4, 64), (64, 4, 4), (4, 64, 4)]:

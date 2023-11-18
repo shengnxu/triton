@@ -30,7 +30,7 @@ execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${TRITON_BUILD_DIR}"
 add_custom_target(oort_venv_triton
   COMMAND ${CMAKE_COMMAND} -E env VIRTUAL_ENV=${VENV_DIR} TRITON_BUILD_DIR=${TRITON_BUILD_DIR} python -m pip install -e . 
   # COMMAND ${CMAKE_COMMAND} -E env VIRTUAL_ENV=${VENV_DIR} python -m pip show triton
-  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/third_party/triton/python/"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../python/"
   BYPRODUCTS "${VENV_SITE}/triton/_C/libtriton.so"
   )
 add_dependencies(oort_venv_triton oort_venv_req)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 SOURCE_PATH = Path(__file__).resolve()
 CSRC = (SOURCE_PATH.parent.parent / 'csrc').absolute()
-INCBIN = (SOURCE_PATH.parent.parent / 'third_party/incbin/').absolute()
+INCBIN = (SOURCE_PATH.parent.parent.parent / 'third_party/incbin/').absolute()
 # COMPILER = SOURCE_PATH.parent / 'compile.py'
 COMPILER = 'hipcc'
 

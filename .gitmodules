@@ -8,3 +8,6 @@
 [submodule "third_party/triton_shared"]
 	path = third_party/triton_shared
 	url = https://github.com/microsoft/triton-shared
+[submodule "third_party/incbin"]
+	path = third_party/incbin
+	url = https://github.com/graphitemaster/incbin.git

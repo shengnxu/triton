@@ -19,4 +19,9 @@ create_venv:
 triton_install:
 	(. build/venv/bin/activate; cd third_party/triton/python/; pip install -e .)
 
+mathaot_triton_install:
+	(. build/venv/bin/activate; pip install -r ./requirements.txt)
+	(. build/venv/bin/activate; cd ../python/; python setup.py develop)
+	# (. build/venv/bin/activate; cd ../python/; pip install -e .)
+
 .PHONY: all clean test_compile create_venv triton_install

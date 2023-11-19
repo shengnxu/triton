@@ -1600,9 +1600,13 @@ struct FpToFpOpConversion
       numElements = 2;
     }
     bool useFP16IntermediateSrc =
+#ifdef USE_ROCM
+        srcElementType.isF32();
+#else
         srcElementType.isF32() &&
         !(computeCapability >= 90 &&
           (dstElementType.isFloat8E4M3FNUZ() || dstElementType.isFloat8E5M2()));
+#endif
     bool isDstFP32 = dstElementType.isF32();
     auto cvtFunc =
         getConversionFunc(useFP16IntermediateSrc ? f16_ty : srcElementType,

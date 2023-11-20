@@ -413,6 +413,7 @@ def compile(fn, **kwargs):
     capability = kwargs.get("cc", None)
     aot_arch = kwargs.get('aot_arch', None)
     CurrentBuildTarget.configure_aot_arch(aot_arch)
+    print(f'{aot_arch=}') # This print() is required for proper functioning for whatever reason (likely due to race conditions or caching), will debug this later
 
     if is_hip():
         device_type = "hip"

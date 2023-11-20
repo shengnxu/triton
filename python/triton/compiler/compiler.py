@@ -120,14 +120,14 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
         pm.add_tritongpu_accelerate_matmul_pass(capability)
     # TODO change interface of accelerate_matmul_pass
     if is_hip():
-        matrix_core_version = gpu_matrix_core_version()
+        matrix_core_version = target["matrix_core_version"]
         matrix_inst_size = matrix_inst_type
         pm.add_tritonamdgpu_accelerate_matmul_pass(matrix_core_version, matrix_inst_size)
     pm.add_tritongpu_remove_layout_conversions_pass()
     if optimize_epilogue:
         pm.add_tritongpu_optimize_epilogue_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
-    if num_stages == 0 and is_hip() and gpu_matrix_core_version() != 0:
+    if num_stages == 0 and is_hip() and target["matrix_core_version"] != 0:
         pm.add_tritongpu_stream_pipeline_pass()
         pm.add_canonicalizer_pass()
     ws_enabled = False
@@ -349,8 +349,6 @@ def is_hip():
     except ImportError:
         raise ImportError("Triton requires PyTorch to be installed")
     return torch.version.hip is not None
-
-from ..language.semantic import gpu_matrix_core_version
 
 def get_cuda_capability(capability):
     if capability is None:

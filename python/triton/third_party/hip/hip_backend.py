@@ -318,9 +318,11 @@ def get_amdgpu_arch_fulldetails():
         if gfx_arch is None:
             raise RuntimeError('gfx_arch is None (not specified)')
 
+        mat_core_ver = gpu_matrix_core_version()
         capability = gpu_matrix_core_version() * 100
 
-        return {"gfx_triple": arch_triple, "gfx_arch": gfx_arch, "gfx_features": arch_features, "capability": capability}
+        return {"gfx_triple": arch_triple, "gfx_arch": gfx_arch, "gfx_features": arch_features,\
+                 "capability": capability, "matrix_core_version": mat_core_ver}
     except BaseException:
         return None
 
@@ -513,3 +515,6 @@ class HIPBackend(BaseBackend):
             return _triton.get_num_warps(module)
         else:
             return _triton.get_num_warps(module)
+
+    def get_matrix_core_version(self):
+        return gpu_matrix_core_version()

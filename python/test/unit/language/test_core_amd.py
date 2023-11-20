@@ -1247,7 +1247,8 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
 def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
     check_type_supported(out_dtype, device)
 
-    if triton.language.semantic.gpu_matrix_core_version() != 3:
+    backend = triton.common.backend.get_backend("hip")
+    if backend.get_matrix_core_version() != 3:
         pytest.skip("fp8 data type is not available on hardware")
 
     @triton.jit
@@ -1631,7 +1632,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                                       ('float16', 'float16'),
                                                       ('float16', 'float32'),
                                                       ('float32', 'float32')]]
-                         if triton.language.semantic.gpu_matrix_core_version() == 0 else
+                         if triton.common.backend.get_backend("hip").get_matrix_core_version() == 0 else
                          # MFMA Test Dot tests
                          [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim)
                           for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
@@ -1882,7 +1883,8 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         # added atol, to loose precision for float16xfloat16->float32 case
         np.testing.assert_allclose(z_ref, to_numpy(z_tri), rtol=0.01, atol=1e-3)
     if torch.version.hip is not None:
-        if triton.language.semantic.gpu_matrix_core_version() > 0:
+        backend = triton.common.backend.get_backend("hip")
+        if backend.get_matrix_core_version() > 0:
             ttgir = pgm.asm['ttgir']
             if non_k_dim == 16:
                 assert "#triton_gpu.mfma<{nonKDim = 16" in ttgir
@@ -1891,9 +1893,9 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
                 assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
                 assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
         gcn = pgm.asm['amdgcn']
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
+        if backend.get_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
             assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
-        if triton.language.semantic.gpu_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
+        if backend.get_matrix_core_version() == 3 and effective_in_dtype == tl.float8e4b8:
             assert "v_mfma_f32_32x32x16_fp8_fp8" in gcn or "v_mfma_f32_16x16x32_fp8_fp8" in gcn
         return
     # make sure ld/st are vectorized
@@ -2728,7 +2730,7 @@ def test_dot_mfma_vector_load(vec_size, swizzle, transposeA, transposeB):
     if transposeA and not transposeB:
         pytest.skip()
 
-    if triton.language.semantic.gpu_matrix_core_version() == 0:
+    if triton.common.backend.get_backend("hip").get_matrix_core_version() == 0:
         pytest.skip("mfma is not available on hardware")
 
     # source code for following ttgir:
@@ -2818,7 +2820,8 @@ module attributes {"triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 4 :
         kernel = triton.compile(f.name, device_type="hip", cc=capabilities)
 
     import triton.language.semantic as sem
-    if torch.version.hip is not None and sem.gpu_matrix_core_version() > 0:
+    # if torch.version.hip is not None and sem.gpu_matrix_core_version() > 0:
+    if torch.version.hip is not None and backend.get_matrix_core_version() > 0:
         kernel[(1, 1, 1)](x_tri, y_tri, z_tri)
         np.testing.assert_allclose(z_np, to_numpy(z_tri), rtol=0.01, atol=1e-3)
 

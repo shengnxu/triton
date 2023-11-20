@@ -1288,32 +1288,6 @@ def is_hip():
         raise ImportError("Triton requires PyTorch to be installed")
     return torch.version.hip is not None
 
-
-def gpu_matrix_core_version() -> int:
-    """ Determine matrix core type available on current GPU.
-
-        0 means no tensor cores are available
-        1 corresponds to MFMA in CDNA 1 architecture
-        2 corresponds to MFMA in CDNA 2 architecture
-        3 corresponds to MFMA in CDNA 3 architecture
-    """
-
-    if not is_hip():
-        return 0
-    arch_info = _triton.get_arch_info()
-    gfx_arch_details = re.search('amd.*', arch_info)
-    if gfx_arch_details is None:
-        return 0
-    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
-    gpu_name = gfx_arch_details[1].split(':')[0]
-    if gpu_name in ['gfx908']:
-        return 1
-    if gpu_name in ['gfx90a']:
-        return 2
-    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
-        return 3
-    return 0
-
 def mfma_supported_granularity(m, n, k) -> bool:
     # todo make this gran_type matrix element type sensitive
     for gran_type in [(32, 8), (16, 16)]:
@@ -1326,8 +1300,8 @@ def mfma_supported_granularity(m, n, k) -> bool:
         return True
     return False
 
-def mfma_supported(M, N, K, allow_tf32, ret_scalar_ty) -> bool:
-    matrix_core_version = gpu_matrix_core_version()
+def mfma_supported(M, N, K, allow_tf32, ret_scalar_ty, target) -> bool:
+    matrix_core_version = target["matrix_core_version"]
     if matrix_core_version not in [1, 2, 3]:
         return False
     if not mfma_supported_granularity(M, N ,K):
@@ -1389,7 +1363,9 @@ def dot(lhs: tl.tensor,
 
     # hip for now converts fp8 to fp16 for mixed input
     if is_hip():
-        fp8_supported = gpu_matrix_core_version() == 3
+        target = builder.target
+        assert "matrix_core_version" in target
+        fp8_supported = target["matrix_core_version"] == 3
         # gfx940 data type
         lhs_hip_fp8 = lhs.type.scalar.is_fp8e4b8() or lhs.type.scalar.is_fp8e5b16()
         rhs_hip_fp8 = rhs.type.scalar.is_fp8e4b8() or rhs.type.scalar.is_fp8e5b16()
@@ -1420,7 +1396,7 @@ def dot(lhs: tl.tensor,
     N = rhs.type.shape[1]
 
     # Cast operands of types f16 and i8 for configurations where FMA only supported.
-    if is_hip() and not mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty):
+    if is_hip() and not mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty, builder.target):
         # max_num_imprecise_acc does not yet apply to hip
         if is_hip():
             max_num_imprecise_acc = 0
@@ -1437,7 +1413,7 @@ def dot(lhs: tl.tensor,
         ret = tl.tensor(builder.create_dot(lhs.handle, rhs.handle, _0, allow_tf32, max_num_imprecise_acc),
                         ret_ty)
         return cast(ret, ret_scalar_ty, builder)
-    if is_hip() and mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty) and ret_scalar_ty.primitive_bitwidth <= 32:
+    if is_hip() and mfma_supported(M, N, lhs.type.shape[1], allow_tf32, ret_scalar_ty, builder.target) and ret_scalar_ty.primitive_bitwidth <= 32:
         # max_num_imprecise_acc does not yet apply to hip
         if is_hip():
             max_num_imprecise_acc = 0

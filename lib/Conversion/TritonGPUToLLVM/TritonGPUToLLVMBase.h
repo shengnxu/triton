@@ -11,6 +11,7 @@
 #include "Utility.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "triton/Analysis/AxisInfo.h"
+#include "triton/Dialect/NVGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Target/PTX/TmaMetadata.h"
 #include <set>
@@ -145,7 +146,8 @@ protected:
     }
     auto newFuncOp = rewriter.create<LLVM::LLVMFuncOp>(
         funcOp.getLoc(), funcOp.getName(), llvmType, linkage,
-        /*dsoLocal*/ false, LLVM::CConv::C, attributes);
+        /*dsoLocal*/ false, LLVM::CConv::C, /*comdat=*/SymbolRefAttr{},
+        attributes);
     rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
                                 newFuncOp.end());
     if (failed(rewriter.convertRegionTypes(&newFuncOp.getBody(), *typeConverter,
@@ -340,6 +342,9 @@ public:
     // Order
     auto inOrder = triton::gpu::getOrder(srcEncoding);
     auto outOrder = triton::gpu::getOrder(resSharedLayout);
+    assert(maxPhase == 1 ||
+           outVec * maxPhase <= srcShape[outOrder[0]] &&
+               "Swizzling would generate out of bounds memory accesses");
     // Tensor indices held by the current thread, as LLVM values
     auto srcIndices = emitIndices(loc, rewriter, srcEncoding, srcTy, false);
     // Swizzling with leading offsets (e.g. Hopper GMMA)
@@ -357,8 +362,13 @@ public:
     unsigned numElemsPerSwizzlingRow =
         swizzlingByteWidth * 8 / resElemTy.getIntOrFloatBitWidth();
     Value numElemsPerSwizzlingRowVal = i32_val(numElemsPerSwizzlingRow);
-    unsigned leadingDimOffset =
-        numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+    unsigned leadingDimOffset;
+    if (outOrder.size() == 2) {
+      leadingDimOffset = numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+    } else {
+      leadingDimOffset = numElemsPerSwizzlingRow;
+    }
+
     Value leadingDimOffsetVal = i32_val(leadingDimOffset);
     // Return values
     DenseMap<unsigned, Value> ret;
@@ -370,9 +380,15 @@ public:
       // Extract multi dimensional index for current element
       auto idx = srcIndices[elemIdx];
       Value idxCol = idx[outOrder[0]]; // contiguous dimension
-      Value idxRow = idx[outOrder[1]]; // discontiguous dimension
+      Value idxRow, strideRow;
+      if (outOrder.size() == 2) {
+        idxRow = idx[outOrder[1]]; // discontiguous dimension
+        strideRow = srcStrides[outOrder[1]];
+      } else {
+        idxRow = i32_val(0);
+        strideRow = i32_val(0);
+      }
       Value strideCol = srcStrides[outOrder[0]];
-      Value strideRow = srcStrides[outOrder[1]];
       // compute phase = (row // perPhase) % maxPhase
       Value phase = urem(udiv(idxRow, i32_val(perPhase)), i32_val(maxPhase));
       // extract dynamic/static offset for immediate offsetting
@@ -424,10 +440,16 @@ public:
       offset = add(offset, add(rowOff, mul(colOff, strideCol)));
       Value currPtr = gep(dstPtrTy, dstPtrBase, offset);
       // compute immediate offset
-      Value immedateOff =
-          add(mul(i32_val(immedateOffRow), srcStrides[outOrder[1]]),
-              i32_val(immedateOffCol));
-      ret[elemIdx] = gep(dstPtrTy, currPtr, immedateOff);
+      Value immediateOff;
+      if (outOrder.size() == 2) {
+        immediateOff =
+            add(mul(i32_val(immedateOffRow), srcStrides[outOrder[1]]),
+                i32_val(immedateOffCol));
+      } else {
+        immediateOff = i32_val(immedateOffCol);
+      }
+
+      ret[elemIdx] = gep(dstPtrTy, currPtr, immediateOff);
     }
     return ret;
   }
@@ -453,18 +475,19 @@ public:
     auto dstElemTy = dstTy.getElementType();
     auto inOrd = triton::gpu::getOrder(srcSharedLayout);
     auto outOrd = triton::gpu::getOrder(dstDistributedLayout);
-    unsigned outVec =
-        inOrd == outOrd
-            ? triton::gpu::getContigPerThread(dstDistributedLayout)[outOrd[0]]
-            : 1;
+    unsigned outVec = inOrd == outOrd
+                          ? triton::gpu::getUniqueContigPerThread(
+                                dstDistributedLayout, dstShape)[outOrd[0]]
+                          : 1;
     unsigned inVec = srcSharedLayout.getVec();
     unsigned minVec = std::min(outVec, inVec);
     unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
+    SmallVector<Value> offsetVals = {i32_val(0), i32_val(0)};
     assert(outElems == dstIndices.size());
 
-    DenseMap<unsigned, Value> sharedPtrs = getSwizzledSharedPtrs(
-        loc, outVec, dstTy, srcSharedLayout, srcElemTy, smemObj, rewriter,
-        smemObj.offsets, smemObj.strides);
+    DenseMap<unsigned, Value> sharedPtrs =
+        getSwizzledSharedPtrs(loc, outVec, dstTy, srcSharedLayout, srcElemTy,
+                              smemObj, rewriter, offsetVals, smemObj.strides);
     assert(outElems % minVec == 0 && "Unexpected number of elements");
     unsigned numVecs = outElems / minVec;
     auto wordTy = vec_ty(elemTy, minVec);
@@ -489,7 +512,7 @@ public:
                                 ConversionPatternRewriter &rewriter) const {
     auto srcTy = src.getType().cast<RankedTensorType>();
     auto srcShape = srcTy.getShape();
-    assert(srcShape.size() == 2 &&
+    assert((srcShape.size() == 1 || srcShape.size() == 2) &&
            "Unexpected rank of storeDistributedToShared");
     auto dstTy = dst.getType().cast<RankedTensorType>();
     auto srcDistributedLayout = srcTy.getEncoding();
@@ -502,10 +525,10 @@ public:
     auto dstElemTy = dstTy.getElementType();
     auto inOrd = triton::gpu::getOrder(srcDistributedLayout);
     auto outOrd = dstSharedLayout.getOrder();
-    unsigned inVec =
-        inOrd == outOrd
-            ? triton::gpu::getContigPerThread(srcDistributedLayout)[inOrd[0]]
-            : 1;
+    unsigned inVec = inOrd == outOrd
+                         ? triton::gpu::getUniqueContigPerThread(
+                               srcDistributedLayout, srcShape)[inOrd[0]]
+                         : 1;
     unsigned outVec = dstSharedLayout.getVec();
     unsigned minVec = std::min(outVec, inVec);
     unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
@@ -515,8 +538,12 @@ public:
     auto wordTy = vec_ty(elemTy, minVec);
     Value word;
 
-    SmallVector<Value> srcStrides = {dstStrides[0], dstStrides[1]};
-    SmallVector<Value> offsetVals = {i32_val(0), i32_val(0)};
+    SmallVector<Value> srcStrides;
+    SmallVector<Value> offsetVals;
+    for (int i = 0; i < srcShape.size(); i++) {
+      srcStrides.push_back(dstStrides[i]);
+      offsetVals.push_back(i32_val(0));
+    }
     SharedMemoryObject smemObj(smemBase, srcStrides, offsetVals);
 
     DenseMap<unsigned, Value> sharedPtrs =
@@ -543,6 +570,7 @@ public:
     auto tensorTy = valueTy.dyn_cast<RankedTensorType>();
     Value mask = int_val(1, 1);
     auto tid = tid_val();
+    auto clusterCTAId = getClusterCTAId(rewriter, loc);
     if (tensorTy) {
       auto layout = tensorTy.getEncoding();
       auto shape = tensorTy.getShape();
@@ -578,7 +606,6 @@ public:
         auto CTASplitNum = triton::gpu::getCTASplitNum(layout);
         auto CTAOrder = triton::gpu::getCTAOrder(layout);
 
-        auto clusterCTAId = getClusterCTAId(rewriter, loc);
         auto multiDimClusterCTAId =
             delinearize(rewriter, loc, clusterCTAId, CTAsPerCGA, CTAOrder);
 
@@ -588,14 +615,23 @@ public:
             continue;
           // This wrapping rule must be consistent with emitCTAOffsetForLayout
           unsigned splitNum = std::min<unsigned>(shape[dim], CTASplitNum[dim]);
-          multiDimClusterCTAId[dim] =
-              urem(multiDimClusterCTAId[dim], i32_val(splitNum));
-          mask = and_(mask, icmp_eq(multiDimClusterCTAId[dim], _0));
+          Value repId = udiv(multiDimClusterCTAId[dim], i32_val(splitNum));
+          // Consider the example where CTAsPerCGA = [4] and CTASplitNum = [2]:
+          //     CTA0 and CTA2 holds data of block0,
+          //     CTA1 and CTA3 holds data of block1.
+          // Only CTA0 and CTA1 are expected to write while CTA2 and CTA3 should
+          // be masked. We add the following mask:
+          //     multiDimClusterCTAId[dim] / splitNum == 0
+          // Actually in all existing cases of multicast, splitNum is always 1.
+          // The mask is equivalent to:
+          //     multiDimClusterCTAId[dim] == 0
+          mask = and_(mask, icmp_eq(repId, _0));
         }
       }
     } else {
-      // If the tensor is not ranked, then it is a scalar and only thread 0 can
-      // write
+      // If the tensor is not ranked, then it is a scalar and only thread 0 of
+      // CTA0 can write
+      mask = and_(mask, icmp_eq(clusterCTAId, i32_val(0)));
       mask = and_(mask, icmp_eq(tid, i32_val(0)));
     }
     return mask;

@@ -53,7 +53,7 @@ llvm_update_compile_flags(triton-translate)
          TritonNvidiaGPUTransforms
          TritonLLVMIR
          TritonPTX
-         TritonHSACO
+	 TritonHSACO
          ${dialect_libs}
          ${conversion_libs}
          # tests
@@ -72,7 +72,6 @@ llvm_update_compile_flags(triton-translate)
          MLIRPass
          MLIRSupport
          MLIRTransforms
-         MLIRExecutionEngine
          MLIRMathToLLVM
          MLIRTransformUtils
          MLIRLLVMToLLVMIRTranslation
@@ -80,3 +79,20 @@ llvm_update_compile_flags(triton-translate)
          MLIRROCDLToLLVMIRTranslation
          )
 mlir_check_all_link_libraries(triton-translate)
+
+add_llvm_executable(triton-llvm-opt
+  triton-llvm-opt.cpp
+
+  DEPENDS
+  intrinsics_gen
+  SUPPORT_PLUGINS
+  )
+target_link_libraries(triton-llvm-opt PRIVATE
+  TritonLLVMIR
+
+  LLVMCore
+  LLVMSupport
+  LLVMOption
+  LLVMCodeGen
+  )
+export_executable_symbols_for_plugins(triton-llvm-opt)

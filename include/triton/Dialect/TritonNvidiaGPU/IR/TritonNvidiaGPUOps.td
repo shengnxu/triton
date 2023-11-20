@@ -258,24 +258,28 @@ def TTNG_DotAsyncOp : TTNG_Op<"dot_async", [Pure,
         $d = matrix_multiply($a, $b) + $c
     }];
 
-    let arguments = (ins TT_FpIntTensor:$a, TT_FpIntTensor:$b, TT_FpIntTensor:$c, BoolAttr:$allowTF32);
+    let arguments = (ins TT_FpIntTensor:$a,
+                         TT_FpIntTensor:$b,
+                         TT_FpIntTensor:$c,
+                         BoolAttr:$allowTF32,
+                         I32Attr:$maxNumImpreciseAcc);
 
     let results = (outs TT_FpIntTensor:$d);
 
     let assemblyFormat = "$a`,` $b`,` $c attr-dict `:` type($a) `*` type($b) `->` type($d)";
 }
 
-def TTNG_DotWaitOp : TTNG_Op<"dot_wait", []> {
+def TTNG_DotWaitOp : TTNG_Op<"dot_wait", [DeclareOpInterfaceMethods<InferTypeOpInterface>,
+                                          AllTypesMatch<["input", "output"]>]> {
   let summary = "dot wait";
-
+  let arguments = (ins TT_FpIntTensor:$input, I32Attr:$pendings);
+  let results = (outs TT_FpIntTensor:$output);
   let description = [{
     This operation defining the waiting action for a async dot, MMAv3 .e.g.
     The subsequent operations should not execute until this operation completes waiting.
   }];
 
-  let arguments = (ins I32Attr:$pendings);
-
-  let assemblyFormat = "attr-dict";
+  let assemblyFormat = "$input attr-dict `:` type($input)";
 }
 
 def TTNG_StoreAsyncOp : TTNG_Op<"store_async",

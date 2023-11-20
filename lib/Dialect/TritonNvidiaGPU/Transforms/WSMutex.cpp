@@ -18,7 +18,9 @@ namespace ttng = triton::nvidia_gpu;
 namespace {
 
 // Target operations: dot, load, store. Add more when necessary.
-#define KEY_TYPES triton::DotOp, ttg::InsertSliceOp, triton::StoreOp
+#define KEY_TYPES                                                              \
+  triton::DotOp, triton::nvidia_gpu::DotAsyncOp, ttg::InsertSliceOp,           \
+      triton::StoreOp
 
 template <typename Head, typename... Tails>
 void getKeyTypeId(Operation *op, int &id, bool &found) {
@@ -151,15 +153,23 @@ void mutexSync(ModuleOp &mod, scf::IfOp &ifOp, scf::ForOp &persistentForOp,
 
   Value newIdx =
       builder.createWithAgentIds<arith::AddIOp>(loc, pipelineIdx, curRoleId);
-  persistentForOp.setIterArg(persistentForOp.getNumIterOperands() - 1, newIdx);
-  auto yield =
-      llvm::cast<scf::YieldOp>(persistentForOp.getBody()->getTerminator());
-  auto idxPlusOneOp =
-      yield->getOperand(yield->getNumOperands() - 1).getDefiningOp();
-  assert(isa<arith::AddIOp>(idxPlusOneOp));
-  assert(idxPlusOneOp->getOperand(0) ==
-         persistentForOp.getBody()->getArgument(
-             persistentForOp.getBody()->getNumArguments() - 1));
+  persistentForOp.getInitArgsMutable()
+      .slice(persistentForOp.getInitArgs().size() - 1, 1)
+      .assign(newIdx);
+
+  pipelineIdx = persistentForOp.getBody()->getArgument(
+      persistentForOp.getBody()->getNumArguments() - 1);
+  Operation *idxPlusOneOp = nullptr;
+  for (OpOperand &v : pipelineIdx.getUses()) {
+    if (isa<arith::AddIOp>(v.getOwner())) {
+      idxPlusOneOp = v.getOwner();
+      break;
+    }
+  }
+  assert(idxPlusOneOp && "idxPlusOneOp should be arith::AddIOp");
+  Operation *use = *idxPlusOneOp->getUsers().begin();
+  assert(isa<scf::YieldOp>(use) || isa<arith::SelectOp>(use) ||
+         isa<arith::CmpIOp>(use));
   idxPlusOneOp->setOperand(1, numRolesValue);
 
   // Add operations at the start of persistentForOp
@@ -238,6 +248,54 @@ void mutexSync(ModuleOp &mod, scf::IfOp &ifOp, scf::ForOp &persistentForOp,
     else
       lockLocs[i] = unlockLocs[prevTypeIds[i]];
   }
+
+  // Update lockLocs
+  // ====================== IR after async launch dots ======================
+  // * %0:2 = scf.for %arg0 = %c0 to %1 step %c1 iter_args(%arg1 = %2, arg2 =
+  // %3) {
+  // *    triton_nvidia_gpu.producer_wait arg2
+  // *    %5 = triton_nvidia_gpu.dot_async %4, %5
+  // *    triton_nvidia_gpu.dot_wait {pendings = 1}
+  // *    %6 = arith.cmpi sgt, arg0, %c0
+  // *    scf.if %6 {
+  // *      %7 = arith.subi arg2, c1
+  // *      triton_nvidia_gpu.consumer_release %7
+  // *    }
+  // *    %8 = arith.addi arg2, c1
+  // *    scf.yield %5, %8
+  // * }
+  // * triton_nvidia_gpu.dot_wait {pendings = 0}
+  // * ...
+  // * triton_nvidia_gpu.consumer_release ..
+  // * =======================================================================
+  // after async launch dots, there will be outstanding consumerReleaseOp after
+  // ForOp. we should set the epilogue lockLocs after the outstanding
+  // consumerReleaseOp.
+  for (int i = 0; i < numRoles; ++i) {
+    Operation *lockOp = lockLocs[i];
+    if (isa<scf::ForOp>(lockOp)) {
+      Operation *loc = nullptr;
+      unsigned numOutstandingConsumerRelease = 0;
+      for (auto v : lockOp->getResults()) {
+        SetVector<Operation *> slices;
+        mlir::getForwardSlice(v, &slices);
+        auto iter = llvm::find_if(slices, [](Operation *op) {
+          return isa<triton::nvidia_gpu::ConsumerReleaseOp>(op);
+        });
+        if (iter != slices.end()) {
+          numOutstandingConsumerRelease++;
+          loc = *iter;
+        }
+      }
+      assert(numOutstandingConsumerRelease <= 1 &&
+             "should have only one outstanding "
+             "consumerReleaseOp after "
+             "async launch dots");
+      if (loc)
+        lockLocs[i] = loc;
+    }
+  }
+
   // lock
   for (int i = 0; i < numRoles; ++i) {
     builder.setInsertionPointAfter(lockLocs[i]);

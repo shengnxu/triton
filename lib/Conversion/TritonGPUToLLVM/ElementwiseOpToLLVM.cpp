@@ -1526,6 +1526,8 @@ struct FpToFpOpConversion
       	// F8 -> BF16
 #ifdef USE_ROCM
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
+	      {{F8E5M2FNUZTyID, BF16TyID}, Fp8E5M2FNUZ_to_Bf16},
+	      {{F8E4M3FNUZTyID, BF16TyID}, Fp8E4M3FNUZ_to_Bf16},
 #else
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16(computeCapability >= 90)},
         {{F8E4M3TyID, BF16TyID}, Fp8E4M3Nv_to_Bf16},
@@ -1534,10 +1536,20 @@ struct FpToFpOpConversion
      	  // BF16 -> F8
 #ifdef USE_ROCM
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
+        {{BF16TyID, F8E5M2FNUZTyID}, Bf16_to_Fp8E5M2FNUZ},
+        {{BF16TyID, F8E4M3FNUZTyID}, Bf16_to_Fp8E4M3FNUZ},
 #else
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2(computeCapability >= 90)},
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},
-        // F32 -> F8
+#endif
+
+        // F32 <-> F8
+#ifdef USE_ROCM
+        {{F32TyID, F8E4M3FNUZTyID}, Fp32_to_Fp8E4M3FNUZ},
+        {{F32TyID, F8E5M2FNUZTyID}, Fp32_to_Fp8E5M2FNUZ},
+        {{F8E4M3FNUZTyID, F32TyID}, Fp8E4M3FNUZ_to_Fp32},
+        {{F8E5M2FNUZTyID, F32TyID}, Fp8E5M2FNUZ_to_Fp32},
+#else
         {{F32TyID, F8E4M3TyID}, Fp32_to_Fp8E4M3Nv},
         {{F32TyID, F8E5M2TyID}, Fp32_to_Fp8E5M2},
 #endif
@@ -1601,16 +1613,27 @@ struct FpToFpOpConversion
     }
     bool useFP16IntermediateSrc =
 #ifdef USE_ROCM
-        srcElementType.isF32();
+        srcElementType.isF32() &&
+        !(computeCapability >= 300 &&
+          (dstElementType.isFloat8E4M3FNUZ() || dstElementType.isFloat8E5M2FNUZ()));
 #else
         srcElementType.isF32() &&
         !(computeCapability >= 90 &&
           (dstElementType.isFloat8E4M3FNUZ() || dstElementType.isFloat8E5M2()));
 #endif
-    bool isDstFP32 = dstElementType.isF32();
+
+    bool useFP16IntermediateDst = 
+#ifdef USE_ROCM
+        dstElementType.isF32() &&
+        !(computeCapability >= 300 &&
+          (srcElementType.isFloat8E4M3FNUZ() || srcElementType.isFloat8E5M2FNUZ()));
+#else
+        dstElementType.isF32();
+#endif
+
     auto cvtFunc =
         getConversionFunc(useFP16IntermediateSrc ? f16_ty : srcElementType,
-                          isDstFP32 ? f16_ty : dstElementType);
+                          useFP16IntermediateDst ? f16_ty : dstElementType);
     SmallVector<Value> inVals;
     for (unsigned i = 0; i < std::min(numElements, operands.size()); i++) {
       inVals.push_back(operands[i][0]);
@@ -1623,7 +1646,7 @@ struct FpToFpOpConversion
     SmallVector<Value> outVals = cvtFunc(loc, rewriter, inVals);
     assert(outVals.size() == inVals.size());
     outVals.resize(std::min(numElements, operands.size()));
-    if (isDstFP32)
+    if (useFP16IntermediateDst)
       for (Value &v : outVals)
         v = convertFp16ToFp32(loc, rewriter, v);
     // Pack values

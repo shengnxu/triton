@@ -24,9 +24,6 @@ def prune_configs(configs, named_args):
     if not tuning_full_space:
         return configs
 
-    tl.static_print(configs)
-    input("Press Enter to continue...")
-
     SIZE_M = named_args["a_ptr"].shape[0]
     SIZE_N = named_args["b_ptr"].shape[1]
     SIZE_K = named_args["a_ptr"].shape[1]

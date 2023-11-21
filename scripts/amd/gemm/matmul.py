@@ -11,6 +11,7 @@ import sys
 import yaml
 import os
 import subprocess
+import pytest
 
 
 
@@ -22,6 +23,9 @@ def prune_configs(configs, named_args):
     # call only for full tuning space
     if not tuning_full_space:
         return configs
+
+    tl.static_print(configs)
+    input("Press Enter to continue...")
 
     SIZE_M = named_args["a_ptr"].shape[0]
     SIZE_N = named_args["b_ptr"].shape[1]
@@ -237,7 +241,15 @@ def matmul(a, b, activation=""):
     return c
 
 
-def test_correctness(M, N, K, datatype = torch.float16):
+@pytest.mark.parametrize("M, N, K, datatype",
+[ (*shape, datatype)
+    for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
+                  (128, 128, 64), (64, 128, 128), (32, 128, 64),
+                  (64, 64, 32), (32, 32, 128), (128, 128, 64),
+                   (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
+    for datatype in [torch.float16]]
+)
+def test_correctness(M, N, K, datatype):
     torch.manual_seed(0)
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
@@ -251,7 +263,6 @@ def test_correctness(M, N, K, datatype = torch.float16):
         print(f'✅ Triton and Torch match for {size_str}')
     else:
         print(f'❌ Triton and Torch differ for {size_str}')
-
 
 def run_speed(M, N, K, datatype, use_rocprof, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)

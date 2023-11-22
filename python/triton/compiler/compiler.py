@@ -413,6 +413,10 @@ def compile(fn, **kwargs):
     capability = kwargs.get("cc", None)
     aot_arch = kwargs.get('aot_arch', None)
     CurrentBuildTarget.configure_aot_arch(aot_arch)
+    # Must do this forehead, otherwise get_arch_default_num_stages won't work
+    if aot_arch is not None:
+        arch, device_type = translate_aot_arch(aot_arch)
+        CurrentBuildTarget.configure_arch(arch)
     print(f'{aot_arch=}') # This print() is required for proper functioning for whatever reason (likely due to race conditions or caching), will debug this later
 
     if is_hip():
@@ -452,9 +456,7 @@ def compile(fn, **kwargs):
     tma_infos = TMAInfos()
     # build architecture descriptor
     if aot_arch is not None:
-        arch, device_type = translate_aot_arch(aot_arch)
         _device_backend = get_backend(device_type)
-        CurrentBuildTarget.configure_arch(arch)
         target = arch
     elif device_type == "cuda":
         _device_backend = get_backend(device_type)

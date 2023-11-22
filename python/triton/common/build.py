@@ -15,7 +15,7 @@ class CurrentBuildTarget:
     aot_arch = None
     @staticmethod
     def is_aot():
-        return CurrentBuildTarget.arch is not None
+        return CurrentBuildTarget.aot_arch is not None
 
     @staticmethod
     def configure_arch(arch : dict):

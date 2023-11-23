@@ -146,6 +146,10 @@ def matmul_kernel_splitK(
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
     # See above `Pointer Arithmetics` section for details
+  #  tl.device_print("SPLIT_K= ", SPLIT_K)
+  #  tl.device_print("BLOCK_SIZE_K= ", BLOCK_SIZE_K)
+  #  tl.device_print("pid= ", pid)
+
     if SPLIT_K == 1:
         offs_k = tl.arange(0, BLOCK_SIZE_K)
     else:
@@ -175,6 +179,11 @@ def matmul_kernel_splitK(
             b = tl.load(b_ptrs)
         else:
             k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
+         #  Calculate k_remaining considering non-multiple case
+         #   k_blocks = tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)
+         #   last_k_block_elements = K - (k_blocks - 1) * BLOCK_SIZE_K * SPLIT_K
+         #   k_is_last_block = (k == k_blocks - 1)
+         #   k_remaining = tl.where(k_is_last_block, last_k_block_elements, BLOCK_SIZE_K * SPLIT_K)
             a = tl.load(a_ptrs, mask=offs_k[None, :] < k_remaining, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < k_remaining, other=0.0)
         # We accumulate along the K dimension.
@@ -243,7 +252,8 @@ def matmul(a, b, activation=""):
     for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
                   (128, 128, 64), (64, 128, 128), (32, 128, 64),
                   (64, 64, 32), (32, 32, 128), (128, 128, 64),
-                   (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
+                  (64, 128, 128), (512, 512, 512), (1024, 1024, 1024),
+                  (16, 16, 1026), (32, 32, 1026)]
     for datatype in [torch.float16]]
 )
 def test_correctness(M, N, K, datatype):

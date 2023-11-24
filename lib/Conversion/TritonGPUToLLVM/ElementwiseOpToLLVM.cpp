@@ -138,6 +138,8 @@ static SmallVector<Value> convert_val_Fp8_to_Fp16(
 #endif
 
 #ifdef USE_ROCM
+// Depend on whether we focus more on performance, we may skip
+// the processing of submornal values
 static Value Fp16_to_Fp8E5M2FNUZ_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto vi16 = bitcast(v, i16_ty);

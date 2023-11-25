@@ -56,9 +56,10 @@ static const std::string Fp16_to_Fp8E5M2(bool hasNativeFP) {
 
 // ROCM utility functions for data type conversion
 #ifdef USE_ROCM
+// convert fp16 to fp32
 static Value cvtFp16ToFp32(Location loc,
-                                ConversionPatternRewriter &rewriter,
-                                const Value &v) {
+                           ConversionPatternRewriter &rewriter,
+                           const Value &v) {
   GCNBuilder builder;
   auto &cvt = *builder.create("v_cvt_f32_f16");
   auto res = builder.newOperand("=v");
@@ -67,9 +68,10 @@ static Value cvtFp16ToFp32(Location loc,
   return builder.launch(rewriter, loc, f32_ty, false);
 }
 
+// convert fp32 to f16
 static Value cvtFp32ToFp16(Location loc,
-                                ConversionPatternRewriter &rewriter,
-                                const Value &v) {
+                           ConversionPatternRewriter &rewriter,
+                           const Value &v) {
   GCNBuilder builder;
   auto &cvt = *builder.create("v_cvt_f16_f32");
   auto res = builder.newOperand("=v");
@@ -78,34 +80,8 @@ static Value cvtFp32ToFp16(Location loc,
   return builder.launch(rewriter, loc, f16_ty, false);
 }
 
-static SmallVector<Value> convert_val_Fp16_to_Fp8(
-  Location loc, ConversionPatternRewriter &rewriter, 
-  Value v0, Value v1, const std::string& fp8_format) {
-  assert(fp8_format == "fp8" or fp8_format == "bf8");
-  std::string ins_str = "v_cvt_pk_" + fp8_format + "_f32";
-
-  auto f32_0 = cvtFp16ToFp32(loc, rewriter, v0);
-  auto f32_1 = cvtFp16ToFp32(loc, rewriter, v1);
-
-  GCNBuilder builder;
-  auto &cvt = *builder.create(ins_str);
-  auto res = builder.newOperand("=v");
-  auto operand0 = builder.newOperand(f32_0, "v");
-  auto operand1 = builder.newOperand(f32_1, "v");
-  cvt(res, operand0, operand1);
-  auto fp8x4Vec = builder.launch(rewriter, loc, i32_ty, false);
-
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  auto a1 = bitcast(fp8x4Vec, fp8x4VecTy);
-
-  SmallVector<Value> ret(2);
-  ret[0] = extract_element(i8_ty, a1, i32_val(0));
-  ret[1] = extract_element(i8_ty, a1, i32_val(1));
-
-  return ret;
-}
-
-static SmallVector<Value> convert_val_Fp8_to_Fp16(
+// convert fp8 to fp32
+static SmallVector<Value> cvtFp8ToFp32(
   Location loc, ConversionPatternRewriter &rewriter, 
   Value v0, Value v1, const std::string& fp8_format) {
   assert(fp8_format == "fp8" or fp8_format == "bf8");
@@ -126,23 +102,100 @@ static SmallVector<Value> convert_val_Fp8_to_Fp16(
   auto fp32x2VecTy = vec_ty(f32_ty, 2);
   auto fp32x2Vec = bitcast(i64v, fp32x2VecTy);
 
-  auto f32_0 = extract_element(f32_ty, fp32x2Vec, i32_val(0));
-  auto f32_1 = extract_element(f32_ty, fp32x2Vec, i32_val(1));
+  SmallVector<Value> ret(2);
+  ret[0] = extract_element(f32_ty, fp32x2Vec, i32_val(0));
+  ret[1] = extract_element(f32_ty, fp32x2Vec, i32_val(1));
+
+  return ret;
+}
+
+// convert fp32 to fp8
+static SmallVector<Value> cvtFp32ToFp8(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  Value v0, Value v1, const std::string& fp8_format) {
+  assert(fp8_format == "fp8" or fp8_format == "bf8");
+  std::string ins_str = "v_cvt_pk_" + fp8_format + "_f32";
+
+  GCNBuilder builder;
+  auto &cvt = *builder.create(ins_str);
+  auto res = builder.newOperand("=v");
+  auto operand0 = builder.newOperand(v0, "v");
+  auto operand1 = builder.newOperand(v1, "v");
+  cvt(res, operand0, operand1);
+  auto fp8x4Vec = builder.launch(rewriter, loc, i32_ty, false);
+
+  auto fp8x4VecTy = vec_ty(i8_ty, 4);
+  auto a1 = bitcast(fp8x4Vec, fp8x4VecTy);
 
   SmallVector<Value> ret(2);
-  ret[0] = cvtFp32ToFp16(loc, rewriter, f32_0);
-  ret[1] = cvtFp32ToFp16(loc, rewriter, f32_1);
+  ret[0] = extract_element(i8_ty, a1, i32_val(0));
+  ret[1] = extract_element(i8_ty, a1, i32_val(1));
+
+  return ret;
+}
+
+// convert fp16 to fp8 for MI300 format
+static SmallVector<Value> convert_val_Fp16_to_Fp8(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  Value v0, Value v1, const std::string& fp8_format) {
+  assert(fp8_format == "fp8" or fp8_format == "bf8");
+  std::string ins_str = "v_cvt_pk_" + fp8_format + "_f32";
+
+  // Convert fp16 to fp32
+  auto f32_0 = cvtFp16ToFp32(loc, rewriter, v0);
+  auto f32_1 = cvtFp16ToFp32(loc, rewriter, v1);
+
+  // Convert fp32 to fp8
+  return cvtFp32ToFp8(loc, rewriter, f32_0, f32_1, fp8_format);
+}
+
+// convert fp8 to fp16 for mi300 formats
+static SmallVector<Value> convert_val_Fp8_to_Fp16(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  Value v0, Value v1, const std::string& fp8_format) {
+
+  // Convert fp8 to fp32
+  SmallVector<Value> ret = cvtFp8ToFp32(loc, rewriter, v0, v1, fp8_format);
+
+  // Convert fp32 to fp16
+  ret[0] = cvtFp32ToFp16(loc, rewriter, ret[0]);
+  ret[1] = cvtFp32ToFp16(loc, rewriter, ret[1]);
 
   return ret;
 }
 #endif
 
 #ifdef USE_ROCM
-<<<<<<< HEAD
-=======
-// Depend on whether we focus more on performance, we may skip
-// the processing of submornal values
->>>>>>> triton-mlir
+static SmallVector<Value> Fp32_to_Fp8E5M2FNUZ(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  const SmallVector<Value>& v) {
+  assert (v.size() == 2);
+  return cvtFp32ToFp8(loc, rewriter, v[0], v[1], "bf8");
+}
+
+static SmallVector<Value> Fp32_to_Fp8E4M3FNUZ(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  const SmallVector<Value>& v) {
+  assert (v.size() == 2);
+  return cvtFp32ToFp8(loc, rewriter, v[0], v[1], "fp8");
+}
+
+static SmallVector<Value> Fp8E5M2FNUZ_to_Fp32(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  const SmallVector<Value>& v) {
+  assert (v.size() == 2);
+  return cvtFp8ToFp32(loc, rewriter, v[0], v[1], "bf8");
+}
+
+static SmallVector<Value> Fp8E4M3FNUZ_to_Fp32(
+  Location loc, ConversionPatternRewriter &rewriter, 
+  const SmallVector<Value>& v) {
+  assert (v.size() == 2);
+  return cvtFp8ToFp32(loc, rewriter, v[0], v[1], "fp8");
+}
+#endif
+
+#ifdef USE_ROCM
 static Value Fp16_to_Fp8E5M2FNUZ_oneValue(
   Location loc, ConversionPatternRewriter &rewriter, Value v) {
   auto vi16 = bitcast(v, i16_ty);
@@ -190,6 +243,9 @@ ConverterT Fp16_to_Fp8E5M2FNUZ(int computeCapability) {
 }
 #endif
 
+#ifdef USE_ROCM
+
+#endif
 
 #ifdef USE_ROCM
 static SmallVector<Value>
@@ -1531,8 +1587,8 @@ struct FpToFpOpConversion
       	// F8 -> BF16
 #ifdef USE_ROCM
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
-	      {{F8E5M2FNUZTyID, BF16TyID}, Fp8E5M2FNUZ_to_Bf16},
-	      {{F8E4M3FNUZTyID, BF16TyID}, Fp8E4M3FNUZ_to_Bf16},
+	      // {{F8E5M2FNUZTyID, BF16TyID}, Fp8E5M2FNUZ_to_Bf16},
+	      // {{F8E4M3FNUZTyID, BF16TyID}, Fp8E4M3FNUZ_to_Bf16},
 #else
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16(computeCapability >= 90)},
         {{F8E4M3TyID, BF16TyID}, Fp8E4M3Nv_to_Bf16},
@@ -1541,8 +1597,8 @@ struct FpToFpOpConversion
      	  // BF16 -> F8
 #ifdef USE_ROCM
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
-        {{BF16TyID, F8E5M2FNUZTyID}, Bf16_to_Fp8E5M2FNUZ},
-        {{BF16TyID, F8E4M3FNUZTyID}, Bf16_to_Fp8E4M3FNUZ},
+        // {{BF16TyID, F8E5M2FNUZTyID}, Bf16_to_Fp8E5M2FNUZ},
+        // {{BF16TyID, F8E4M3FNUZTyID}, Bf16_to_Fp8E4M3FNUZ},
 #else
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2(computeCapability >= 90)},
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},

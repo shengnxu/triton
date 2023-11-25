@@ -244,10 +244,6 @@ ConverterT Fp16_to_Fp8E5M2FNUZ(int computeCapability) {
 #endif
 
 #ifdef USE_ROCM
-
-#endif
-
-#ifdef USE_ROCM
 static SmallVector<Value>
 Fp8E5M2_to_Fp16(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {

@@ -557,6 +557,68 @@ static const std::string Bf16_to_Fp8E5M2(bool hasNativeFP) {
   return ret;
 }
 #endif
+
+// ROCM type conversion between fp8 and bf16
+#ifdef USE_ROCM
+
+static Value cvtBf16ToFp32(Location loc, 
+  ConversionPatternRewriter &rewriter, Value v) {
+  auto bf16x2VecTy = vec_ty(i16_ty, 2);
+  Value a0 = undef(bf16x2VecTy);
+  a0 = insert_element(bf16x2VecTy, a0, int_val(16,0), i32_val(0));
+  a0 = insert_element(bf16x2VecTy, a0, v, i32_val(1));
+  return bitcast(a0, i32_ty);
+}
+
+static Value cvtFp32ToBf16(Location loc, 
+  ConversionPatternRewriter &rewriter, Value v) {
+  auto bf16x2VecTy = vec_ty(i16_ty, 2);
+  Value a = bitcast(v, bf16x2VecTy);
+  return extract_element(i16_ty, a, i32_val(1));
+}
+
+// fp8e4m3fnuz to bf16
+static SmallVector<Value>
+Fp8E4M3FNUZ_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  assert(v.size() == 2);
+  auto ret = cvtFp8ToFp32(loc, rewriter, v[0], v[1], "fp8");
+  ret[0] = cvtFp32ToBf16(loc, rewriter, ret[0]);
+  ret[1] = cvtFp32ToBf16(loc, rewriter, ret[1]);
+  return ret;
+}
+
+// bf16 to fp8e4m3fnuz
+static SmallVector<Value>
+Bf16_to_Fp8E4M3FNUZ(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  assert(v.size() == 2);
+  auto v0 = cvtBf16ToFp32(loc, rewriter, v[0]);
+  auto v1 = cvtBf16ToFp32(loc, rewriter, v[1]);
+  return cvtFp32ToFp8(loc, rewriter, v0, v1, "fp8");
+}
+
+// fp8e5m2fnuz to bf16
+static SmallVector<Value>
+Fp8E5M2FNUZ_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  assert(v.size() == 2);
+  auto ret = cvtFp8ToFp32(loc, rewriter, v[0], v[1], "bf8");
+  ret[0] = cvtFp32ToBf16(loc, rewriter, ret[0]);
+  ret[1] = cvtFp32ToBf16(loc, rewriter, ret[1]);
+  return ret;
+}
+// bf16 to fp8e5m2fnuz
+static SmallVector<Value>
+Bf16_to_Fp8E5M2FNUZ(Location loc, ConversionPatternRewriter &rewriter,
+                   const SmallVector<Value> &v) {
+  assert(v.size() == 2);
+  auto v0 = cvtBf16ToFp32(loc, rewriter, v[0]);
+  auto v1 = cvtBf16ToFp32(loc, rewriter, v[1]);
+  return cvtFp32ToFp8(loc, rewriter, v0, v1, "bf8");
+}
+#endif
+
 /* ----- FP8E4M3B15 ------ */
 // This data-type is a variant of the standard FP8E4M3 format.
 // It was designed for fast software conversion to FP16 on
@@ -1587,8 +1649,8 @@ struct FpToFpOpConversion
       	// F8 -> BF16
 #ifdef USE_ROCM
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16},
-	      // {{F8E5M2FNUZTyID, BF16TyID}, Fp8E5M2FNUZ_to_Bf16},
-	      // {{F8E4M3FNUZTyID, BF16TyID}, Fp8E4M3FNUZ_to_Bf16},
+	      {{F8E5M2FNUZTyID, BF16TyID}, Fp8E5M2FNUZ_to_Bf16},
+	      {{F8E4M3FNUZTyID, BF16TyID}, Fp8E4M3FNUZ_to_Bf16},
 #else
 	      {{F8E5M2TyID, BF16TyID}, Fp8E5M2_to_Bf16(computeCapability >= 90)},
         {{F8E4M3TyID, BF16TyID}, Fp8E4M3Nv_to_Bf16},
@@ -1597,8 +1659,8 @@ struct FpToFpOpConversion
      	  // BF16 -> F8
 #ifdef USE_ROCM
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2},
-        // {{BF16TyID, F8E5M2FNUZTyID}, Bf16_to_Fp8E5M2FNUZ},
-        // {{BF16TyID, F8E4M3FNUZTyID}, Bf16_to_Fp8E4M3FNUZ},
+        {{BF16TyID, F8E5M2FNUZTyID}, Bf16_to_Fp8E5M2FNUZ},
+        {{BF16TyID, F8E4M3FNUZTyID}, Bf16_to_Fp8E4M3FNUZ},
 #else
         {{BF16TyID, F8E5M2TyID}, Bf16_to_Fp8E5M2(computeCapability >= 90)},
         {{BF16TyID, F8E4M3TyID}, Bf16_to_Fp8E4M3Nv},

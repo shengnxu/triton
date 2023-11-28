@@ -228,7 +228,7 @@ def matmul(a, b, activation=""):
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -246,6 +246,28 @@ def matmul(a, b, activation=""):
 
     return c
 
+def unravel_index(indices, shape):
+    shape = torch.tensor(shape)
+    indices = indices % shape.prod()  # prevent out-of-bounds indices
+
+    coord = torch.zeros(indices.size() + shape.size(), dtype=int)
+
+    for i, dim in enumerate(reversed(shape)):
+        coord[..., i] = indices % dim
+        indices = indices // dim
+
+    return coord.flip(-1)
+
+def maxloc(tensor1, tensor2):
+    diff_tensor=torch.abs(tensor1-tensor2)
+    maxloc=torch.argmax(diff_tensor)
+    maxloc2d=unravel_index(maxloc, diff_tensor.shape)
+    tensor1_v_maxloc=tensor1[maxloc2d[0], maxloc2d[1]]
+    tensor2_v_maxloc=tensor2[maxloc2d[0], maxloc2d[1]]
+
+    print("Max difference location (row, column):", maxloc2d)
+    print("Value at maxloc in triton output:",  tensor1_v_maxloc.item())
+    print("Value at maxloc in torch ouput:",  tensor2_v_maxloc.item())
 
 @pytest.mark.parametrize("M, N, K, datatype",
 [ (*shape, datatype)
@@ -264,12 +286,13 @@ def test_correctness(M, N, K, datatype):
     torch_output = torch.matmul(a, b)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
-    rtol = 0 if torch.version.hip is None else 1e-2
+    rtol = 0 if torch.version.hip is None else 1e-4
     size_str = f'size, (M: {M}, N: {N}, K: {K})'
     if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
         print(f'✅ Triton and Torch match for {size_str}')
     else:
         print(f'❌ Triton and Torch differ for {size_str}')
+        maxloc(triton_output,  torch_output)
 
 def run_speed(M, N, K, datatype, use_rocprof, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)

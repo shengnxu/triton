@@ -1215,18 +1215,29 @@ struct FpToFpOpConversion
     bool isDstFP32 = dstElementType.isF32();
     SmallVector<Value> inVals = {operands[0][0], operands[1][0], operands[2][0],
                                  operands[3][0]};
+
+#ifdef USE_ROCM
+    bool isSrcFP16 = srcElementType.isF16();
+    bool isSrcBF16 = srcElementType.isBF16();
+
+    if ((isSrcFP16 || isSrcBF16)
+          && isDstFP32) {
+      SmallVector<Value> outVals;
+      for (Value &v : inVals) {
+        if(isSrcFP16)
+          outVals.push_back(convertFp16ToFp32(loc, rewriter, v));
+        else
+          outVals.push_back(convertBf16ToFp32(loc, rewriter, v));
+      }
+      return outVals;
+    }
+#endif
+
     if (isSrcFP32)
       for (Value &v : inVals)
         v = convertFp32ToFp16(loc, rewriter, v);
 
     SmallVector<Value> outVals;
-    if (srcElementType.isF16() && dstElementType.isF32()) {
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[0]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[1]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[2]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[3]));
-      return outVals;
-    }
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
                                      isDstFP32 ? f16_ty : dstElementType);
     outVals = cvtFunc(loc, rewriter, inVals[0], inVals[1], inVals[2], inVals[3]);

@@ -273,6 +273,30 @@ def get_amdgcn_bitcode_paths(gfx_arch: str):
     return amdgcn_bitcode_paths
 
 
+def gpu_matrix_core_version() -> int:
+    """ Determine matrix core type available on current GPU.
+
+        0 means no tensor cores are available
+        1 corresponds to MFMA in CDNA 1 architecture
+        2 corresponds to MFMA in CDNA 2 architecture
+        3 corresponds to MFMA in CDNA 3 architecture
+    """
+
+    arch_info = _triton.get_arch_info()
+    gfx_arch_details = re.search('amd.*', arch_info)
+    if gfx_arch_details is None:
+        return 0
+    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
+    gpu_name = gfx_arch_details[1].split(':')[0]
+    if gpu_name in ['gfx908']:
+        return 1
+    if gpu_name in ['gfx90a']:
+        return 2
+    if gpu_name in ['gfx940', 'gfx941', 'gfx942']:
+        return 3
+    return 0
+
+
 def get_amdgpu_arch_fulldetails():
     """
     get the amdgpu full ISA details for compiling:
@@ -291,7 +315,11 @@ def get_amdgpu_arch_fulldetails():
         gfx_arch = os.environ.get('MI_GPU_ARCH', arch_name)
         if gfx_arch is None:
             raise RuntimeError('gfx_arch is None (not specified)')
-        return {"gfx_triple": arch_triple, "gfx_arch": gfx_arch, "gfx_features": arch_features}
+        mat_core_ver = gpu_matrix_core_version()
+        capability = gpu_matrix_core_version() * 100
+
+        return {"gfx_triple": arch_triple, "gfx_arch": gfx_arch, "gfx_features": arch_features,\
+                 "capability": capability, "matrix_core_version": mat_core_ver}
     except BaseException as e:
         print("Error: Attempting to get amgpu ISA Details {}".format(e))
         return None
@@ -485,3 +513,6 @@ class HIPBackend(BaseBackend):
             return _triton.get_num_warps(module)
         else:
             return _triton.get_num_warps(module)
+
+    def get_matrix_core_version(self):
+        return gpu_matrix_core_version()

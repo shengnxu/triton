@@ -1752,19 +1752,30 @@ struct FpToFpOpConversion
     for (unsigned i = 0; i < std::min(numElements, operands.size()); i++) {
       inVals.push_back(operands[i][0]);
     }
+
+#ifdef USE_ROCM
+    bool isSrcFP16 = srcElementType.isF16();
+    bool isSrcBF16 = srcElementType.isBF16();
+
+    if ((isSrcFP16 || isSrcBF16)
+          && isDstFP32) {
+      SmallVector<Value> outVals;
+      for (Value &v : inVals) {
+        if(isSrcFP16)
+          outVals.push_back(convertFp16ToFp32(loc, rewriter, v));
+        else
+          outVals.push_back(convertBf16ToFp32(loc, rewriter, v));
+      }
+      return outVals;
+    }
+#endif
+
     if (useFP16IntermediateSrc)
       for (Value &v : inVals)
         v = convertFp32ToFp16NZ(loc, rewriter, v);
     inVals.resize(numElements, undef(typeConverter->convertType(srcType)));
     
     SmallVector<Value> outVals;
-    if (srcElementType.isF16() && dstElementType.isF32()) {
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[0]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[1]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[2]));
-      outVals.push_back(convertFp16ToFp32(loc, rewriter, inVals[3]));
-      return outVals;
-    }
     auto cvtFunc = getConversionFunc(isSrcFP32 ? f16_ty : srcElementType,
                                      isDstFP32 ? f16_ty : dstElementType);
     outVals = cvtFunc(loc, rewriter, inVals);

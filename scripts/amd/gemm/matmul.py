@@ -195,7 +195,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    c = accumulator
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.

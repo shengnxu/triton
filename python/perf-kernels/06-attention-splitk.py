@@ -466,6 +466,7 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
         split_k = split_k // 2
     split_k = min(split_k, 64)
     split_k = max(split_k, 1)
+    print(f"split_k = {split_k}")
     return split_k
 
 # @register_operator
@@ -703,44 +704,36 @@ def get_input_shapes():
     return cases
 
 
-# @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-#                          [(4, 48, 1024, 64),
-#                           (4, 48, 2048, 64),
-#                           (4, 48, 4096, 64),
-#                           (4, 48, 1024, 128),
-#                           (4, 48, 2048, 128),
-#                           (4, 48, 4096, 128),
-#                           #(4, 48, 8192, 64),
-#                           #(4, 48, 16384, 64)
-#                           ])
-# def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
-#     torch.manual_seed(20)
-#     q = (
-#         torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
-#         .normal_(mean=0., std=0.5)
-#         .requires_grad_()
-#     )
-#     k = (
-#         torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
-#         .normal_(mean=0., std=0.5)
-#         .requires_grad_()
-#     )
-#     v = (
-#         torch.empty((Z, H, D_HEAD, N_CTX), dtype=dtype, device="cuda")
-#         .normal_(mean=0., std=0.5)
-#         .requires_grad_()
-#     )
-#     sm_scale = 0.5
-#     dout = torch.randn_like(q)
-#     # reference implementation
-#     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-#     p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-#     p = torch.softmax(p.float(), dim=-1).half()
-#     ref_out = torch.matmul(p, v.transpose(2,3))
-#     # triton implementation
-#     tri_out = attention(q, k, v, sm_scale)
-#     # compare
-#     assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+@pytest.mark.parametrize('B, Mq, Mkv, Hq, Hkv, K',
+                         get_input_shapes())
+def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
+    torch.manual_seed(20)
+    q = (
+        torch.empty((B, Mq, Hkv, Hq // Hkv, K), dtype=dtype, device="cuda")
+        .normal_(mean=0., std=0.5)
+        .requires_grad_()
+    )
+    k = (
+        torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
+        .normal_(mean=0., std=0.5)
+        .requires_grad_()
+    ).expand(-1, -1, -1, Hq // Hkv, -1)
+    v = (
+        torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
+        .normal_(mean=0., std=0.5)
+        .requires_grad_()
+    ).expand(-1, -1, -1, Hq // Hkv, -1)
+    scale = 1 / K**0.5
+    tri_out = attention(q, k, v, scale)
+
+    q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
+    k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    v = v.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    attn = (q @ k.transpose(-1, -2)).softmax(-1) * scale
+    ref_out = attn @ v
+
+    # compare
+    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
 
 
 try:

@@ -281,8 +281,7 @@ def matmul_kernel(
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
 @triton.jit
 def leaky_relu(x):
-    x = x + 1
-    return tl.where(x >= 0, x, 0.01 * x)
+    return tl.where(x > 0, x, 0.01 * x)
 
 
 # %%
@@ -298,7 +297,8 @@ def matmul(a, b, activation=""):
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+   # c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=torch.float32)
     # 1D launch kernel where each block gets its own program.
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
@@ -311,7 +311,7 @@ def matmul(a, b, activation=""):
         c.stride(0), c.stride(1),
         ACTIVATION=activation
     )
-    return c
+    return c.to(torch.float16)
 
 
 # %%
@@ -336,7 +336,9 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
     a = torch.randn((M, K), device='cuda', dtype=torch.float16)
     b = torch.randn((K, N), device='cuda', dtype=torch.float16)
     triton_output = matmul(a, b)
+    triton_relu_output = matmul(a, b, activation="leaky_relu")
     torch_output = torch.matmul(a, b)
+    torch_relu_output = torch.nn.functional.leaky_relu(torch_output)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
@@ -345,6 +347,12 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
     else:
         print("❌ Triton and Torch differ")
         assert torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol)
+
+    if torch.allclose(triton_relu_output, torch_relu_output, atol=1e-2, rtol=rtol):
+        print("✅ Fused matmul Triton and Torch match")
+    else:
+        print("❌ Fused matmul Triton and Torch differ")
+        assert torch.allclose(triton_relu_output, torch_relu_output, atol=1e-2, rtol=rtol)
 
 
 # %%

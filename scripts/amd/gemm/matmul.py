@@ -89,7 +89,7 @@ def get_full_tuning_space(use_split_k):
 #        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
 #        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
 #        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'SPLIT_K': 8}, num_stages=1, num_warps=2),
-        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 8}, num_stages=1, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'SPLIT_K': 1}, num_stages=1, num_warps=2),
 #        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 4, 'SPLIT_K': 8}, num_stages=1, num_warps=2),
 #        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 8}, num_stages=1, num_warps=4),
 #        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 1, 'SPLIT_K': 10}, num_stages=1, num_warps=1),
@@ -213,8 +213,7 @@ def matmul_kernel_splitK(
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
 @triton.jit
 def leaky_relu(x):
-    x = x + 1
-    return tl.where(x >= 0, x, 0.01 * x)
+    return tl.where(x > 0, x, 0.01 * x)
 
 
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
@@ -287,7 +286,9 @@ def test_correctness(M, N, K, datatype):
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     triton_output = matmul(a, b)
+    triton_activation_output = matmul(a, b, activation= "leaky_relu")
     torch_output = torch.matmul(a, b)
+    torch_activation_output=torch.nn.functional.leaky_relu(torch_output)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
@@ -298,6 +299,13 @@ def test_correctness(M, N, K, datatype):
     else:
         print(f'❌ Triton and Torch differ for {size_str}')
         maxloc(triton_output,  torch_output)
+
+    if torch.allclose(triton_activation_output, torch_activation_output, atol=1e-2, rtol=rtol):
+        print(f'✅ fused matmul Triton and Torch match for {size_str}')
+        maxloc(triton_activation_output,  torch_activation_output)
+    else:
+        print(f'❌ fused matmul Triton and Torch differ for {size_str}')
+        maxloc(triton_activation_output,  torch_activation_output)
 
 def run_speed(M, N, K, datatype, use_rocprof, provider):
     print("in run_speed")

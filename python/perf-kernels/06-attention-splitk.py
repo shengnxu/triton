@@ -466,7 +466,6 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
         split_k = split_k // 2
     split_k = min(split_k, 64)
     split_k = max(split_k, 1)
-    print(f"split_k = {split_k}")
     return split_k
 
 # @register_operator

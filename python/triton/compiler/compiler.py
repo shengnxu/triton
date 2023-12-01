@@ -175,6 +175,42 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target,
     pm.run(mod)
     return mod
 
+def get_amdgcn_bitcode_paths(gfx_arch: str):
+    print("get_amdgcn_bitcode_paths")
+    gpu_arch_agnostic_bitcode_libraries = ["opencl.bc",
+                                           "ocml.bc",
+                                           "ockl.bc",
+                                           "oclc_finite_only_off.bc",
+                                           "oclc_daz_opt_off.bc",
+                                           "oclc_correctly_rounded_sqrt_on.bc",
+                                           "oclc_unsafe_math_off.bc",
+                                           "oclc_wavefrontsize64_on.bc",
+                                           "oclc_abi_version_400.bc", ]
+
+    gfx_arch_id = re.search('gfx(\\w+)', gfx_arch).group(1).strip()
+
+    gpu_arch_specific_bitcode_library = 'oclc_isa_version_' + gfx_arch_id + ".bc"
+    current_dir = Path(__file__)
+    bitcode_path_dir = os.path.join('/pyenv/versions/3.10.0/lib/python3.10/site-packages/triton/third_party/hip/', "lib/bitcode/")
+    #bitcode_path_dir = 'pyenv/versions/3.10.0/lib/python3.10/site-packages/triton/third_party/hip/'
+    print(f'current_dir: {current_dir} bitcode_path_dir: {bitcode_path_dir}')
+    amdgcn_bitcode_paths = {}
+    i = 0
+    for bc_lib in gpu_arch_agnostic_bitcode_libraries:
+        bc_path = bitcode_path_dir + bc_lib
+        print(f"bc_path: {bc_path}")
+        if os.path.exists(bc_path):
+            amdgcn_bitcode_paths['library_' + str(i)] = bc_path
+            i += 1
+    bc_gfx_path = bitcode_path_dir + gpu_arch_specific_bitcode_library
+    print(f"bc_gfx_path: {bc_gfx_path}")
+    if os.path.exists(bc_gfx_path):
+        #amdgcn_bitcode_paths['library_' + str(i)] = bc_gfx_path
+        amdgcn_bitcode_paths['library_' + str(i)] = '/pyenv/versions/3.10.0/lib/python3.10/site-packages/triton/third_party/hip/lib/bitcode/oclc_isa_version_90a.bc'
+
+    amdgcn_bitcode_paths['library_' + str(i)] = '/pyenv/versions/3.10.0/lib/python3.10/site-packages/triton/third_party/hip/lib/bitcode/oclc_isa_version_90a.bc'
+    print(f"amdgcn_bitcode_paths: {amdgcn_bitcode_paths}")
+    return amdgcn_bitcode_paths
 
 def _add_external_libs(mod, libs):
     for name, path in libs.items():

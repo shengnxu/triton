@@ -12,4 +12,4 @@ export AMDGCN_ENABLE_DUMP=1
 export TRITON_USE_ROCM=ON
 
 # pip install -U matplotlib pandas filelock tabulate
-pip install --verbose -e .
+pip install --verbose .

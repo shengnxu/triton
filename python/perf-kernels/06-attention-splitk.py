@@ -12,20 +12,22 @@ import sys
 import triton
 import triton.language as tl
 
-# from .attn_bias import BlockDiagonalCausalWithOffsetPaddedKeysMask
-
-
 def _strides(x: torch.Tensor, *stride_names: str):
     assert x.ndim == len(stride_names)
     return {f"stride_{s}": x.stride(i) for i, s in enumerate(stride_names)}
 
 
-# if TYPE_CHECKING or _has_triton21():
-#     import triton
-#     import triton.language as tl
-
-#     from xformers.triton.vararg_kernel import VAR_ARGS_ARRAY, unroll_varargs
-
+# @triton.autotune(
+#    configs=[
+#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
+#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
+#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
+#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32}, num_stages=1, num_warps=2),
+#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64}, num_stages=1, num_warps=2),
+#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128}, num_stages=1, num_warps=4),
+#    ],
+#    key=['Z', 'H', 'G', 'N_CTX_Q', 'N_CTX_K', 'BLOCK_DMODEL'],        
+# )
 @triton.jit
 def _fwd_kernel_splitK(
     Q,
@@ -458,6 +460,7 @@ def _splitK_reduce(
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
+    # print(f"B = {B}, H = {H}, Mk = {Mk}")
     """Heuristic for the number of splits"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     split_k = max(Mk, 1024) // bh
@@ -700,6 +703,13 @@ def get_input_shapes():
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
         for i in range(8, 18)
     ]
+
+    # cases = [
+    #     # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
+    #     (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
+    #     for i in range(17, 18)
+    # ]
+
     return cases
 
 
@@ -724,6 +734,7 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     ).expand(-1, -1, -1, Hq // Hkv, -1)
     scale = 1 / K**0.5
     tri_out = attention(q, k, v, scale)
+    tri_out = tri_out.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
 
     q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
     k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
@@ -732,7 +743,11 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     ref_out = attn @ v
 
     # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+
+    print(f"ref = {ref_out}")
+    print(f"tri = {tri_out}")
+
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=0)
 
 
 try:

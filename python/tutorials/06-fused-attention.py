@@ -88,10 +88,10 @@ def _attn_fwd_inner(
 # re-tuning.
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
    ],
    key=['Z', 'H', 'N_CTX', 'STAGE', 'BLOCK_DMODEL'],
@@ -645,11 +645,11 @@ except BaseException:
 
 # vary seq length for fixed head and batch=4
 configs = []
-for mode in ['fwd', 'bwd']:
-    for D_HEAD in [128, 64]:
+for mode in ['fwd']:
+    for D_HEAD in [64]:
         if mode == 'bwd' and D_HEAD == 128:
             continue
-        for causal in [False, True]:
+        for causal in [False]:
             if mode == 'bwd' and causal == False:
                 continue
             configs.append(triton.testing.Benchmark(
@@ -685,7 +685,7 @@ def bench_flash_attention(
 ):
     assert mode in ["fwd", "bwd"]
     warmup = 25
-    rep = 100
+    rep = 30
     split_kernel = False
     # Bwd pass only supports causal=True right now
     if mode == 'bwd':
@@ -725,4 +725,4 @@ def bench_flash_attention(
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path=".", print_data=True)
+# bench_flash_attention.run(save_path=".", print_data=True)

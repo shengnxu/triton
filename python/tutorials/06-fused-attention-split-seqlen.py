@@ -43,8 +43,6 @@ def _attn_fwd_inner(
     pre_load_v: tl.constexpr,
 ):
     BLOCK_K = BLOCK_M // 2
-    # test scripts
-    # test 2
     # range of values handled by this stage
     if STAGE == 1:
         lo, hi = 0, start_m * BLOCK_M
@@ -64,11 +62,10 @@ def _attn_fwd_inner(
         if pre_load_v:
             v = tl.load(V_block_ptr)
         qk_1 = tl.zeros([BLOCK_K, BLOCK_N], dtype=tl.float32)
-        qk_2 = tl.zeros([BLOCK_K, BLOCK_N], dtype=tl.float32)
-        if STAGE == 2:
-            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-            qk_1 = tl.where(mask, qk_1, float("-inf"))
-            qk_2 = tl.where(mask, qk_2, float("-inf"))
+        # if STAGE == 2:
+        #     mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+        #     qk_1 = tl.where(mask, qk_1, float("-inf"))
+        #     qk_2 = tl.where(mask, qk_2, float("-inf"))
         qk_1 += tl.dot(q1, k)
         m_ij_1 = tl.maximum(m_i_1, tl.max(qk_1, 1))
         qk_1 = qk_1 - m_ij_1[:, None]
@@ -82,7 +79,7 @@ def _attn_fwd_inner(
         l_i_1 = l_i_1 * alpha_1 + l_ij_1
         m_i_1 = m_ij_1
 
-
+        qk_2 = tl.zeros([BLOCK_K, BLOCK_N], dtype=tl.float32)
         qk_2 += tl.dot(q2, k)
         m_ij_2 = tl.maximum(m_i_2, tl.max(qk_2, 1))
         qk_2 = qk_2 - m_ij_2[:, None]
@@ -106,10 +103,10 @@ def _attn_fwd_inner(
 # re-tuning.
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'BLOCK_K': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'BLOCK_K': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'BLOCK_K': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'BLOCK_K': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'BLOCK_K': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'BLOCK_K': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'BLOCK_K': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
    ],
    key=['Z', 'H', 'N_CTX', 'STAGE', 'BLOCK_DMODEL'],
@@ -760,4 +757,4 @@ def bench_flash_attention(
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path=".", print_data=True)
+# bench_flash_attention.run(save_path=".", print_data=True)

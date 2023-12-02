@@ -71,6 +71,7 @@ def _fwd_kernel_splitK(
     USE_SEQ_LEN: tl.constexpr,
     PACKED_PER_VAL: tl.constexpr = 1,
     N_GROUPS: tl.constexpr = 1,
+    pre_load_v: tl.constexpr=False,
 ):
     """This kernel can accept non-quantized or int4-quantized keys/values.
     PACKED_PER_VAL determines the quantization type:
@@ -201,24 +202,30 @@ def _fwd_kernel_splitK(
         # k: "VAR_ARGS_ARRAY"  # noqa: F821
         # v: "VAR_ARGS_ARRAY"  # noqa: F821
         # for i in range(len(acc)):  # noqa: F821
-        k, v = load_dequantize_k_v_group(  # noqa: F821
-            K_block_ptr,
-            V_block_ptr,
-            K_scale_shift_block_ptr,
-            V_scale_shift_block_ptr,
-            BOUNDS_CHECKS_N,
-            PACKED_PER_VAL,
-            PACKED_D_PER_GROUP,
-            Q.dtype.element_ty,
-            0,
-        )
+        #k, v = load_dequantize_k_v_group(  # noqa: F821
+        #    K_block_ptr,
+        #    V_block_ptr,
+        #    K_scale_shift_block_ptr,
+        #    V_scale_shift_block_ptr,
+        #    BOUNDS_CHECKS_N,
+        #    PACKED_PER_VAL,
+        #    PACKED_D_PER_GROUP,
+        #    Q.dtype.element_ty,
+        #    0,
+        #)
         # k.append(k_tmp)
         # v.append(v_tmp)
+        k = tl.load(K_block_ptr, boundary_check=(1,) if BOUNDS_CHECKS_N else ())
+        if pre_load_v:
+            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
 
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # for i in range(elem_num):  # noqa: F821
         qk += tl.dot(q, k)  # noqa: F821
+        if not pre_load_v:
+            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
+
         qk *= qk_scale
 
         # TODO: This is slow, and only needed at the last iteration.
@@ -647,6 +654,7 @@ class _attention(torch.autograd.Function):
             num_stages=1,
             PACKED_PER_VAL=PACKED_PER_VAL,
             N_GROUPS=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1,
+            pre_load_v=False
         )
 
         if mqa_swap_seqlen_head:

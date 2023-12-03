@@ -688,7 +688,8 @@ class _attention(torch.autograd.Function):
             lse = lse[:, 0]
         if Mk == 0:
             out.zero_()
-
+            
+        out = out.reshape(B, H, -1, Kq).transpose(1, 2).contiguous()
         return out
 
 attention = _attention.apply
@@ -734,20 +735,15 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     ).expand(-1, -1, -1, Hq // Hkv, -1)
     scale = 1 / K**0.5
     tri_out = attention(q, k, v, scale)
-    tri_out = tri_out.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
 
     q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
     k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
     v = v.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
-    attn = (q @ k.transpose(-1, -2)).softmax(-1) * scale
+    attn = (q @ k.transpose(-1, -2) * scale).softmax(-1)
     ref_out = attn @ v
 
     # compare
-
-    print(f"ref = {ref_out}")
-    print(f"tri = {tri_out}")
-
-    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=0)
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-3, rtol=0)
 
 
 try:

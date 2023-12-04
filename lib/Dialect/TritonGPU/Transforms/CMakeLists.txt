@@ -10,6 +10,7 @@ add_mlir_dialect_library(TritonGPUTransforms
   RemoveLayoutConversions.cpp
   ReorderInstructions.cpp
   StreamPipeline.cpp
+  DotSlicing.cpp
   TritonGPUConversion.cpp
   Utility.cpp
 

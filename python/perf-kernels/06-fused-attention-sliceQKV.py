@@ -47,27 +47,28 @@ def _attn_fwd(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    D_TILE: tl.constexpr,
     pre_load_v: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     qkv_offset = off_hz * stride_qh
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_qm, stride_qk),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, 32),
-        order=(1, 0)
-    )
-    K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, 0),
-        block_shape=(32, BLOCK_N),
-        order=(0, 1)
-    )
+    # Q_block_ptr = tl.make_block_ptr(
+    #     base=Q + qkv_offset,
+    #     shape=(N_CTX, BLOCK_DMODEL),
+    #     strides=(stride_qm, stride_qk),
+    #     offsets=(start_m * BLOCK_M, 0),
+    #     block_shape=(BLOCK_M, 32),
+    #     order=(1, 0)
+    # )
+    # K_block_ptr = tl.make_block_ptr(
+    #     base=K + qkv_offset,
+    #     shape=(BLOCK_DMODEL, N_CTX),
+    #     strides=(stride_kk, stride_kn),
+    #     offsets=(0, 0),
+    #     block_shape=(32, BLOCK_N),
+    #     order=(0, 1)
+    # )
     V_block_ptr = tl.make_block_ptr(
         base=V + qkv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
@@ -76,9 +77,19 @@ def _attn_fwd(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(0, 1)
     )
-    # initialize offsets
+
+    # offs_d = tl.arange(0, 32)
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
+    # off_q = off_hz * stride_qh + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    # off_k = off_hz * stride_qh + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kk
+    # off_v = off_hz * stride_qh + offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    # Initialize pointers to Q, K, V
+    # q_ptrs = Q + off_q
+    # k_ptrs = K + off_k
+    # v_ptrs = V + off_v
+
+    # initialize offsets
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
@@ -184,6 +195,7 @@ class _attention(torch.autograd.Function):
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1],
             N_CTX=q.shape[2],
+            D_TILE = 32,
             BLOCK_DMODEL=Lk,
         )
 

@@ -83,11 +83,11 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4), # d64-False
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4), # d64-False
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
    ],
    key=['Z', 'H', 'N_CTX', 'STAGE', 'BLOCK_DMODEL'],
 )
@@ -733,25 +733,25 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for mode in ['fwd', 'bwd']:
-    for D_HEAD in [128, 64]:
+for mode in ['fwd']:
+    for D_HEAD in [128]:
         if mode == 'bwd' and D_HEAD == 128:
             continue
-        for causal in [False, True]:
+        for causal in [False]:
             if mode == 'bwd' and causal == False:
                 continue
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
+                x_vals=[#(16, 16, 1024),
+                        #(8, 16, 2048),
                         (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
-                        (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        #(2, 16, 8192),
+                        #(1, 16, 16384),
+                        #(4, 48, 1024),
+                        #(4, 48, 2048),
+                        #(4, 48, 4096),
+                        #(4, 48, 8192),
+                        #(4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),

@@ -1633,7 +1633,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                          if triton.language.semantic.gpu_matrix_core_version() == 0 else
                          # MFMA Test Dot tests
                          [(*shape, 2, False, False, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim)
-                          for shape in [(64, 64, 64), (32, 32, 32), (16, 16, 16)]
+                          for shape in [(128, 128, 128), (32, 32, 32), (16, 16, 16)]
                           for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [True, False]
                           for in_dtype, out_dtype in [('float16', 'float16'),
@@ -1646,7 +1646,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
                          [(*shape_nw, col_a, col_b, 'none', allow_tf32, in_dtype, out_dtype, non_k_dim)
-                          for shape_nw in [[128, 128, 32, 2],
+                          for shape_nw in [[128, 128, 128, 2],
                                            [128, 16, 32, 4],
                                            [128, 128, 64, 2],
                                            [128, 32, 32, 2],

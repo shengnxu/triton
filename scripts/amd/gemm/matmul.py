@@ -11,6 +11,7 @@ import sys
 import yaml
 import os
 import subprocess
+import pytest
 
 
 
@@ -145,6 +146,7 @@ def matmul_kernel_splitK(
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
     # See above `Pointer Arithmetics` section for details
+
     if SPLIT_K == 1:
         offs_k = tl.arange(0, BLOCK_SIZE_K)
     else:
@@ -185,7 +187,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(tl.float16)
+    c = accumulator
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -193,17 +195,16 @@ def matmul_kernel_splitK(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+
     if SPLIT_K == 1:
         tl.store(c_ptrs, c, mask=c_mask)
     else:
         tl.atomic_add(c_ptrs, c, mask=c_mask)
 
-
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
 @triton.jit
 def leaky_relu(x):
-    x = x + 1
-    return tl.where(x >= 0, x, 0.01 * x)
+    return tl.where(x > 0, x, 0.01 * x)
 
 
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
@@ -218,7 +219,7 @@ def matmul(a, b, activation=""):
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    c = torch.zeros((M, N), device=a.device, dtype=torch.float32)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -234,24 +235,65 @@ def matmul(a, b, activation=""):
         ACTIVATION=activation
     )
 
-    return c
+    return c.to(a.dtype)
 
+def unravel_index(indices, shape):
+    shape = torch.tensor(shape)
+    indices = indices % shape.prod()  # prevent out-of-bounds indices
 
-def test_correctness(M, N, K, datatype = torch.float16):
+    coord = torch.zeros(indices.size() + shape.size(), dtype=int)
+
+    for i, dim in enumerate(reversed(shape)):
+        coord[..., i] = indices % dim
+        indices = indices // dim
+
+    return coord.flip(-1)
+
+def maxloc(tensor1, tensor2):
+    diff_tensor=torch.abs(tensor1-tensor2)
+    maxloc=torch.argmax(diff_tensor)
+    maxloc2d=unravel_index(maxloc, diff_tensor.shape)
+    tensor1_v_maxloc=tensor1[maxloc2d[0], maxloc2d[1]]
+    tensor2_v_maxloc=tensor2[maxloc2d[0], maxloc2d[1]]
+
+    print("Max difference location (row, column):", maxloc2d)
+    print("Value at maxloc in triton output:",  tensor1_v_maxloc.item())
+    print("Value at maxloc in torch ouput:",  tensor2_v_maxloc.item())
+
+@pytest.mark.parametrize("M, N, K, datatype",
+[ (*shape, datatype)
+    for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
+                  (128, 128, 64), (64, 128, 128), (32, 128, 64),
+                  (64, 64, 32), (32, 32, 128), (128, 128, 64),
+                  (64, 128, 128), (512, 512, 512), (1024, 1024, 1024),
+                  (16, 16, 1026), (32, 32, 1026)]
+    for datatype in [torch.float16]]
+)
+def test_correctness(M, N, K, datatype):
     torch.manual_seed(0)
     a = torch.randn((M, K), device='cuda', dtype=datatype)
     b = torch.randn((K, N), device='cuda', dtype=datatype)
     triton_output = matmul(a, b)
+    triton_activation_output = matmul(a, b, activation= "leaky_relu")
     torch_output = torch.matmul(a, b)
+    torch_activation_output=torch.nn.functional.leaky_relu(torch_output)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
     size_str = f'size, (M: {M}, N: {N}, K: {K})'
     if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
         print(f'✅ Triton and Torch match for {size_str}')
+        maxloc(triton_output,  torch_output)
     else:
         print(f'❌ Triton and Torch differ for {size_str}')
+        maxloc(triton_output,  torch_output)
 
+    if torch.allclose(triton_activation_output, torch_activation_output, atol=1e-2, rtol=rtol):
+        print(f'✅ fused matmul Triton and Torch match for {size_str}')
+        maxloc(triton_activation_output,  torch_activation_output)
+    else:
+        print(f'❌ fused matmul Triton and Torch differ for {size_str}')
+        maxloc(triton_activation_output,  torch_activation_output)
 
 def run_speed(M, N, K, datatype, use_rocprof, provider):
     a = torch.randn((M, K), device='cuda', dtype=datatype)

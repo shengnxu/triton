@@ -124,7 +124,7 @@ def _fwd_kernel_splitK(
         shape=(N_CTX_Q, D_PER_GROUP),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, D_PER_GROUP),
+        block_shape=(BLOCK_M, D_PER_GROUP//2),
         order=(1, 0),
     )
 
@@ -136,7 +136,7 @@ def _fwd_kernel_splitK(
         shape=(PACKED_D_PER_GROUP, hi),
         strides=(stride_kk, stride_kn),
         offsets=(0, lo),
-        block_shape=(PACKED_D_PER_GROUP, BLOCK_N),
+        block_shape=(PACKED_D_PER_GROUP//2, BLOCK_N),
         order=(0, 1),
     )
     v_base = V + off_h * stride_vh + off_z * stride_vz + off_g * stride_vg
@@ -145,7 +145,7 @@ def _fwd_kernel_splitK(
         shape=(hi, PACKED_D_PER_GROUP),
         strides=(stride_vn, stride_vk),
         offsets=(lo, 0),
-        block_shape=(BLOCK_N, PACKED_D_PER_GROUP),
+        block_shape=(BLOCK_N, PACKED_D_PER_GROUP//2),
         order=(1, 0),
     )
 
@@ -184,7 +184,8 @@ def _fwd_kernel_splitK(
     # acc = []
     elem_num = 1
     # for i in range(elem_num):  # noqa: F821
-    acc = tl.zeros([BLOCK_M, D_PER_GROUP], dtype=tl.float32)  # noqa: F821
+    acc_left = tl.zeros([BLOCK_M, D_PER_GROUP//2], dtype=tl.float32)  # noqa: F821
+    acc_right = tl.zeros([BLOCK_M, D_PER_GROUP//2], dtype=tl.float32)  # noqa: F821
 
     # scale sm_scale by log_2(e) and use
     # 2^x instead of exp in the loop because CSE and LICM
@@ -193,8 +194,11 @@ def _fwd_kernel_splitK(
     # load q: it will stay in SRAM throughout
     # q: "VAR_ARGS_ARRAY"  # noqa: F821
     # for i in range(elem_num):  # noqa: F821
-    q = tl.load(  # noqa: F821
+    q_left = tl.load(  # noqa: F821
         tl.advance(Q_block_ptr, (0, 0)), boundary_check=(0,)
+    )
+    q_right = tl.load(
+        tl.advance(Q_block_ptr, (0, D_PER_GROUP//2)), boundary_check=(0,)
     )
 
     # loop over k, v and update accumulator
@@ -215,14 +219,21 @@ def _fwd_kernel_splitK(
         #)
         # k.append(k_tmp)
         # v.append(v_tmp)
-        k = tl.load(K_block_ptr, boundary_check=(1,) if BOUNDS_CHECKS_N else ())
+        k_top = tl.load(K_block_ptr, boundary_check=(1,) if BOUNDS_CHECKS_N else ())
+        k_bottom = tl.load(
+            tl.advance(K_block_ptr, (PACKED_D_PER_GROUP//2, 0)),
+            boundary_check=(1,) if BOUNDS_CHECKS_N else ())
         if pre_load_v:
-            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
+            v_left = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
+            v_right = tl.load(
+                tl.advance(V_block_ptr, (0, PACKED_D_PER_GROUP//2)),
+                boundary_check=(0,) if BOUNDS_CHECKS_N else ())
 
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # for i in range(elem_num):  # noqa: F821
-        qk += tl.dot(q, k)  # noqa: F821
+        qk += tl.dot(q_left, k_top)  # noqa: F821
+        qk += tl.dot(q_right, k_bottom)
 
         qk *= qk_scale
 
@@ -243,9 +254,14 @@ def _fwd_kernel_splitK(
         # -- scale and update acc --
         # for i in range(elem_num):  # noqa: F821
         if not pre_load_v:
-            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
-        acc *= alpha[:, None]  # noqa: F821
-        acc += tl.dot(p, v)  # noqa: F821
+            v_left = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
+            v_right = tl.load(
+                tl.advance(V_block_ptr, (0, PACKED_D_PER_GROUP//2)),
+                boundary_check=(0,) if BOUNDS_CHECKS_N else ())
+        acc_left *= alpha[:, None]  # noqa: F821
+        acc_right *= alpha[:, None]
+        acc_left += tl.dot(p, v_left)  # noqa: F821
+        acc_right += tl.dot(p, v_right)
         # update pointers
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -263,13 +279,18 @@ def _fwd_kernel_splitK(
         shape=(N_CTX_Q, D_PER_GROUP),
         strides=(stride_osk_m, 1),
         offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, D_PER_GROUP),
+        block_shape=(BLOCK_M, D_PER_GROUP//2),
         order=(1, 0),
     )
     # for i in range(elem_num):  # noqa: F821
     tl.store(
         tl.advance(O_block_ptr, (0, 0)),
-        acc,  # noqa: F821
+        acc_left,  # noqa: F821
+        boundary_check=(0,),
+    )
+    tl.store(
+        tl.advance(O_block_ptr, (0, D_PER_GROUP//2)),
+        acc_right,  # noqa: F821
         boundary_check=(0,),
     )
     # Write metadata for split-K reduction
@@ -679,6 +700,8 @@ class _attention(torch.autograd.Function):
             BLOCK_SIZE=out.shape[-1],
             G=G,
             H=H,
+            num_warps=1,
+            num_stages=1
             # TODO: Tune num_warps
         )
         lse = lse.reshape([B, G, H, M])

@@ -379,84 +379,111 @@ def dequantize(
 
 @triton.jit
 def _splitK_reduce(
-    Out_splitK,  # [B, H, split_k, Mq, K]
-    Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
-    Out,  # [B, H, M, K]
-    LSE,  # [B, H, M]
-    split_k,
-    stride_osk_zhg,
-    stride_osk_s,
-    stride_osk_m,
-    stride_osk_k,
-    stride_mzhg,
-    stride_m2,
-    stride_ms,
-    stride_mm,
-    stride_oz,
-    stride_oh,
-    stride_og,
-    stride_om,
-    stride_ok,
-    stride_lse_zhg,
-    stride_lse_m,
-    BLOCK_SIZE: tl.constexpr,
-    H: tl.constexpr,
-    G: tl.constexpr,
+	Out_splitK,  # [B, H, split_k, Mq, K]
+	Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
+	Out,  # [B, H, M, K]
+	LSE,  # [B, H, M]
+	split_k,
+	stride_osk_zhg,
+	stride_osk_s,
+	stride_osk_m,
+	stride_osk_k,
+	stride_mzhg,
+	stride_m2,
+	stride_ms,
+	stride_mm,
+	stride_oz,
+	stride_oh,
+	stride_og,
+	stride_om,
+	stride_ok,
+	stride_lse_zhg,
+	stride_lse_m,
+	BLOCK_SIZE: tl.constexpr,
+	H: tl.constexpr,
+	G: tl.constexpr,
 ):
-    off_zhg = tl.program_id(0)
-    off_z = off_zhg // (H * G)
-    off_h = (off_zhg // G) % H
-    off_g = off_zhg % G
-    off_m = tl.program_id(1)
+	off_zhg = tl.program_id(0)
+	off_z = off_zhg // (H * G)
+	off_h = (off_zhg // G) % H
+	off_g = off_zhg % G
+	off_m = tl.program_id(1)
 
-    Out_splitK_ptr = (
-        Out_splitK
-        + stride_osk_zhg * off_zhg
-        + stride_osk_m * off_m
-        + tl.arange(0, BLOCK_SIZE)
-    )
-    Metadata_ptr = Metadata + stride_mzhg * off_zhg + off_m
-    m = tl.load(Metadata_ptr)
-    l_sum = tl.load(Metadata_ptr + stride_m2)
-    acc = tl.load(Out_splitK_ptr)
+	Out_splitK_ptr = (
+		Out_splitK
+		+ stride_osk_zhg * off_zhg
+		+ stride_osk_m * off_m
+		+ tl.arange(0, BLOCK_SIZE)
+	)
 
-    for split_k_idx in range(1, split_k):
-        Metadata_ptr = Metadata_ptr + stride_ms
-        Out_splitK_ptr = Out_splitK_ptr + stride_osk_s
+	Metadata_ptr = Metadata + stride_mzhg * off_zhg + off_m
+	m = tl.load(Metadata_ptr)
+	l_sum = tl.load(Metadata_ptr + stride_m2)
+	acc = tl.load(Out_splitK_ptr)
 
-        m_k = tl.load(Metadata_ptr)
-        l_k = tl.load(Metadata_ptr + stride_m2)
-        acc_k = tl.load(Out_splitK_ptr)
+	Metadata_ptr = Metadata_ptr + stride_ms
+	Out_splitK_ptr = Out_splitK_ptr + stride_osk_s
+	m_k1 = tl.load(Metadata_ptr)
+	l_k1 = tl.load(Metadata_ptr + stride_m2)
+	acc_k1 = tl.load(Out_splitK_ptr)
 
-        m_new = tl.maximum(m, m_k)
-        if m_k < m:
-            # Scale incoming values
-            alpha = tl.math.exp2(m_k - m_new)
-            acc_k = acc_k * alpha
-            l_k = l_k * alpha
-        else:
-            # Scale our values
-            alpha = tl.math.exp2(m - m_new)
-            acc = acc * alpha
-            l_sum = l_sum * alpha
+	for idx in range(2, split_k):
+		Metadata_ptr = Metadata_ptr + stride_ms
+		Out_splitK_ptr = Out_splitK_ptr + stride_osk_s
 
-        m = m_new
-        l_sum = l_sum + l_k
-        acc = acc + acc_k
+		m_k = m_k1
+		l_k = l_k1
+		acc_k = acc_k1
 
-    acc = acc / l_sum
-    Out_ptr = (
-        Out
-        + stride_oz * off_z
-        + stride_oh * off_h
-        + stride_og * off_g
-        + stride_om * off_m
-        + tl.arange(0, BLOCK_SIZE)
-    )
-    tl.store(Out_ptr, acc)
+		m_k1 = tl.load(Metadata_ptr)
+		l_k1 = tl.load(Metadata_ptr + stride_m2)
+		acc_k1 = tl.load(Out_splitK_ptr)
 
-    l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
-    tl.store(l_ptrs, (m + tl.math.log2(l_sum)) / 1.44269504)
+		m_new = tl.maximum(m, m_k)
+		if m_k < m:
+			# Scale incoming values
+			alpha = tl.math.exp2(m_k - m_new)
+			acc_k = acc_k * alpha
+			l_k = l_k * alpha
+		else:
+			# Scale our values
+			alpha = tl.math.exp2(m - m_new)
+			acc = acc * alpha
+			l_sum = l_sum * alpha
+
+		m = m_new
+		l_sum = l_sum + l_k
+		acc = acc + acc_k
+
+	m_new = tl.maximum(m, m_k1)
+	if m_k1 < m:
+		# Scale incoming values
+		alpha = tl.math.exp2(m_k1 - m_new)
+		acc_k1 = acc_k1 * alpha
+		l_k1 = l_k1 * alpha
+	else:
+		# Scale our values
+		alpha = tl.math.exp2(m - m_new)
+		acc = acc * alpha
+		l_sum = l_sum * alpha
+
+	m = m_new
+	l_sum = l_sum + l_k1
+	acc = acc + acc_k1
+
+	acc = acc / l_sum
+	Out_ptr = (
+		Out
+		+ stride_oz * off_z
+		+ stride_oh * off_h
+		+ stride_og * off_g
+		+ stride_om * off_m
+		+ tl.arange(0, BLOCK_SIZE)
+	)
+	tl.store(Out_ptr, acc)
+
+	l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
+	tl.store(l_ptrs, (m + tl.math.log2(l_sum)) / 1.44269504)
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:

@@ -223,8 +223,6 @@ def _fwd_kernel_splitK(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # for i in range(elem_num):  # noqa: F821
         qk += tl.dot(q, k)  # noqa: F821
-        if not pre_load_v:
-            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
 
         qk *= qk_scale
 
@@ -244,6 +242,8 @@ def _fwd_kernel_splitK(
 
         # -- scale and update acc --
         # for i in range(elem_num):  # noqa: F821
+        if not pre_load_v:
+            v = tl.load(V_block_ptr, boundary_check=(0,) if BOUNDS_CHECKS_N else ())
         acc *= alpha[:, None]  # noqa: F821
         acc += tl.dot(p, v)  # noqa: F821
         # update pointers
@@ -654,7 +654,7 @@ class _attention(torch.autograd.Function):
             num_stages=1,
             PACKED_PER_VAL=PACKED_PER_VAL,
             N_GROUPS=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1,
-            pre_load_v=False
+            pre_load_v=True
         )
 
         if mqa_swap_seqlen_head:

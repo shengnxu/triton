@@ -360,6 +360,8 @@ def translate_aot_arch(aot_arch):
     are both gfxAAA
     '''
     if aot_arch == 'MI200':
+        mat_core_ver = 2
+        capability = mat_core_ver * 100
         # gfx_arch_details = 'amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-'.split('--')
         # arch_triple = gfx_arch_details[0]
         # arch_name_features = gfx_arch_details[1].split(':')
@@ -368,6 +370,8 @@ def translate_aot_arch(aot_arch):
         return { "gfx_triple": 'amdgcn-amd-amdhsa',
                  "gfx_arch": 'gfx90a',
                  "gfx_features": '+sramecc,-xnack',
+                 "capability": capability,
+                 "matrix_core_version": mat_core_ver,
                  "num_warps": 4,
                  "num_stages": 2,
                  "num_ctas": 1,

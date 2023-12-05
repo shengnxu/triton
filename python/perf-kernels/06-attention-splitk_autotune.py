@@ -17,17 +17,17 @@ def _strides(x: torch.Tensor, *stride_names: str):
     return {f"stride_{s}": x.stride(i) for i, s in enumerate(stride_names)}
 
 
-# @triton.autotune(
-#    configs=[
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128}, num_stages=1, num_warps=4),
-#    ],
-#    key=['Z', 'H', 'G', 'N_CTX_Q', 'N_CTX_K', 'BLOCK_DMODEL'],        
-# )
+@triton.autotune(
+   configs=[
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32}, num_stages=1, num_warps=2),
+       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64}, num_stages=1, num_warps=2),
+       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128}, num_stages=1, num_warps=4),
+   ],
+   key=['Z', 'H', 'G', 'N_CTX_Q', 'N_CTX_K', 'BLOCK_DMODEL'],        
+)
 @triton.jit
 def _fwd_kernel_splitK(
     Q,
@@ -457,6 +457,7 @@ def _splitK_reduce(
 
     l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
     tl.store(l_ptrs, (m + tl.math.log2(l_sum)) / 1.44269504)
+
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
     # print(f"B = {B}, H = {H}, Mk = {Mk}")

@@ -99,6 +99,7 @@ def get_full_tuning_space(use_split_k):
         'perf_model': None,
         "top_k": None
     },
+    reset_to_zero=['c_ptr'],
 )
 @triton.heuristics({
     'EVEN_K': lambda args: args['K'] % (args['BLOCK_SIZE_K'] * args['SPLIT_K']) == 0,

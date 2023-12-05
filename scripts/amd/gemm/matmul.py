@@ -187,7 +187,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator
+    c = accumulator.to(c_ptr.type.element_ty)
 
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -219,7 +219,7 @@ def matmul(a, b, activation=""):
     M, K = a.shape
     K, N = b.shape
     # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=torch.float32)
+    c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (

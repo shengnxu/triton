@@ -8,6 +8,7 @@ from typing import Any, Tuple
 
 
 from triton.common import _build
+from triton.common.build import CurrentBuildTarget
 from triton.common.backend import BaseBackend, register_backend, compute_core_version_key
 from triton.compiler.make_launcher import get_cache_manager, make_so_cache_key
 from triton.compiler.utils import generate_cu_signature
@@ -284,12 +285,16 @@ def gpu_matrix_core_version() -> int:
         3 corresponds to MFMA in CDNA 3 architecture
     """
 
-    arch_info = _triton.get_arch_info()
-    gfx_arch_details = re.search('amd.*', arch_info)
-    if gfx_arch_details is None:
-        return 0
-    gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
-    gpu_name = gfx_arch_details[1].split(':')[0]
+    if CurrentBuildTarget.is_aot():
+        gpu_name = CurrentBuildTarget.arch['gfx_arch']
+    else:
+        arch_info = _triton.get_arch_info()
+        print(f'gpu_matrix_core_version {arch_info=}')
+        gfx_arch_details = re.search('amd.*', arch_info)
+        if gfx_arch_details is None:
+            return 0
+        gfx_arch_details = gfx_arch_details.group(0).strip().split('--')
+        gpu_name = gfx_arch_details[1].split(':')[0]
     if gpu_name in ['gfx908']:
         return 1
     if gpu_name in ['gfx90a']:

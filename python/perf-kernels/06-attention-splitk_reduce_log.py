@@ -378,113 +378,125 @@ def dequantize(
     return dequant
 
 @triton.jit
-def _splitK_reduce(
-	Out_splitK,  # [B, H, split_k, Mq, K]
-	Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
-	Out,  # [B, H, M, K]
-	LSE,  # [B, H, M]
-	split_k,
-	stride_osk_zhg,
-	stride_osk_s,
-	stride_osk_m,
-	stride_osk_k,
-	stride_mzhg,
-	stride_m2,
-	stride_ms,
-	stride_mm,
-	stride_oz,
-	stride_oh,
-	stride_og,
-	stride_om,
-	stride_ok,
-	stride_lse_zhg,
-	stride_lse_m,
-	BLOCK_SIZE: tl.constexpr,
-	H: tl.constexpr,
-	G: tl.constexpr,
+def _splitK_reduceMaxSum(
+    Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
+    Out_Metadata, #[B, H, 2, M_ceil] contains [m, l]
+    split_k,
+    M_ceil,
+    stride_mzhg,
+    stride_m2,
+    stride_ms,
+    stride_mm,
+    stride_omzhg,
+    stride_om2,
+    stride_omm,
+    H: tl.constexpr,
+    G: tl.constexpr,
 ):
-	off_zhg = tl.program_id(0)
-	off_z = off_zhg // (H * G)
-	off_h = (off_zhg // G) % H
-	off_g = off_zhg % G
-	off_m = tl.program_id(1)
+    off_zhg = tl.program_id(0)
+    off_z = off_zhg // (H * G)
+    off_h = (off_zhg // G) % H
+    off_g = off_zhg % G
 
-	Out_splitK_ptr = (
-		Out_splitK
-		+ stride_osk_zhg * off_zhg
-		+ stride_osk_m * off_m
-		+ tl.arange(0, BLOCK_SIZE)
-	)
+    # read  chunk
+    offset_k = tl.arange(0, split_k)
+    offset_m = tl.arange(0, M_ceil)
+    Metadata_ptr = Metadata + stride_mzhg * off_zhg + offset_k[:, None] * stride_ms + offset_m[None, :] * stride_mm
+    # max values
+    m = tl.load(Metadata_ptr)
+    m_max = tl.max(m, axis=0)
+    alpha = tl.exp2(m - m_max[None,:])
+    # read sum
+    l_sum = tl.load(Metadata_ptr + stride_m2)
+    l_sum *= alpha
+    g_sum = tl.sum(l_sum, axis=0)
 
-	Metadata_ptr = Metadata + stride_mzhg * off_zhg + off_m
-	m = tl.load(Metadata_ptr)
-	l_sum = tl.load(Metadata_ptr + stride_m2)
-	acc = tl.load(Out_splitK_ptr)
+    # store back to output (Metadata_)
+    Out_Metadata_ptr = Out_Metadata +  stride_omzhg * off_zhg + offset_m[None, :] * stride_omm
+    tl.store(Out_Metadata_ptr, m_max)
+    tl.store(Out_Metadata_ptr + stride_om2, g_sum)
 
-	Metadata_ptr = Metadata_ptr + stride_ms
-	Out_splitK_ptr = Out_splitK_ptr + stride_osk_s
-	m_k1 = tl.load(Metadata_ptr)
-	l_k1 = tl.load(Metadata_ptr + stride_m2)
-	acc_k1 = tl.load(Out_splitK_ptr)
+@triton.jit
+def _splitK_reduce(
+    Out_splitK,  # [B, H, split_k, Mq, K]
+    Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
+    Out_metadata, #[B, H, 2, M_ceil]
+    Out,  # [B, H, M, K]
+    LSE,  # [B, H, M]
+    split_k,
+    M_ceil,
+    stride_osk_zhg,
+    stride_osk_s,
+    stride_osk_m,
+    stride_osk_k,
+    stride_mzhg,
+    stride_m2,
+    stride_ms,
+    stride_mm,
+    stride_oz,
+    stride_oh,
+    stride_og,
+    stride_om,
+    stride_ok,
+    stride_omzhg,
+    stride_om2,
+    stride_omm,
+    stride_lse_zhg,
+    stride_lse_m,
+    BLOCK_SIZE: tl.constexpr,
+    H: tl.constexpr,
+    G: tl.constexpr,
+    D_PER_GROUP: tl.constexpr,
 
-	for idx in range(2, split_k):
-		Metadata_ptr = Metadata_ptr + stride_ms
-		Out_splitK_ptr = Out_splitK_ptr + stride_osk_s
+):
+    off_zhg = tl.program_id(0)
+    off_z = off_zhg // (H * G)
+    off_h = (off_zhg // G) % H
+    off_g = off_zhg % G
+    off_m = tl.program_id(2)
 
-		m_k = m_k1
-		l_k = l_k1
-		acc_k = acc_k1
+    # Write metadata for split-K reduction
+    O_block_ptr = tl.make_block_ptr(
+        base=Out_splitK + off_zhg * stride_osk_zhg,
+        shape=(split_k, D_PER_GROUP),
+        strides=(stride_osk_s, 1),
+        offsets=(off_m * M_ceil, 0),
+        block_shape=(split_k, D_PER_GROUP),
+        order=(1, 0),
+    )
+    # read acc
+    acc = tl.load(O_block_ptr, boundary_check=(1, 0))
+    
+    #read local m
+    m_base = Metadata + stride_mzhg * off_zhg
+    m_block_ptr = tl.make_block_ptr(
+        base = m_base,
+        shape=(split_k, 1),
+        strides=(stride_omzhg, 1),
+        offsets=(off_m, 0),
+        block_shape=(split_k, 1),
+        order=(1, 0)
+    )
+    l_m = tl.load(m_block_ptr)
 
-		m_k1 = tl.load(Metadata_ptr)
-		l_k1 = tl.load(Metadata_ptr + stride_m2)
-		acc_k1 = tl.load(Out_splitK_ptr)
+    gm_ptr = Out_metadata + stride_mzhg * off_zhg + off_m
+    g_m = tl.load(gm_ptr)
+    g_sum = tl.load(gm_ptr + stride_om2)
 
-		m_new = tl.maximum(m, m_k)
-		if m_k < m:
-			# Scale incoming values
-			alpha = tl.math.exp2(m_k - m_new)
-			acc_k = acc_k * alpha
-			l_k = l_k * alpha
-		else:
-			# Scale our values
-			alpha = tl.math.exp2(m - m_new)
-			acc = acc * alpha
-			l_sum = l_sum * alpha
-
-		m = m_new
-		l_sum = l_sum + l_k
-		acc = acc + acc_k
-
-	m_new = tl.maximum(m, m_k1)
-	if m_k1 < m:
-		# Scale incoming values
-		alpha = tl.math.exp2(m_k1 - m_new)
-		acc_k1 = acc_k1 * alpha
-		l_k1 = l_k1 * alpha
-	else:
-		# Scale our values
-		alpha = tl.math.exp2(m - m_new)
-		acc = acc * alpha
-		l_sum = l_sum * alpha
-
-	m = m_new
-	l_sum = l_sum + l_k1
-	acc = acc + acc_k1
-
-	acc = acc / l_sum
-	Out_ptr = (
-		Out
-		+ stride_oz * off_z
-		+ stride_oh * off_h
-		+ stride_og * off_g
-		+ stride_om * off_m
-		+ tl.arange(0, BLOCK_SIZE)
-	)
-	tl.store(Out_ptr, acc)
-
-	l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
-	tl.store(l_ptrs, (m + tl.math.log2(l_sum)) / 1.44269504)
-
+    alpha = tl.exp2(l_m - g_m)
+    acc = acc * alpha[:, None]
+    acc_out = tl.sum(acc, axis=0) / g_sum
+    Out_ptr = (
+        Out
+        + stride_oz * off_z
+        + stride_oh * off_h
+        + stride_og * off_g
+        + stride_om * off_m
+        + tl.arange(0, BLOCK_SIZE)
+    )
+    tl.store(Out_ptr, acc_out)
+    l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
+    tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
     # print(f"B = {B}, H = {H}, Mk = {Mk}")
@@ -519,61 +531,6 @@ class _attention(torch.autograd.Function):
     SUPPORTS_BMGHK = True
     NAME = "triton_splitKF"
 
-
-    # @classmethod
-    # def shape_not_supported_reasons(
-    #     cls, Mq: int, Mkv: int, K: int, Kv: int
-    # ) -> List[str]:
-    #     reasons = super().shape_not_supported_reasons(Mq, Mkv, K, Kv)
-    #     if K not in {16, 32, 64, 128}:
-    #         reasons.append(f"Embed dim {K} not supported")
-    #     return reasons
-
-    # @classmethod
-    # def not_supported_reasons(cls, d: Inputs) -> List[str]:
-    #     reasons = super(FwOp, cls).not_supported_reasons(d)
-    #     check_lastdim_alignment_stride1(reasons, "query", d.query, 8)
-    #     if d.key.dtype != torch.int32:
-    #         check_lastdim_alignment_stride1(reasons, "key", d.key, 8)
-    #         check_lastdim_alignment_stride1(reasons, "value", d.value, 8)
-    #     if cls.OPERATOR is None:
-    #         reasons.append("triton is not available")
-    #     if d.device.type == "cuda":
-    #         # Has only been tested on 8.0 / 9.0.
-    #         if torch.cuda.get_device_capability(d.device) < (8, 0):
-    #             reasons.append(
-    #                 "requires GPU with sm80 minimum compute capacity, e.g., A100/H100/L4"
-    #             )
-
-    #     q_len = d.query.shape[1]
-    #     if isinstance(d.attn_bias, BlockDiagonalCausalWithOffsetPaddedKeysMask):
-    #         seqinfo = d.attn_bias.q_seqinfo
-    #         if q_len != seqinfo.seqstart_py[-1]:
-    #             reasons.append(
-    #                 f"Expected total {seqinfo.seqstart_py[-1]} queries not {q_len}"
-    #             )
-    #         q_len = seqinfo.min_seqlen
-    #         if q_len != seqinfo.max_seqlen:
-    #             reasons.append(
-    #                 "Variable query len is not supported in the presence of causal mask."
-    #             )
-
-    #     if d.key.ndim in [4, 5] and d.key.shape[-2] != 1:
-    #         if d.key.stride(-2) == 0 and d.value.stride(-2) == 0 and q_len > 1:
-    #             reasons.append("multiquery is only supported with query seqlen=1")
-
-    #     if d.attn_bias is not None and q_len > 1:
-    #         reasons.append(
-    #             "query with seqlen > 1 is not supported in the presence of causal mask"
-    #         )
-    #     return reasons
-
-
-    # @classmethod
-
-    # def apply(
-    #     cls, inp: Inputs, needs_gradient: bool
-    # ) -> Tuple[torch.Tensor, Optional[Context]]:
     @staticmethod
     def forward(cls, q, k, v, scale_float):
 
@@ -639,6 +596,9 @@ class _attention(torch.autograd.Function):
         metadata = torch.empty(
             [B * G * H, 2, split_k, M_ceil], dtype=torch.float32, device=q.device
         )
+        Out_metadata = torch.empty(
+            [B * G * H, 2, M_ceil], dtype=torch.float32, device=q.device
+        )
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H, split_k)
 
@@ -686,22 +646,39 @@ class _attention(torch.autograd.Function):
         else:
             out = torch.empty((B, M, G, H, Kq), device=q.device, dtype=q.dtype)
 
+        # compute global max and sum
+        grid = (B * G * H, 1)
+        _splitK_reduceMaxSum[grid](
+            metadata,
+            Out_metadata,
+            split_k=split_k,
+            M_ceil=M_ceil,
+            **_strides(metadata, "mzhg", "m2", "ms", "mm"),
+            **_strides(Out_metadata, "omzhg", "om2", "omm"),
+            H=H,
+            G=G
+        )
+
         # Merge together
-        grid = (B * G * H, M, 1)
+        grid = (B * G * H, 1, M)
         _splitK_reduce[grid](
             o_splitk,
             metadata,
+            Out_metadata,
             out,
             lse,
             split_k=split_k,
+            M_ceil=M_ceil,
             **_strides(o_splitk, "osk_zhg", "osk_s", "osk_m", "osk_k"),
             **_strides(metadata, "mzhg", "m2", "ms", "mm"),
+            **_strides(Out_metadata, "omzhg", "om2", "omm"),
             **_strides(out, "oz", "om", "og", "oh", "ok"),
             **_strides(lse, "lse_zhg", "lse_m"),
             BLOCK_SIZE=out.shape[-1],
             G=G,
             H=H,
             # TODO: Tune num_warps
+            D_PER_GROUP=Lk
         )
         lse = lse.reshape([B, G, H, M])
         if mqa_swap_seqlen_head:

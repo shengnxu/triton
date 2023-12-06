@@ -4,9 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 message(STATUS "HIP_BACKEND_MODE = ${HIP_BACKEND_MODE}")
 set(ROCM_DEFAULT_DIR "/opt/rocm")
 add_definitions( -DROCM_DEFAULT_DIR="${ROCM_DEFAULT_DIR}")
-set(ROCM_LIBRARIES
-  ${CMAKE_CURRENT_SOURCE_DIR}/lib/hsa/libhsa-runtime64.so
-)
+find_package(hip REQUIRED)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/include) # Tablegen'd files

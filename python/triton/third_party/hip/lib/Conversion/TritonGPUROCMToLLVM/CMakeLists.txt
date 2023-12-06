@@ -1,6 +1,3 @@
-add_library(rocm_libraries SHARED IMPORTED )
-set_target_properties(rocm_libraries PROPERTIES IMPORTED_LOCATION ${ROCM_LIBRARIES})
-
 add_mlir_conversion_library(TritonGPUROCMToLLVM
     ConvertLayoutOpToLLVM/SharedToDotOperandFMA.cpp
     ConvertLayoutOpToLLVM/SharedToDotOperandMMAv1.cpp
@@ -65,5 +62,5 @@ add_mlir_conversion_library(TritonGPUROCMToLLVM
     TritonGPUROCMTransforms
     TritonNvidiaGPUTransforms
     NVGPUIR
-    rocm_libraries
+    hip::device
 )

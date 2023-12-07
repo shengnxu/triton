@@ -107,9 +107,34 @@ def get_thirdparty_packages(triton_cache_path):
                 pass
             os.makedirs(package_root_dir, exist_ok=True)
             print(f'downloading and extracting {p.url} ...')
-            ftpstream = urllib.request.urlopen(p.url)
-            file = tarfile.open(fileobj=ftpstream, mode="r|*")
-            file.extractall(path=package_root_dir)
+            if p.package == 'llvm' and 'centos-x64' in p.url:
+                print(f'Taking CentOS 7 workaround path ...')
+                # Workaround: CentOS 7 cannot establish TLS connection to
+                # https://tritonlang.blob.core.windows.net
+                # Download with SSL disabled and verify with known checksum
+                import ssl
+                import shutil
+                import hashlib
+                context = ssl._create_unverified_context()
+                ftpstream = urllib.request.urlopen(p.url, context=context)
+                fn = os.path.join(triton_cache_path, p.package, 'centos7-workaround.tar.gz')
+                with open(fn, 'wb') as f:
+                    shutil.copyfileobj(ftpstream, f)
+                PACKAGE_HASH='0f0f85fc78fcc2621a29808281e2e8798747fe1bd53f7c512cd32cbb9d55fa4b'
+                with open(fn, 'rb') as f:
+                    h = hashlib.sha256()
+                    while block := f.read(64 * 1024):
+                        h.update(block)
+                    if h.hexdigest() != PACKAGE_HASH:
+                        raise IOError('File downloaded from {url} does not have matching checksum, '
+                                      + f'expected {PACKAGE_HASH}, acutal {h.hexdigest()}')
+                    f.seek(0)
+                    file = tarfile.open(fileobj=f, mode="r")
+                    file.extractall(path=package_root_dir)
+            else:
+                ftpstream = urllib.request.urlopen(p.url)
+                file = tarfile.open(fileobj=ftpstream, mode="r|*")
+                file.extractall(path=package_root_dir)
             # write version url to package_dir
             with open(os.path.join(package_dir, "version.txt"), "w") as f:
                 f.write(p.url)

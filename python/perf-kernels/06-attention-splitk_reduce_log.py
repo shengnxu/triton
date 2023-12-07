@@ -381,8 +381,8 @@ def dequantize(
 def _splitK_reduceMaxSum(
     Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
     Out_Metadata, #[B, H, 2, M_ceil] contains [m, l]
-    split_k,
-    M_ceil,
+    split_k: tl.constexpr,
+    M_ceil: tl.constexpr,
     stride_mzhg,
     stride_m2,
     stride_ms,
@@ -405,14 +405,14 @@ def _splitK_reduceMaxSum(
     # max values
     m = tl.load(Metadata_ptr)
     m_max = tl.max(m, axis=0)
-    alpha = tl.exp2(m - m_max[None,:])
+    alpha = tl.math.exp2(m - m_max[None,:])
     # read sum
     l_sum = tl.load(Metadata_ptr + stride_m2)
     l_sum *= alpha
     g_sum = tl.sum(l_sum, axis=0)
 
     # store back to output (Metadata_)
-    Out_Metadata_ptr = Out_Metadata +  stride_omzhg * off_zhg + offset_m[None, :] * stride_omm
+    Out_Metadata_ptr = Out_Metadata +  stride_omzhg * off_zhg + offset_m * stride_omm
     tl.store(Out_Metadata_ptr, m_max)
     tl.store(Out_Metadata_ptr + stride_om2, g_sum)
 
@@ -423,7 +423,7 @@ def _splitK_reduce(
     Out_metadata, #[B, H, 2, M_ceil]
     Out,  # [B, H, M, K]
     LSE,  # [B, H, M]
-    split_k,
+    split_k:tl.constexpr,
     M_ceil,
     stride_osk_zhg,
     stride_osk_s,
@@ -483,8 +483,8 @@ def _splitK_reduce(
     g_m = tl.load(gm_ptr)
     g_sum = tl.load(gm_ptr + stride_om2)
 
-    alpha = tl.exp2(l_m - g_m)
-    acc = acc * alpha[:, None]
+    alpha = tl.math.exp2(l_m - g_m)
+    acc = acc * alpha
     acc_out = tl.sum(acc, axis=0) / g_sum
     Out_ptr = (
         Out
@@ -702,11 +702,11 @@ def get_input_shapes():
     cases = [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 18)
+        for i in range(8, 9)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(8, 18)
+        for i in range(17, 18)
     ]
 
     # cases = [

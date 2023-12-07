@@ -459,27 +459,27 @@ def _splitK_reduce(
     O_block_ptr = tl.make_block_ptr(
         base=Out_splitK + off_zhg * stride_osk_zhg,
         shape=(split_k, D_PER_GROUP),
-        strides=(stride_osk_s, 1),
-        offsets=(off_m * M_ceil, 0),
+        strides=(stride_osk_s, stride_osk_k),
+        offsets=(0, off_m * stride_osk_m),
         block_shape=(split_k, D_PER_GROUP),
         order=(1, 0),
     )
     # read acc
-    acc = tl.load(O_block_ptr, boundary_check=(1, 0))
+    acc = tl.load(O_block_ptr)
     
     #read local m
     m_base = Metadata + stride_mzhg * off_zhg
     m_block_ptr = tl.make_block_ptr(
         base = m_base,
         shape=(split_k, 1),
-        strides=(stride_omzhg, 1),
-        offsets=(off_m, 0),
+        strides=(stride_omzhg, stride_mm),
+        offsets=(0, off_m * stride_mm),
         block_shape=(split_k, 1),
         order=(1, 0)
     )
     l_m = tl.load(m_block_ptr)
 
-    gm_ptr = Out_metadata + stride_mzhg * off_zhg + off_m
+    gm_ptr = Out_metadata + stride_mzhg * off_zhg + stride_omm * off_m
     g_m = tl.load(gm_ptr)
     g_sum = tl.load(gm_ptr + stride_om2)
 

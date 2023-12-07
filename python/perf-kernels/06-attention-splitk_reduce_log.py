@@ -424,7 +424,7 @@ def _splitK_reduce(
     Out,  # [B, H, M, K]
     LSE,  # [B, H, M]
     split_k:tl.constexpr,
-    M_ceil,
+    M_ceil:tl.constexpr,
     stride_osk_zhg,
     stride_osk_s,
     stride_osk_m,
@@ -455,39 +455,32 @@ def _splitK_reduce(
     off_g = off_zhg % G
     off_m = tl.program_id(2)
 
+    # read  chunk
     spk_idx = tl.arange(0, split_k)
+    # offset_m = tl.arange(0, M_ceil)
+    Metadata_ptr = Metadata + stride_mzhg * off_zhg + spk_idx * stride_ms + off_m * stride_mm
+    # max values
+    m = tl.load(Metadata_ptr)
+    g_m = tl.max(m, axis=0)
+    alpha = tl.math.exp2(m - g_m)
+    # read sum
+    l_sum = tl.load(Metadata_ptr + stride_m2)
+    l_sum *= alpha
+    g_sum = tl.sum(l_sum, axis=0)
+
+    tl.debug_barrier()
+
     kidx = tl.arange(0, BLOCK_SIZE)
-    # Write metadata for split-K reduction
-    # O_block_ptr = tl.make_block_ptr(
-    #     base=Out_splitK + off_zhg * stride_osk_zhg,
-    #     shape=(split_k, D_PER_GROUP),
-    #     strides=(stride_osk_s, stride_osk_k),
-    #     offsets=(0, off_m * stride_osk_m),
-    #     block_shape=(split_k, D_PER_GROUP),
-    #     order=(1, 0),
-    # )
-    # # read acc
-    # acc = tl.load(O_block_ptr, boundary_check=(1, 0))
-    # print("acc = %f\n", acc)
     o_ptr = Out_splitK + off_zhg * stride_osk_zhg + stride_osk_s * spk_idx[:, None] + stride_osk_m * off_m + kidx[None, :] * stride_osk_k
     acc = tl.load(o_ptr)
 
     #read local m
     m_base = Metadata + stride_mzhg * off_zhg + stride_ms * spk_idx + off_m * stride_mm
     l_m = tl.load(m_base)
-    # m_block_ptr = tl.make_block_ptr(
-    #     base = m_base,
-    #     shape=(split_k, 1),
-    #     strides=(stride_omzhg, stride_mm),
-    #     offsets=(0, off_m * stride_mm),
-    #     block_shape=(split_k, 1),
-    #     order=(1, 0)
-    # )
-    # l_m = tl.load(m_block_ptr)
 
-    gm_ptr = Out_metadata + stride_omzhg * off_zhg + stride_omm * off_m
-    g_m = tl.load(gm_ptr)
-    g_sum = tl.load(gm_ptr + stride_om2)
+    # gm_ptr = Out_metadata + stride_omzhg * off_zhg + stride_omm * off_m
+    # g_m = tl.load(gm_ptr)
+    # g_sum = tl.load(gm_ptr + stride_om2)
 
     alpha = tl.math.exp2(l_m - g_m)
     acc = acc * alpha[:, None]
@@ -503,6 +496,7 @@ def _splitK_reduce(
     tl.store(Out_ptr, acc_out)
     l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
     tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
+
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
     # print(f"B = {B}, H = {H}, Mk = {Mk}")
@@ -653,18 +647,18 @@ class _attention(torch.autograd.Function):
         else:
             out = torch.empty((B, M, G, H, Kq), device=q.device, dtype=q.dtype)
 
-        # compute global max and sum
-        grid = (B * G * H, 1)
-        _splitK_reduceMaxSum[grid](
-            metadata,
-            Out_metadata,
-            split_k=split_k,
-            M_ceil=M_ceil,
-            **_strides(metadata, "mzhg", "m2", "ms", "mm"),
-            **_strides(Out_metadata, "omzhg", "om2", "omm"),
-            H=H,
-            G=G
-        )
+        # # compute global max and sum
+        # grid = (B * G * H, 1)
+        # _splitK_reduceMaxSum[grid](
+        #     metadata,
+        #     Out_metadata,
+        #     split_k=split_k,
+        #     M_ceil=M_ceil,
+        #     **_strides(metadata, "mzhg", "m2", "ms", "mm"),
+        #     **_strides(Out_metadata, "omzhg", "om2", "omm"),
+        #     H=H,
+        #     G=G
+        # )
 
         # print(f"split_k = {split_k}, M = {M}")
 
@@ -715,11 +709,11 @@ def get_input_shapes():
     cases = [
         # dict(B=max(1, 1), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 18)
+        for i in range(8, 9)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(8, 18)
+        for i in range(17, 18)
     ]
 
     # cases = [

@@ -714,12 +714,12 @@ attention = _attention.apply
 def get_input_shapes():
     cases = [
         # dict(B=max(1, 1), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-        (max(1, 1), 1, 2**i, 16, 1, 64)
-        for i in range(8, 9)
+        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
+        for i in range(8, 18)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(17, 17)
+        for i in range(8, 18)
     ]
 
     # cases = [
@@ -805,6 +805,7 @@ def bench_flash_attention(B, Mq, Mkv, Hq, Hkv, K, causal, mode, provider, dtype=
     assert mode in ['fwd', 'bwd']
     warmup = 100
     rep = 400
+    ms = 0
     if provider == "triton":
         q = torch.randn(
             [B, Mq, Hkv, Hq // Hkv, K], device="cuda", dtype=dtype, requires_grad=False

@@ -1725,36 +1725,63 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         off_m = tl.arange(0, BLOCK_M)
         off_n = tl.arange(0, BLOCK_N)
         off_l = tl.arange(0, BLOCK_N)
-        off_k = tl.arange(0, BLOCK_K)
-        Xs = X + off_m[:, None] * stride_xm + off_k[None, :] * stride_xk
-        Ys = Y + off_k[:, None] * stride_yk + off_n[None, :] * stride_yn
+        off_k = tl.arange(0, 32)
+        Xs = X + off_m[:, None] * stride_xm
+        Ys = Y + off_n[None, :] * stride_yn
         Ws = W + off_n[:, None] * stride_wn + off_l[None, :] * stride_wl
         Zs = Z + off_m[:, None] * stride_zm + off_n[None, :] * stride_zn
-        x = tl.load(Xs)
-        y = tl.load(Ys)
         # if in_dtype is tl.float8e4b15 or in_dtype is tl.float8e5:
         # TODO change types when they are available
-        if in_dtype is tl.float8e5b16 or in_dtype is tl.float8e4b8:
-            x = x.to(in_dtype)
-            y = y.to(in_dtype)
-        z = tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
-        if ADD_MATRIX:
-            z += tl.load(Zs)
-        if ADD_ROWS:
-            ZRs = Z + off_m * stride_zm
-            z += tl.load(ZRs)[:, None]
-        if ADD_COLS:
-            ZCs = Z + off_n * stride_zn
-            z += tl.load(ZCs)[None, :]
-        if DO_SOFTMAX:
-            max = tl.max(z, 1)
-            z = z - max[:, None]
-            num = tl.exp(z.to(tl.float32)).to(max.dtype)
-            den = tl.sum(num, 1)
-            z = num / den[:, None]
-        if CHAIN_DOT:
-            w = tl.load(Ws)
-            z = tl.dot(z.to(w.dtype), w, out_dtype=out_dtype)
+        # if in_dtype is tl.float8e5b16 or in_dtype is tl.float8e4b8:
+        #     x = x.to(in_dtype)
+        #     y = y.to(in_dtype)
+        z = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        # for i in range(0, 4):
+        Xs2 = Xs + off_k[None, :] * stride_xk
+        Ys2 = Ys + off_k[:, None] * stride_yk
+        x = tl.load(Xs2)
+        y = tl.load(Ys2)
+        z += tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
+        off_k += 32
+
+        Xs2 = Xs + off_k[None, :] * stride_xk
+        Ys2 = Ys + off_k[:, None] * stride_yk
+        x = tl.load(Xs2)
+        y = tl.load(Ys2)
+        z += tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
+        off_k += 32
+
+        Xs2 = Xs + off_k[None, :] * stride_xk
+        Ys2 = Ys + off_k[:, None] * stride_yk
+        x = tl.load(Xs2)
+        y = tl.load(Ys2)
+        z += tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
+        off_k += 32
+
+        Xs2 = Xs + off_k[None, :] * stride_xk
+        Ys2 = Ys + off_k[:, None] * stride_yk
+        x = tl.load(Xs2)
+        y = tl.load(Ys2)
+        z += tl.dot(x, y, allow_tf32=ALLOW_TF32, out_dtype=out_dtype)
+        # off_k += 32
+
+        # if ADD_MATRIX:
+        #     z += tl.load(Zs)
+        # if ADD_ROWS:
+        #     ZRs = Z + off_m * stride_zm
+        #     z += tl.load(ZRs)[:, None]
+        # if ADD_COLS:
+        #     ZCs = Z + off_n * stride_zn
+        #     z += tl.load(ZCs)[None, :]
+        # if DO_SOFTMAX:
+        #     max = tl.max(z, 1)
+        #     z = z - max[:, None]
+        #     num = tl.exp(z.to(tl.float32)).to(max.dtype)
+        #     den = tl.sum(num, 1)
+        #     z = num / den[:, None]
+        # if CHAIN_DOT:
+        #     w = tl.load(Ws)
+        #     z = tl.dot(z.to(w.dtype), w, out_dtype=out_dtype)
         tl.store(Zs, z)
     # input
     if in_dtype == "int8":

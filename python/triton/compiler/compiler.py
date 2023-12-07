@@ -105,6 +105,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, arch,
     if optimize_epilogue:
         pm.add_tritongpu_optimize_epilogue_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
+    pm.add_tritongpu_dot_slicing_pass()
     if num_stages == 0 and is_hip() and gpu_matrix_core_version() != 0:
         pm.add_tritongpu_stream_pipeline_pass()
         pm.add_canonicalizer_pass()
@@ -138,8 +139,8 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, arch,
         pm.add_tritongpu_materialize_load_store_pass(num_warps, 0)
     else:
         pm.add_tritongpu_materialize_load_store_pass(num_warps, arch)
-    if _is_cuda(arch) and arch // 10 <= 8:
-        pm.add_tritongpu_prefetch_pass()
+    # if _is_cuda(arch) and arch // 10 <= 8:
+    pm.add_tritongpu_prefetch_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()

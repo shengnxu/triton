@@ -26,7 +26,7 @@ def max_fn(x, y):
 @triton.autotune(
    configs=[
        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=2, num_warps=4),
        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
@@ -34,7 +34,7 @@ def max_fn(x, y):
    key=['Z', 'H', 'N_CTX', 'BLOCK_DMODEL'],
 )
 
-
+# referent
 @triton.jit
 def _attn_fwd(
     Q, K, V, sm_scale, M, Out,
@@ -47,28 +47,27 @@ def _attn_fwd(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    D_TILE: tl.constexpr,
     pre_load_v: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     qkv_offset = off_hz * stride_qh
-    # Q_block_ptr = tl.make_block_ptr(
-    #     base=Q + qkv_offset,
-    #     shape=(N_CTX, BLOCK_DMODEL),
-    #     strides=(stride_qm, stride_qk),
-    #     offsets=(start_m * BLOCK_M, 0),
-    #     block_shape=(BLOCK_M, 32),
-    #     order=(1, 0)
-    # )
-    # K_block_ptr = tl.make_block_ptr(
-    #     base=K + qkv_offset,
-    #     shape=(BLOCK_DMODEL, N_CTX),
-    #     strides=(stride_kk, stride_kn),
-    #     offsets=(0, 0),
-    #     block_shape=(32, BLOCK_N),
-    #     order=(0, 1)
-    # )
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + qkv_offset,
+        shape=(N_CTX, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    K_block_ptr = tl.make_block_ptr(
+        base=K + qkv_offset,
+        shape=(BLOCK_DMODEL, N_CTX),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, 0),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
     V_block_ptr = tl.make_block_ptr(
         base=V + qkv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
@@ -77,19 +76,9 @@ def _attn_fwd(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(0, 1)
     )
-
-    # offs_d = tl.arange(0, 32)
+    # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
-    # off_q = off_hz * stride_qh + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
-    # off_k = off_hz * stride_qh + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kk
-    # off_v = off_hz * stride_qh + offs_n[:, None] * stride_qm + offs_d[None, :] * stride_qk
-    # Initialize pointers to Q, K, V
-    # q_ptrs = Q + off_q
-    # k_ptrs = K + off_k
-    # v_ptrs = V + off_v
-
-    # initialize offsets
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
@@ -98,22 +87,21 @@ def _attn_fwd(
     # 2^x instead of exp in the loop because CSE and LICM
     # don't work as expected with `exp` in the loop
     qk_scale = sm_scale * 1.44269504
-    #q = tl.load(Q_block_ptr)
-    #q = (q * qk_scale).to(tl.float16)
+    q = tl.load(Q_block_ptr)
+    q = (q * qk_scale).to(tl.float16)
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         #k = tl.load(K_block_ptr)
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        for i in range (0,4):
-            q = tl.load(Q_block_ptr)
-            q = (q * qk_scale).to(tl.float16)
-            k = tl.load(K_block_ptr)
-            qk += tl.dot(q, k)
-            Q_block_ptr = tl.advance(Q_block_ptr, (0, 32))
-            K_block_ptr = tl.advance(K_block_ptr, (32, 0))
+        # qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+
+        # q = tl.load(Q_block_ptr)
+        # q = (q * qk_scale).to(tl.float16)
+        k = tl.load(K_block_ptr)
+        qk = tl.dot(q, k)
+
         if pre_load_v:
             v = tl.load(V_block_ptr)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -130,25 +118,9 @@ def _attn_fwd(
         l_i = l_i * alpha + l_ij
         # update m_i and l_i
         m_i = m_ij
+        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-        #K_block_ptr = tl.advance(K_block_ptr, (-128, BLOCK_N))
-        K_block_ptr = tl.make_block_ptr(
-            base=K + qkv_offset,
-            shape=(BLOCK_DMODEL, N_CTX),
-            strides=(stride_kk, stride_kn),
-            offsets=(0, start_n+BLOCK_N),
-            block_shape=(32, BLOCK_N),
-            order=(0, 1)
-        )
-        #Q_block_ptr = tl.advance(Q_block_ptr, (0, -128))
-        Q_block_ptr = tl.make_block_ptr(
-            base=Q + qkv_offset,
-            shape=(N_CTX, BLOCK_DMODEL),
-            strides=(stride_qm, stride_qk),
-            offsets=(start_m * BLOCK_M, 0),
-            block_shape=(BLOCK_M, 32),
-            order=(1, 0)
-        )
+
     acc = acc / l_i[:, None]
     # write back O
     O_block_ptr = tl.make_block_ptr(
@@ -160,6 +132,512 @@ def _attn_fwd(
         order=(1, 0)
     )
     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
+
+# unrolled
+
+# @triton.autotune(
+#    configs=[
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#    ],
+#    key=['Z', 'H', 'N_CTX', 'BLOCK_DMODEL'],
+# )
+
+# @triton.jit
+# def _attn_fwd(
+#     Q, K, V, sm_scale, M, Out,
+#     stride_qz, stride_qh, stride_qm, stride_qk,
+#     stride_kz, stride_kh, stride_kn, stride_kk,
+#     stride_vz, stride_vh, stride_vn, stride_vk,
+#     stride_oz, stride_oh, stride_om, stride_on,
+#     Z, H,
+#     N_CTX,
+#     BLOCK_DMODEL: tl.constexpr,
+#     BLOCK_M: tl.constexpr,
+#     BLOCK_N: tl.constexpr,
+#     pre_load_v: tl.constexpr,
+# ):
+#     start_m = tl.program_id(0)
+#     off_hz = tl.program_id(1)
+#     qkv_offset = off_hz * stride_qh
+#     Q_block_ptr = tl.make_block_ptr(
+#         base=Q + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_qm, stride_qk),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, 32),
+#         order=(1, 0)
+#     )
+#     K_block_ptr = tl.make_block_ptr(
+#         base=K + qkv_offset,
+#         shape=(BLOCK_DMODEL, N_CTX),
+#         strides=(stride_kk, stride_kn),
+#         offsets=(0, 0),
+#         block_shape=(32, BLOCK_N),
+#         order=(0, 1)
+#     )
+#     V_block_ptr = tl.make_block_ptr(
+#         base=V + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_vk, stride_vn),
+#         offsets=(0, 0),
+#         block_shape=(BLOCK_N, BLOCK_DMODEL),
+#         order=(0, 1)
+#     )
+#     # initialize offsets
+#     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     offs_n = tl.arange(0, BLOCK_N)
+#     # initialize pointer to m and l
+#     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+#     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
+#     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+#     # scale sm_scale by log_2(e) and use
+#     # 2^x instead of exp in the loop because CSE and LICM
+#     # don't work as expected with `exp` in the loop
+#     qk_scale = sm_scale * 1.44269504
+
+#     q1 = tl.load(Q_block_ptr)
+#     q1 = (q1 * qk_scale).to(tl.float16)
+#     Q_block_ptr = tl.advance(Q_block_ptr, (0, 32))
+
+#     q2 = tl.load(Q_block_ptr)
+#     q2 = (q2 * qk_scale).to(tl.float16)
+#     Q_block_ptr = tl.advance(Q_block_ptr, (0, 32))
+
+#     q3 = tl.load(Q_block_ptr)
+#     q3 = (q3 * qk_scale).to(tl.float16)
+#     Q_block_ptr = tl.advance(Q_block_ptr, (0, 32))
+
+#     q4 = tl.load(Q_block_ptr)
+#     q4 = (q4 * qk_scale).to(tl.float16)
+
+#     #q = tl.load(Q_block_ptr)
+#     #q = (q * qk_scale).to(tl.float16)
+#     lo, hi = 0, N_CTX
+#     # loop over k, v and update accumulator
+#     for start_n in range(lo, hi, BLOCK_N):
+#         start_n = tl.multiple_of(start_n, BLOCK_N)
+#         # -- compute qk ----
+#         #k = tl.load(K_block_ptr)
+#         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+
+#         k = tl.load(K_block_ptr)
+#         qk += tl.dot(q1, k)
+#         K_block_ptr = tl.advance(K_block_ptr, (32, 0))
+
+#         k = tl.load(K_block_ptr)
+#         qk += tl.dot(q2, k)
+#         K_block_ptr = tl.advance(K_block_ptr, (32, 0))
+
+#         k = tl.load(K_block_ptr)
+#         qk += tl.dot(q3, k)
+#         K_block_ptr = tl.advance(K_block_ptr, (32, 0))
+
+#         k = tl.load(K_block_ptr)
+#         qk += tl.dot(q4, k)
+
+#         if pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         m_ij = tl.maximum(m_i, tl.max(qk, 1))
+#         qk = qk - m_ij[:, None]
+#         p = tl.math.exp2(qk)
+#         # -- update output accumulator --
+#         alpha = tl.math.exp2(m_i - m_ij)
+#         acc = acc * alpha[:, None]
+#         if not pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         acc += tl.dot(p.to(tl.float16), v)
+#         # -- update m_i and l_i
+#         l_ij = tl.sum(p, 1)
+#         l_i = l_i * alpha + l_ij
+#         # update m_i and l_i
+#         m_i = m_ij
+#         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+#         #K_block_ptr = tl.advance(K_block_ptr, (-128, BLOCK_N))
+#         K_block_ptr = tl.make_block_ptr(
+#             base=K + qkv_offset,
+#             shape=(BLOCK_DMODEL, N_CTX),
+#             strides=(stride_kk, stride_kn),
+#             offsets=(0, start_n+BLOCK_N),
+#             block_shape=(32, BLOCK_N),
+#             order=(0, 1)
+#         )
+#         #Q_block_ptr = tl.advance(Q_block_ptr, (0, -128))
+#         Q_block_ptr = tl.make_block_ptr(
+#             base=Q + qkv_offset,
+#             shape=(N_CTX, BLOCK_DMODEL),
+#             strides=(stride_qm, stride_qk),
+#             offsets=(start_m * BLOCK_M, 0),
+#             block_shape=(BLOCK_M, 32),
+#             order=(1, 0)
+#         )
+#     acc = acc / l_i[:, None]
+#     # write back O
+#     O_block_ptr = tl.make_block_ptr(
+#         base=Out + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_om, stride_on),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, BLOCK_DMODEL),
+#         order=(1, 0)
+#     )
+#     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
+# block pointer arithmetic
+# @triton.jit
+# def _attn_fwd(
+#     Q, K, V, sm_scale, M, Out,
+#     stride_qz, stride_qh, stride_qm, stride_qk,
+#     stride_kz, stride_kh, stride_kn, stride_kk,
+#     stride_vz, stride_vh, stride_vn, stride_vk,
+#     stride_oz, stride_oh, stride_om, stride_on,
+#     Z, H,
+#     N_CTX,
+#     BLOCK_DMODEL: tl.constexpr,
+#     BLOCK_M: tl.constexpr,
+#     BLOCK_N: tl.constexpr,
+#     pre_load_v: tl.constexpr,
+# ):
+#     start_m = tl.program_id(0)
+#     off_hz = tl.program_id(1)
+#     qkv_offset = off_hz * stride_qh
+#     Q_block_ptr = tl.make_block_ptr(
+#         base=Q + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_qm, stride_qk),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, 32),
+#         order=(1, 0)
+#     )
+#     K_block_ptr = tl.make_block_ptr(
+#         base=K + qkv_offset,
+#         shape=(BLOCK_DMODEL, N_CTX),
+#         strides=(stride_kk, stride_kn),
+#         offsets=(0, 0),
+#         block_shape=(32, BLOCK_N),
+#         order=(0, 1)
+#     )
+#     V_block_ptr = tl.make_block_ptr(
+#         base=V + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_vk, stride_vn),
+#         offsets=(0, 0),
+#         block_shape=(BLOCK_N, BLOCK_DMODEL),
+#         order=(0, 1)
+#     )
+#     # initialize offsets
+#     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     offs_n = tl.arange(0, BLOCK_N)
+#     # initialize pointer to m and l
+#     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+#     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
+#     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+#     # scale sm_scale by log_2(e) and use
+#     # 2^x instead of exp in the loop because CSE and LICM
+#     # don't work as expected with `exp` in the loop
+#     qk_scale = sm_scale * 1.44269504
+#     #q = tl.load(Q_block_ptr)
+#     #q = (q * qk_scale).to(tl.float16)
+#     lo, hi = 0, N_CTX
+#     # loop over k, v and update accumulator
+#     for start_n in range(lo, hi, BLOCK_N):
+#         start_n = tl.multiple_of(start_n, BLOCK_N)
+#         # -- compute qk ----
+#         #k = tl.load(K_block_ptr)
+#         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+#         for i in range (0,4):
+#             q = tl.load(Q_block_ptr)
+#             q = (q * qk_scale).to(tl.float16)
+#             k = tl.load(K_block_ptr)
+#             qk += tl.dot(q, k)
+#             Q_block_ptr = tl.advance(Q_block_ptr, (0, 32))
+#             K_block_ptr = tl.advance(K_block_ptr, (32, 0))
+#         if pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         m_ij = tl.maximum(m_i, tl.max(qk, 1))
+#         qk = qk - m_ij[:, None]
+#         p = tl.math.exp2(qk)
+#         # -- update output accumulator --
+#         alpha = tl.math.exp2(m_i - m_ij)
+#         acc = acc * alpha[:, None]
+#         if not pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         acc += tl.dot(p.to(tl.float16), v)
+#         # -- update m_i and l_i
+#         l_ij = tl.sum(p, 1)
+#         l_i = l_i * alpha + l_ij
+#         # update m_i and l_i
+#         m_i = m_ij
+#         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+#         #K_block_ptr = tl.advance(K_block_ptr, (-128, BLOCK_N))
+#         K_block_ptr = tl.make_block_ptr(
+#             base=K + qkv_offset,
+#             shape=(BLOCK_DMODEL, N_CTX),
+#             strides=(stride_kk, stride_kn),
+#             offsets=(0, start_n+BLOCK_N),
+#             block_shape=(32, BLOCK_N),
+#             order=(0, 1)
+#         )
+#         #Q_block_ptr = tl.advance(Q_block_ptr, (0, -128))
+#         Q_block_ptr = tl.make_block_ptr(
+#             base=Q + qkv_offset,
+#             shape=(N_CTX, BLOCK_DMODEL),
+#             strides=(stride_qm, stride_qk),
+#             offsets=(start_m * BLOCK_M, 0),
+#             block_shape=(BLOCK_M, 32),
+#             order=(1, 0)
+#         )
+#     acc = acc / l_i[:, None]
+#     # write back O
+#     O_block_ptr = tl.make_block_ptr(
+#         base=Out + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_om, stride_on),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, BLOCK_DMODEL),
+#         order=(1, 0)
+#     )
+#     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
+# index arithmetic
+
+# @triton.autotune(
+#    configs=[
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#    ],
+#    key=['Z', 'H', 'N_CTX', 'BLOCK_DMODEL'],
+# )
+
+# @triton.jit
+# def _attn_fwd(
+#     Q, K, V, sm_scale, M, Out,
+#     stride_qz, stride_qh, stride_qm, stride_qk,
+#     stride_kz, stride_kh, stride_kn, stride_kk,
+#     stride_vz, stride_vh, stride_vn, stride_vk,
+#     stride_oz, stride_oh, stride_om, stride_on,
+#     Z, H,
+#     N_CTX,
+#     BLOCK_DMODEL: tl.constexpr,
+#     BLOCK_M: tl.constexpr,
+#     BLOCK_N: tl.constexpr,
+#     # D_TILE: tl.constexpr,
+#     pre_load_v: tl.constexpr,
+# ):
+#     start_m = tl.program_id(0)
+#     off_hz = tl.program_id(1)
+#     qkv_offset = off_hz * stride_qh
+#     V_block_ptr = tl.make_block_ptr(
+#         base=V + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_vk, stride_vn),
+#         offsets=(0, 0),
+#         block_shape=(BLOCK_N, BLOCK_DMODEL),
+#         order=(0, 1)
+#     )
+
+#     offs_d = tl.arange(0, 32)
+#     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     off_q = qkv_offset + offs_m[:, None] * stride_qm
+#     offs_n = tl.arange(0, BLOCK_N)
+#     off_k = qkv_offset + offs_n[None, :] * stride_kn
+
+#     # initialize offsets
+#     # initialize pointer to m and l
+#     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+#     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
+#     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+#     # scale sm_scale by log_2(e) and use
+#     # 2^x instead of exp in the loop because CSE and LICM
+#     # don't work as expected with `exp` in the loop
+#     qk_scale = sm_scale * 1.44269504
+#     #q = tl.load(Q_block_ptr)
+#     #q = (q * qk_scale).to(tl.float16)
+#     lo, hi = 0, N_CTX
+#     # loop over k, v and update accumulator
+#     for start_n in range(lo, hi, BLOCK_N):
+#         start_n = tl.multiple_of(start_n, BLOCK_N)
+#         # -- compute qk ----
+#         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+#         for i in range (0,4):
+#             off_q_d = off_q + (offs_d[None, :] + 32 * i) * stride_qk
+#             off_k_d = off_k + (offs_d[:, None] + 32 * i) * stride_kk
+#             q_ptrs = Q + off_q_d
+#             q = tl.load(q_ptrs)
+#             q = (q * qk_scale).to(tl.float16)
+#             k_ptrs = K + off_k_d
+#             k = tl.load(k_ptrs)
+#             qk += tl.dot(q, k)
+
+#         if pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         m_ij = tl.maximum(m_i, tl.max(qk, 1))
+#         qk = qk - m_ij[:, None]
+#         p = tl.math.exp2(qk)
+#         # -- update output accumulator --
+#         alpha = tl.math.exp2(m_i - m_ij)
+#         acc = acc * alpha[:, None]
+#         if not pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         acc += tl.dot(p.to(tl.float16), v)
+#         # -- update m_i and l_i
+#         l_ij = tl.sum(p, 1)
+#         l_i = l_i * alpha + l_ij
+#         # update m_i and l_i
+#         m_i = m_ij
+#         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+#         off_k += BLOCK_N * stride_kn
+#     acc = acc / l_i[:, None]
+#     # write back O
+#     O_block_ptr = tl.make_block_ptr(
+#         base=Out + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_om, stride_on),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, BLOCK_DMODEL),
+#         order=(1, 0)
+#     )
+#     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
+# unrolled index arithmetic
+# @triton.autotune(
+#    configs=[
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4),
+#        #triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#    ],
+#    key=['Z', 'H', 'N_CTX', 'BLOCK_DMODEL'],
+# )
+
+# @triton.jit
+# def _attn_fwd(
+#     Q, K, V, sm_scale, M, Out,
+#     stride_qz, stride_qh, stride_qm, stride_qk,
+#     stride_kz, stride_kh, stride_kn, stride_kk,
+#     stride_vz, stride_vh, stride_vn, stride_vk,
+#     stride_oz, stride_oh, stride_om, stride_on,
+#     Z, H,
+#     N_CTX,
+#     BLOCK_DMODEL: tl.constexpr,
+#     BLOCK_M: tl.constexpr,
+#     BLOCK_N: tl.constexpr,
+#     # D_TILE: tl.constexpr,
+#     pre_load_v: tl.constexpr,
+# ):
+#     start_m = tl.program_id(0)
+#     off_hz = tl.program_id(1)
+#     qkv_offset = off_hz * stride_qh
+#     V_block_ptr = tl.make_block_ptr(
+#         base=V + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_vk, stride_vn),
+#         offsets=(0, 0),
+#         block_shape=(BLOCK_N, BLOCK_DMODEL),
+#         order=(0, 1)
+#     )
+
+#     offs_d = tl.arange(0, 32)
+#     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+#     off_q = qkv_offset + offs_m[:, None] * stride_qm
+#     offs_n = tl.arange(0, BLOCK_N)
+#     off_k = qkv_offset + offs_n[None, :] * stride_kn
+
+#     # initialize offsets
+#     # initialize pointer to m and l
+#     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+#     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
+#     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+#     # scale sm_scale by log_2(e) and use
+#     # 2^x instead of exp in the loop because CSE and LICM
+#     # don't work as expected with `exp` in the loop
+#     qk_scale = sm_scale * 1.44269504
+#     #q = tl.load(Q_block_ptr)
+#     #q = (q * qk_scale).to(tl.float16)
+#     lo, hi = 0, N_CTX
+#     q_ptrs = Q + (off_q + (offs_d[None, :] + 0) * stride_qk + 0*stride_qk)
+#     # q_ptrs = Q + off_q_d
+#     q1 = tl.load(q_ptrs)
+#     q1 = (q1 * qk_scale).to(tl.float16)
+    
+#     stride = stride_qk * 32
+
+#     q_ptrs += stride
+#     q2 = tl.load(q_ptrs)
+#     q2 = (q2 * qk_scale).to(tl.float16)
+
+#     q_ptrs += q_ptrs
+#     q3 = tl.load(q_ptrs)
+#     q3 = (q3 * qk_scale).to(tl.float16)
+
+#     q_ptrs += stride
+#     q4 = tl.load(q_ptrs)
+#     q4 = (q4 * qk_scale).to(tl.float16)
+
+#     # loop over k, v and update accumulator
+#     for start_n in range(lo, hi, BLOCK_N):
+#         start_n = tl.multiple_of(start_n, BLOCK_N)
+#         # -- compute qk ----
+#         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+
+#         off_k_d = off_k + (offs_d[:, None] + 32 * 0) * stride_kk
+#         k_ptrs = K + off_k_d
+#         k = tl.load(k_ptrs)
+#         qk += tl.dot(q1, k)
+
+#         off_k_d = off_k + (offs_d[:, None] + 32 * 1) * stride_kk
+#         k_ptrs = K + off_k_d
+#         k = tl.load(k_ptrs)
+#         qk += tl.dot(q2, k)
+
+#         off_k_d = off_k + (offs_d[:, None] + 32 * 2) * stride_kk
+#         k_ptrs = K + off_k_d
+#         k = tl.load(k_ptrs)
+#         qk += tl.dot(q3, k)
+
+#         off_k_d = off_k + (offs_d[:, None] + 32 * 3) * stride_kk
+#         k_ptrs = K + off_k_d
+#         k = tl.load(k_ptrs)
+#         qk += tl.dot(q4, k)
+
+#         if pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         m_ij = tl.maximum(m_i, tl.max(qk, 1))
+#         qk = qk - m_ij[:, None]
+#         p = tl.math.exp2(qk)
+#         # -- update output accumulator --
+#         alpha = tl.math.exp2(m_i - m_ij)
+#         acc = acc * alpha[:, None]
+#         if not pre_load_v:
+#             v = tl.load(V_block_ptr)
+#         acc += tl.dot(p.to(tl.float16), v)
+#         # -- update m_i and l_i
+#         l_ij = tl.sum(p, 1)
+#         l_i = l_i * alpha + l_ij
+#         # update m_i and l_i
+#         m_i = m_ij
+#         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+#         off_k += BLOCK_N * stride_kn
+#     acc = acc / l_i[:, None]
+#     # write back O
+#     O_block_ptr = tl.make_block_ptr(
+#         base=Out + qkv_offset,
+#         shape=(N_CTX, BLOCK_DMODEL),
+#         strides=(stride_om, stride_on),
+#         offsets=(start_m * BLOCK_M, 0),
+#         block_shape=(BLOCK_M, BLOCK_DMODEL),
+#         order=(1, 0)
+#     )
+#     tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+
 
 
 empty = torch.empty(128, device="cuda")
@@ -195,7 +673,7 @@ class _attention(torch.autograd.Function):
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             q.shape[0], q.shape[1],
             N_CTX=q.shape[2],
-            D_TILE = 32,
+            # D_TILE = 32,
             BLOCK_DMODEL=Lk,
         )
 

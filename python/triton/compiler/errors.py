@@ -6,6 +6,7 @@ class CompilationError(Exception):
     source_line_count_max_in_message = 12
 
     def _format_message(self) -> str:
+        print(self.error_message)
         node = self.node
         if self.src is None:
             source_excerpt = " <source unavailable>"

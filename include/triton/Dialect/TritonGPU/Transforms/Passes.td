@@ -49,7 +49,7 @@ def TritonGPUStreamPipeline : Pass<"tritongpu-stream-pipeline", "mlir::ModuleOp"
                            "mlir::arith::ArithDialect"];
 }
 
-def TritonGPUDotSLicing: Pass<"tritongpu-dot-slicing", "mlir::ModuleOp"> {
+def TritonGPUDotSlicing: Pass<"tritongpu-dot-slicing", "mlir::ModuleOp"> {
   let summary = "dot slicing";
 
   let description = [{

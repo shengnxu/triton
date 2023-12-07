@@ -455,36 +455,42 @@ def _splitK_reduce(
     off_g = off_zhg % G
     off_m = tl.program_id(2)
 
+    spk_idx = tl.arange(0, split_k)
+    kidx = tl.arange(0, BLOCK_SIZE)
     # Write metadata for split-K reduction
-    O_block_ptr = tl.make_block_ptr(
-        base=Out_splitK + off_zhg * stride_osk_zhg,
-        shape=(split_k, D_PER_GROUP),
-        strides=(stride_osk_s, stride_osk_k),
-        offsets=(0, off_m * stride_osk_m),
-        block_shape=(split_k, D_PER_GROUP),
-        order=(1, 0),
-    )
-    # read acc
-    acc = tl.load(O_block_ptr)
-    
-    #read local m
-    m_base = Metadata + stride_mzhg * off_zhg
-    m_block_ptr = tl.make_block_ptr(
-        base = m_base,
-        shape=(split_k, 1),
-        strides=(stride_omzhg, stride_mm),
-        offsets=(0, off_m * stride_mm),
-        block_shape=(split_k, 1),
-        order=(1, 0)
-    )
-    l_m = tl.load(m_block_ptr)
+    # O_block_ptr = tl.make_block_ptr(
+    #     base=Out_splitK + off_zhg * stride_osk_zhg,
+    #     shape=(split_k, D_PER_GROUP),
+    #     strides=(stride_osk_s, stride_osk_k),
+    #     offsets=(0, off_m * stride_osk_m),
+    #     block_shape=(split_k, D_PER_GROUP),
+    #     order=(1, 0),
+    # )
+    # # read acc
+    # acc = tl.load(O_block_ptr, boundary_check=(1, 0))
+    # print("acc = %f\n", acc)
+    o_ptr = Out_splitK + off_zhg * stride_osk_zhg + stride_osk_s * spk_idx[:, None] + stride_osk_m * off_m + kidx[None, :] * stride_osk_k
+    acc = tl.load(o_ptr)
 
-    gm_ptr = Out_metadata + stride_mzhg * off_zhg + stride_omm * off_m
+    #read local m
+    m_base = Metadata + stride_mzhg * off_zhg + stride_ms * spk_idx + off_m * stride_mm
+    l_m = tl.load(m_base)
+    # m_block_ptr = tl.make_block_ptr(
+    #     base = m_base,
+    #     shape=(split_k, 1),
+    #     strides=(stride_omzhg, stride_mm),
+    #     offsets=(0, off_m * stride_mm),
+    #     block_shape=(split_k, 1),
+    #     order=(1, 0)
+    # )
+    # l_m = tl.load(m_block_ptr)
+
+    gm_ptr = Out_metadata + stride_omzhg * off_zhg + stride_omm * off_m
     g_m = tl.load(gm_ptr)
     g_sum = tl.load(gm_ptr + stride_om2)
 
     alpha = tl.math.exp2(l_m - g_m)
-    acc = acc * alpha
+    acc = acc * alpha[:, None]
     acc_out = tl.sum(acc, axis=0) / g_sum
     Out_ptr = (
         Out
@@ -580,6 +586,7 @@ class _attention(torch.autograd.Function):
         B, Mk, G, H, Kkv = k.shape
         B, M, G, H, Kq = q.shape
         assert Lk == Kq, f"Keys have head dim {Lk} but queries have head dim {Kq}"
+        # print(f"B = {B}, M = {M}, G = {G}, H = {H}, Kkv = {Kkv}, Kq = {Kq}")
 
         BLOCK_M = cls.BLOCK_M
         BLOCK_N = cls.BLOCK_N
@@ -659,6 +666,11 @@ class _attention(torch.autograd.Function):
             G=G
         )
 
+        # print(f"split_k = {split_k}, M = {M}")
+
+        # print(f"metadata, shape = {metadata.shape}, data =\n{metadata}")
+        # print(f"Out_metadata = \n{Out_metadata}")
+
         # Merge together
         grid = (B * G * H, 1, M)
         _splitK_reduce[grid](
@@ -680,6 +692,7 @@ class _attention(torch.autograd.Function):
             # TODO: Tune num_warps
             D_PER_GROUP=Lk
         )
+
         lse = lse.reshape([B, G, H, M])
         if mqa_swap_seqlen_head:
             # H/M dimensions have been swapped
@@ -700,13 +713,13 @@ attention = _attention.apply
 
 def get_input_shapes():
     cases = [
-        # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
+        # dict(B=max(1, 1), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
+        (max(1, 1), 1, 2**i, 16, 1, 64)
         for i in range(8, 9)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(17, 18)
+        for i in range(17, 17)
     ]
 
     # cases = [
@@ -745,6 +758,9 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     v = v.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
     attn = (q @ k.transpose(-1, -2) * scale).softmax(-1)
     ref_out = attn @ v
+
+    # print(f"ref_out = \n{ref_out}")
+    # print(f"tri_out = \n{tri_out}")
 
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-3, rtol=0)

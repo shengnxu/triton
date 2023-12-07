@@ -784,6 +784,7 @@ def bench_flash_attention(B, Mq, Mkv, Hq, Hkv, K, causal, mode, provider, dtype=
     assert mode in ['fwd', 'bwd']
     warmup = 100
     rep = 400
+    ms = 0
     if provider == "triton":
         q = torch.randn(
             [B, Mq, Hkv, Hq // Hkv, K], device="cuda", dtype=dtype, requires_grad=False

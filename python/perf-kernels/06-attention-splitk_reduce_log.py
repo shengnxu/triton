@@ -1,9 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
-#
-# This source code is licensed under the BSD license found in the
-# LICENSE file in the root directory of this source tree.
-
-
 from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
 import pytest
 import torch
@@ -420,7 +414,6 @@ def _splitK_reduceMaxSum(
 def _splitK_reduce(
     Out_splitK,  # [B, H, split_k, Mq, K]
     Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
-    Out_metadata, #[B, H, 2, M_ceil]
     Out,  # [B, H, M, K]
     LSE,  # [B, H, M]
     split_k:tl.constexpr,
@@ -438,9 +431,6 @@ def _splitK_reduce(
     stride_og,
     stride_om,
     stride_ok,
-    stride_omzhg,
-    stride_om2,
-    stride_omm,
     stride_lse_zhg,
     stride_lse_m,
     BLOCK_SIZE: tl.constexpr,
@@ -449,53 +439,44 @@ def _splitK_reduce(
     D_PER_GROUP: tl.constexpr,
 
 ):
-    off_zhg = tl.program_id(0)
-    off_z = off_zhg // (H * G)
-    off_h = (off_zhg // G) % H
-    off_g = off_zhg % G
-    off_m = tl.program_id(2)
+        off_zhg = tl.program_id(0)
+        off_z = off_zhg // (H * G)
+        off_h = (off_zhg // G) % H
+        off_g = off_zhg % G
+        off_m = tl.program_id(2)
 
-    # read  chunk
-    spk_idx = tl.arange(0, split_k)
-    # offset_m = tl.arange(0, M_ceil)
-    Metadata_ptr = Metadata + stride_mzhg * off_zhg + spk_idx * stride_ms + off_m * stride_mm
-    # max values
-    m = tl.load(Metadata_ptr)
-    g_m = tl.max(m, axis=0)
-    alpha = tl.math.exp2(m - g_m)
-    # read sum
-    l_sum = tl.load(Metadata_ptr + stride_m2)
-    l_sum *= alpha
-    g_sum = tl.sum(l_sum, axis=0)
+        # read  chunk
+        spk_idx = tl.arange(0, split_k)
+        Metadata_ptr = Metadata + stride_mzhg * off_zhg + spk_idx * stride_ms + off_m * stride_mm
+        # max values
+        l_m = tl.load(Metadata_ptr)
+        g_m = tl.max(l_m, axis=0)
+        alpha = tl.math.exp2(l_m - g_m)
+        # read sum
+        l_sum = tl.load(Metadata_ptr + stride_m2)
+        l_sum *= alpha
+        g_sum = tl.sum(l_sum, axis=0)
 
-    tl.debug_barrier()
+        # tl.debug_barrier()
 
-    kidx = tl.arange(0, BLOCK_SIZE)
-    o_ptr = Out_splitK + off_zhg * stride_osk_zhg + stride_osk_s * spk_idx[:, None] + stride_osk_m * off_m + kidx[None, :] * stride_osk_k
-    acc = tl.load(o_ptr)
+        kidx = tl.arange(0, BLOCK_SIZE)
+        o_ptr = Out_splitK + off_zhg * stride_osk_zhg + stride_osk_s * spk_idx[:, None] + stride_osk_m * off_m + kidx[None, :] * stride_osk_k
+        acc = tl.load(o_ptr)
 
-    #read local m
-    m_base = Metadata + stride_mzhg * off_zhg + stride_ms * spk_idx + off_m * stride_mm
-    l_m = tl.load(m_base)
-
-    # gm_ptr = Out_metadata + stride_omzhg * off_zhg + stride_omm * off_m
-    # g_m = tl.load(gm_ptr)
-    # g_sum = tl.load(gm_ptr + stride_om2)
-
-    alpha = tl.math.exp2(l_m - g_m)
-    acc = acc * alpha[:, None]
-    acc_out = tl.sum(acc, axis=0) / g_sum
-    Out_ptr = (
-        Out
-        + stride_oz * off_z
-        + stride_oh * off_h
-        + stride_og * off_g
-        + stride_om * off_m
-        + tl.arange(0, BLOCK_SIZE)
-    )
-    tl.store(Out_ptr, acc_out)
-    l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
-    tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
+        alpha = tl.math.exp2(l_m - g_m)
+        acc = acc * alpha[:, None]
+        acc_out = tl.sum(acc, axis=0) / g_sum
+        Out_ptr = (
+            Out
+            + stride_oz * off_z
+            + stride_oh * off_h
+            + stride_og * off_g
+            + stride_om * off_m
+            + tl.arange(0, BLOCK_SIZE)
+        )
+        tl.store(Out_ptr, acc_out)
+        l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
+        tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
@@ -597,9 +578,6 @@ class _attention(torch.autograd.Function):
         metadata = torch.empty(
             [B * G * H, 2, split_k, M_ceil], dtype=torch.float32, device=q.device
         )
-        Out_metadata = torch.empty(
-            [B * G * H, 2, M_ceil], dtype=torch.float32, device=q.device
-        )
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H, split_k)
 
@@ -670,14 +648,12 @@ class _attention(torch.autograd.Function):
         _splitK_reduce[grid](
             o_splitk,
             metadata,
-            Out_metadata,
             out,
             lse,
             split_k=split_k,
             M_ceil=M_ceil,
             **_strides(o_splitk, "osk_zhg", "osk_s", "osk_m", "osk_k"),
             **_strides(metadata, "mzhg", "m2", "ms", "mm"),
-            **_strides(Out_metadata, "omzhg", "om2", "omm"),
             **_strides(out, "oz", "om", "og", "oh", "ok"),
             **_strides(lse, "lse_zhg", "lse_m"),
             BLOCK_SIZE=out.shape[-1],
@@ -709,11 +685,11 @@ def get_input_shapes():
     cases = [
         # dict(B=max(1, 1), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 9)
+        for i in range(8, 18)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(17, 18)
+        for i in range(8, 18)
     ]
 
     # cases = [

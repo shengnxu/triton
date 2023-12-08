@@ -129,6 +129,16 @@ public:
     return false;
   }
 
+  bool isSecondDot(tt::DotOp &dotOp) const {
+    SetVector<Operation *> slices;
+    mlir::getBackwardSlice(dotOp.getResult(), &slices);
+    if (llvm::find_if(slices, [](Operation *op) {
+          return isa<tt::DotOp>(op);
+        }) != slices.end())
+      return true;
+    return false;
+  }
+
   /// @brief Choose MFMA instruction parameters
   /// @param dot target dot operation
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
@@ -263,6 +273,7 @@ public:
     auto warpsPerTile = warpsPerTileMFMA(dotOp, retShape, numWarps);
 
     bool isTransposed = isChainDot(dotOp);
+
     mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,
                                          warpsPerTile, isTransposed, CTALayout);
 
@@ -284,9 +295,11 @@ public:
                          .cast<ttg::BlockedEncodingAttr>()
                          .getOrder();
 
-    // kWidth is a number of consecutive elements per one instruction per one
-    // thread
-    auto kWidth = kDim;
+    // kWidth is the number of consecutive elements each thread loads
+    // from LDS. It can be a multiple of the number of elements each
+    // threads holds for a single mfma instruction
+    // For now, hard-code it to be 8 for fp16
+    auto kWidth = kDim * 2;
     // in mfma 32x32 case argument matrix groups elements in 2 groups
     // in mfma 16x16 case argument matrix groups elements in 4 groups
     // in mfma 4x4 case arguemnt matrix groups in 16 groups
@@ -303,6 +316,11 @@ public:
     default:
       llvm::report_fatal_error("unsupported kDim in mfma dot");
     }
+    // Hack for FA
+    // For second gemm, kWidth must be 4 since opA comes from mfmaLayout
+    // TODO (zhanglx): generalize the logic
+    if (isSecondDot(dotOp))
+      kWidth /= 2;
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
         ttg::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc, kWidth));

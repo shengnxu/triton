@@ -416,10 +416,19 @@ struct DotOpMFMAConversionHelper {
     auto numRepN = repB[1];
     auto numRepK = repA[1];
 
-    ValueTable ha = getValuesFromDotOperandLayoutStruct(
-        loadedA, numRepM, numRepK, kWidth, aTensorTy.getElementType());
-    ValueTable hb = getValuesFromDotOperandLayoutStruct(
-        loadedB, numRepN, numRepK, kWidth, aTensorTy.getElementType());
+    ValueTable ha, ha1, hb, hb1;
+    if (kWidth == 8) {
+      std::tie(ha, ha1) = getValuesFromDotOperandLayoutStruct_kWidth8(
+          loadedA, numRepM, numRepK, kWidth, aTensorTy.getElementType());
+      std::tie(hb, hb1) = getValuesFromDotOperandLayoutStruct_kWidth8(
+          loadedB, numRepN, numRepK, kWidth, aTensorTy.getElementType());
+    } else {
+      ha = getValuesFromDotOperandLayoutStruct(
+          loadedA, numRepM, numRepK, kWidth, aTensorTy.getElementType());
+      hb = getValuesFromDotOperandLayoutStruct(
+          loadedB, numRepN, numRepK, kWidth, aTensorTy.getElementType());
+    }
+
     auto dstElemTy = dTensorTy.getElementType();
     auto fc =
         typeConverter->unpackLLElements(loc, loadedC, rewriter, dstElemTy);
@@ -446,6 +455,12 @@ struct DotOpMFMAConversionHelper {
               mfmaLayout.getIsTransposed()
                   ? generateMFMAOp(mfmaInstrDescr, hb[{n, k}], ha[{m, k}], acc)
                   : generateMFMAOp(mfmaInstrDescr, ha[{m, k}], hb[{n, k}], acc);
+          if (kWidth == 8)
+            acc = mfmaLayout.getIsTransposed()
+                      ? generateMFMAOp(mfmaInstrDescr, hb1[{n, k}], ha1[{m, k}],
+                                       acc)
+                      : generateMFMAOp(mfmaInstrDescr, ha1[{m, k}], hb1[{n, k}],
+                                       acc);
         }
         acc = reduceSubBlocks(subBlocks, acc);
         for (unsigned v = 0; v < elemsPerVec; ++v) {
@@ -467,8 +482,49 @@ struct DotOpMFMAConversionHelper {
 /**
  * @brief Converts dot operand structure to value table and converts types appropriate for mfma instructions
 */
-  ValueTable getValuesFromDotOperandLayoutStruct(Value value, int n0, int n1, int kWidth,
-                                                 Type type) const {
+  std::pair<ValueTable, ValueTable>
+  getValuesFromDotOperandLayoutStruct_kWidth8(Value value, int n0, int n1,
+                                              int kWidth, Type type) const {
+    auto elems = typeConverter->unpackLLElements(loc, value, rewriter, type);
+    ValueTable vals;
+    ValueTable vals1;
+    for (int i = 0; i < n0; i++) {
+      for (int j = 0; j < n1; j++) {
+        auto rawElems = elems[n1 * i + j];
+        Value convertedElems;
+        auto fp16x4VecTy = vec_ty(f16_ty, 4);
+        Value fp16x4Vec0 = undef(fp16x4VecTy);
+        Value fp16x4Vec1 = undef(fp16x4VecTy);
+        if (type.isF32()) {
+          convertedElems = extract_element(type, rawElems, i32_val(0));
+        } else if (type.getIntOrFloatBitWidth() == 8) {
+          if (kWidth == 4)
+            convertedElems = bitcast(rawElems, i32_ty);
+          if (kWidth == 8)
+            convertedElems = bitcast(rawElems, i64_ty);
+        } else {
+          assert(type.isBF16() || type.isF16());
+          // hard code for fp16 with kWidth=8
+          assert(kWidth == 8);
+          for (int i = 0; i < 4; i ++){
+              auto val0 = extract_element(f16_ty, rawElems, i32_val(i));
+              auto val1 = extract_element(f16_ty, rawElems, i32_val(i+4));
+              fp16x4Vec0 = insert_element(fp16x4VecTy, fp16x4Vec0, val0, i32_val(i));
+              fp16x4Vec1 = insert_element(fp16x4VecTy, fp16x4Vec1, val1, i32_val(i));
+          }
+          // convertedElems = rawElems;
+        }
+        // vals[{i, j}] = convertedElems;
+        vals[{i, j}] = fp16x4Vec0;
+        vals1[{i, j}] = fp16x4Vec1;
+      }
+    }
+    // return vals;
+    return std::make_pair(vals, vals1);
+  }
+
+  ValueTable getValuesFromDotOperandLayoutStruct(Value value, int n0, int n1,
+                                                 int kWidth, Type type) const {
     auto elems = typeConverter->unpackLLElements(loc, value, rewriter, type);
     ValueTable vals;
     for (int i = 0; i < n0; i++) {
@@ -479,9 +535,9 @@ struct DotOpMFMAConversionHelper {
           convertedElems = extract_element(type, rawElems, i32_val(0));
         } else if (type.getIntOrFloatBitWidth() == 8) {
           if (kWidth == 4)
-            convertedElems = bitcast(rawElems, i32_ty);
+              convertedElems = bitcast(rawElems, i32_ty);
           if (kWidth == 8)
-            convertedElems = bitcast(rawElems, i64_ty);
+              convertedElems = bitcast(rawElems, i64_ty);
         } else {
           assert(type.isBF16() || type.isF16());
           convertedElems = rawElems;

@@ -151,10 +151,10 @@ class _attention(torch.autograd.Function):
             pre_load_v = False if causal else True
         else:
             ## D_HEAD = 128
-            BLOCK_M = 128
+            BLOCK_M = 256
             BLOCK_N = 128
             waves_per_eu = 2
-            num_warps = 4
+            num_warps = 8
             num_stages = 1
             pre_load_v = False
 
@@ -299,7 +299,8 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
 
 
 def main():
-    bench_flash_attention.run(save_path='.', print_data=True)
+    #bench_flash_attention.run(save_path='.', print_data=True)
+    test_op_fwd(4, 16, 4096, 128)
 
 if __name__ == '__main__':
     sys.exit(main())

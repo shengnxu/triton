@@ -372,52 +372,11 @@ def dequantize(
     return dequant
 
 @triton.jit
-def _splitK_reduceMaxSum(
-    Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
-    Out_Metadata, #[B, H, 2, M_ceil] contains [m, l]
-    split_k: tl.constexpr,
-    M_ceil: tl.constexpr,
-    stride_mzhg,
-    stride_m2,
-    stride_ms,
-    stride_mm,
-    stride_omzhg,
-    stride_om2,
-    stride_omm,
-    H: tl.constexpr,
-    G: tl.constexpr,
-):
-    off_zhg = tl.program_id(0)
-    off_z = off_zhg // (H * G)
-    off_h = (off_zhg // G) % H
-    off_g = off_zhg % G
-
-    # read  chunk
-    offset_k = tl.arange(0, split_k)
-    offset_m = tl.arange(0, M_ceil)
-    Metadata_ptr = Metadata + stride_mzhg * off_zhg + offset_k[:, None] * stride_ms + offset_m[None, :] * stride_mm
-    # max values
-    m = tl.load(Metadata_ptr)
-    m_max = tl.max(m, axis=0)
-    alpha = tl.math.exp2(m - m_max[None,:])
-    # read sum
-    l_sum = tl.load(Metadata_ptr + stride_m2)
-    l_sum *= alpha
-    g_sum = tl.sum(l_sum, axis=0)
-
-    # store back to output (Metadata_)
-    Out_Metadata_ptr = Out_Metadata +  stride_omzhg * off_zhg + offset_m * stride_omm
-    tl.store(Out_Metadata_ptr, m_max)
-    tl.store(Out_Metadata_ptr + stride_om2, g_sum)
-
-@triton.jit
 def _splitK_reduce(
     Out_splitK,  # [B, H, split_k, Mq, K]
     Metadata,  # [B, H, 2, split_k, M_ceil] contains [mi, li]
     Out,  # [B, H, M, K]
     LSE,  # [B, H, M]
-    split_k:tl.constexpr,
-    M_ceil:tl.constexpr,
     stride_osk_zhg,
     stride_osk_s,
     stride_osk_m,
@@ -433,63 +392,101 @@ def _splitK_reduce(
     stride_ok,
     stride_lse_zhg,
     stride_lse_m,
+    M_ceil:tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
     H: tl.constexpr,
     G: tl.constexpr,
-    D_PER_GROUP: tl.constexpr,
+    split_k:tl.constexpr,
+    splitK_pow2:tl.constexpr,
+    use_mask:tl.constexpr,
+):        
+    off_zhg = tl.program_id(0)
+    off_z = off_zhg // (H * G)
+    off_h = (off_zhg // G) % H
+    off_g = off_zhg % G
+    off_m = tl.program_id(1)
+    off_k = tl.program_id(2)
 
-):
-        off_zhg = tl.program_id(0)
-        off_z = off_zhg // (H * G)
-        off_h = (off_zhg // G) % H
-        off_g = off_zhg % G
-        off_m = tl.program_id(2)
+    # read  chunk
+    spk_idx = tl.arange(0, splitK_pow2)
+    kidx = tl.arange(0, BLOCK_SIZE)
 
-        # read  chunk
-        spk_idx = tl.arange(0, split_k)
-        Metadata_ptr = Metadata + stride_mzhg * off_zhg + spk_idx * stride_ms + off_m * stride_mm
-        # max values
+    Metadata_ptr = (
+        Metadata
+        + stride_mzhg * off_zhg
+        + spk_idx * stride_ms
+        + off_m * stride_mm
+    )
+
+    o_ptr = (
+        Out_splitK
+        + off_zhg * stride_osk_zhg
+        + stride_osk_m * off_m
+        + off_k * BLOCK_SIZE
+        + stride_osk_s * spk_idx[:, None]
+        + kidx[None, :] * stride_osk_k
+    )
+
+    # read max values of each splitK
+    if use_mask:
+        spk_mask = spk_idx < split_k
+        l_m = tl.load(Metadata_ptr, mask=spk_mask, other=float("-inf"))
+        l_sum = tl.load(Metadata_ptr + stride_m2, mask=spk_mask, other=0.0)
+        acc = tl.load(o_ptr, mask=spk_mask[:,None], other=0.0)
+    else:
         l_m = tl.load(Metadata_ptr)
-        g_m = tl.max(l_m, axis=0)
-        alpha = tl.math.exp2(l_m - g_m)
-        # read sum
         l_sum = tl.load(Metadata_ptr + stride_m2)
-        l_sum *= alpha
-        g_sum = tl.sum(l_sum, axis=0)
-
-        # tl.debug_barrier()
-
-        kidx = tl.arange(0, BLOCK_SIZE)
-        o_ptr = Out_splitK + off_zhg * stride_osk_zhg + stride_osk_s * spk_idx[:, None] + stride_osk_m * off_m + kidx[None, :] * stride_osk_k
         acc = tl.load(o_ptr)
 
-        alpha = tl.math.exp2(l_m - g_m)
-        acc = acc * alpha[:, None]
-        acc_out = tl.sum(acc, axis=0) / g_sum
-        Out_ptr = (
-            Out
-            + stride_oz * off_z
-            + stride_oh * off_h
-            + stride_og * off_g
-            + stride_om * off_m
-            + tl.arange(0, BLOCK_SIZE)
-        )
-        tl.store(Out_ptr, acc_out)
-        l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
-        tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
+    g_m = tl.max(l_m, axis=0)
+    alpha = tl.math.exp2(l_m - g_m)
 
+    # read sum
+    l_sum *= alpha
+    g_sum = tl.sum(l_sum, axis=0)
 
-def get_split_k(B: int, H: int, Mk: int) -> int:
-    # print(f"B = {B}, H = {H}, Mk = {Mk}")
+    alpha = tl.math.exp2(l_m - g_m)
+    acc = acc * alpha[:, None]
+    acc_out = tl.sum(acc, axis=0) / g_sum
+    Out_ptr = (
+        Out
+        + stride_oz * off_z
+        + stride_oh * off_h
+        + stride_og * off_g
+        + stride_om * off_m
+        + off_k * BLOCK_SIZE
+        + tl.arange(0, BLOCK_SIZE)
+    )
+    tl.store(Out_ptr, acc_out)
+    l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
+    tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
+
+def get_split_k(B: int, G: int, H: int, Mk: int) -> int:
     """Heuristic for the number of splits"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     split_k = max(Mk, 1024) // bh
-    max_chunk_size = 64 if Mk <= 512 and bh <= 64 else 128
+    max_chunk_size = 64
     while split_k > 0 and Mk / split_k < max_chunk_size:
         split_k = split_k // 2
-    split_k = min(split_k, 64)
+    while B * H * G * split_k >= 1024:
+        split_k = split_k // 2
+    split_k = min(split_k, 512)
     split_k = max(split_k, 1)
     return split_k
+
+
+def next_power_of_2(n: int):
+    """Return the smallest power of 2 greater than or equal to n"""
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n |= n >> 32
+    n += 1
+    return n
+
 
 # @register_operator
 # class FwOp(AttentionFwOpBase):
@@ -541,6 +538,7 @@ class _attention(torch.autograd.Function):
         #     k = k.reshape(B, -1, G, H, Kkv)
         #     v = v.reshape(B, -1, G, H, Kkv)
 
+        # print(f"shape, q = {q.shape}, k = {k.shape}")
         # Transpose in the case of MQA/GQA
         mqa_swap_seqlen_head = False
         if k.shape[3] > 1 and k.stride(3) == 0 and v.stride(3) == 0:
@@ -569,7 +567,7 @@ class _attention(torch.autograd.Function):
             split_k = cls.SPLIT_K
         else:
             # Use heuristics
-            split_k = get_split_k(B, H, Mk)
+            split_k = get_split_k(B, G, H, Mk)
 
         M_ceil = (M + BLOCK_M - 1) // BLOCK_M * BLOCK_M
         o_splitk = torch.empty(
@@ -584,9 +582,8 @@ class _attention(torch.autograd.Function):
         num_warps = 2
         split_size = (Mk + split_k - 1) // split_k
         use_seq_len = seq_len is not None
-        # _fwd_kernel_splitK_unrolled = unroll_varargs(
-        #     _fwd_kernel_splitK, N=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1
-        # )
+
+        # print(f"B = {B}, G = {G}, H = {H}, split_k = {split_k}, M_ceil = {M_ceil}, Kq = {Kq}, num_of_wgs = {G * G * H * split_k}")
 
         _fwd_kernel_splitK[grid](
             Q=q,
@@ -625,42 +622,34 @@ class _attention(torch.autograd.Function):
         else:
             out = torch.empty((B, M, G, H, Kq), device=q.device, dtype=q.dtype)
 
-        # # compute global max and sum
-        # grid = (B * G * H, 1)
-        # _splitK_reduceMaxSum[grid](
-        #     metadata,
-        #     Out_metadata,
-        #     split_k=split_k,
-        #     M_ceil=M_ceil,
-        #     **_strides(metadata, "mzhg", "m2", "ms", "mm"),
-        #     **_strides(Out_metadata, "omzhg", "om2", "omm"),
-        #     H=H,
-        #     G=G
-        # )
-
-        # print(f"split_k = {split_k}, M = {M}")
-
-        # print(f"metadata, shape = {metadata.shape}, data =\n{metadata}")
-        # print(f"Out_metadata = \n{Out_metadata}")
-
         # Merge together
-        grid = (B * G * H, 1, M)
+        splitK_pow2 = next_power_of_2(split_k)
+        use_mask = splitK_pow2 > split_k
+        if B * G * H * M >= 512:
+            k_block_num = 1
+        else:
+            k_block_num = 2
+        assert out.shape[-1] % k_block_num == 0
+        k_block_size = out.shape[-1] // k_block_num
+        grid = (B * G * H, M, k_block_num)
         _splitK_reduce[grid](
             o_splitk,
             metadata,
             out,
             lse,
-            split_k=split_k,
-            M_ceil=M_ceil,
             **_strides(o_splitk, "osk_zhg", "osk_s", "osk_m", "osk_k"),
             **_strides(metadata, "mzhg", "m2", "ms", "mm"),
             **_strides(out, "oz", "om", "og", "oh", "ok"),
             **_strides(lse, "lse_zhg", "lse_m"),
-            BLOCK_SIZE=out.shape[-1],
+            M_ceil=M_ceil,
+            BLOCK_SIZE=k_block_size,
             G=G,
             H=H,
             # TODO: Tune num_warps
-            D_PER_GROUP=Lk
+            split_k=split_k,
+            splitK_pow2=splitK_pow2,
+            use_mask=use_mask,
+            num_warps=4
         )
 
         lse = lse.reshape([B, G, H, M])
@@ -675,7 +664,7 @@ class _attention(torch.autograd.Function):
             lse = lse[:, 0]
         if Mk == 0:
             out.zero_()
-            
+        # print(f"Mk = {Mk}, out_shape = {out.shape}")
         out = out.reshape(B, H, -1, Kq).transpose(1, 2).contiguous()
         return out
 
@@ -683,13 +672,13 @@ attention = _attention.apply
 
 def get_input_shapes():
     cases = [
-        # dict(B=max(1, 1), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
         for i in range(8, 18)
     ] + [
-        # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
         for i in range(8, 18)
+    ] + [
+        (1, 1, 16896, 8, 1, 128)
     ]
 
     # cases = [
@@ -706,7 +695,7 @@ def get_input_shapes():
 def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     torch.manual_seed(20)
     q = (
-        torch.empty((B, Mq, Hkv, Hq // Hkv, K), dtype=dtype, device="cuda")
+        torch.empty((B, Mq, Hkv, (Hq + Hkv - 1) // Hkv, K), dtype=dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
@@ -714,12 +703,12 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
         torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
-    ).expand(-1, -1, -1, Hq // Hkv, -1)
+    ).expand(-1, -1, -1, (Hq + Hkv - 1) // Hkv, -1)
     v = (
         torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
-    ).expand(-1, -1, -1, Hq // Hkv, -1)
+    ).expand(-1, -1, -1, (Hq + Hkv - 1) // Hkv, -1)
     scale = 1 / K**0.5
     tri_out = attention(q, k, v, scale)
 

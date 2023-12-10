@@ -130,7 +130,7 @@ def matmul_kernel_splitK(
     # This is done in a grouped ordering to promote L2 data reuse.
     # See above `L2 Cache Optimizations` section for details.
     pid = tl.program_id(axis=0)
-    pid_z = tl.program_id(1)
+    pid_z = tl.program_id(axis=1)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
@@ -186,10 +186,37 @@ def matmul_kernel_splitK(
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
+        c
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c = accumulator.to(c_ptr.type.element_ty)
 
+
+@triton.jit
+def splitK_reduce(
+    c_ptr,
+    # Matrix dimensions
+    c_buf_ptr,
+    M, N, K,
+    stride_cm, stride_cn,
+    # The stride variables represent how much to increase the ptr by when moving by 1
+    # element in a particular dimension. E.g. `stride_am` is how much to increase `a_ptr`
+    # by to get the element one row down (A has M rows).
+    # Meta-parameters
+    BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+    SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
+    ACTIVATION: tl.constexpr):
+
+    pid = tl.program_id(axis=0)
+    pid_z = tl.program_id(axis=1)
+    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + (pid % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -235,6 +262,10 @@ def matmul(a, b, activation=""):
         c.stride(0), c.stride(1),
         ACTIVATION=activation
     )
+    splitk_value=META['SPLIT_K']
+    c_buf = torch.zeros((splitk_value,M, N), device=a.device, dtype=a.dtype)
+    grid=(splitk_value, )
+    splitK_reduce[grid](c, c_buf)
 
     return c.to(a.dtype)
 

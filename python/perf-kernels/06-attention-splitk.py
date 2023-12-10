@@ -691,12 +691,14 @@ attention = _attention.apply
 def get_input_shapes():
     cases = [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 18)
+        #(max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
+        #for i in range(8, 18)
     ] + [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(8, 18)
+        #(max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
+        #for i in range(8, 18)
+    ] + [
+        (2, 7, 7328, 1, 128, 128)
     ]
 
     # cases = [

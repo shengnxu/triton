@@ -371,6 +371,7 @@ verbose = False
     triton.testing.Benchmark(
         x_names=['M', 'N', 'K'],  # Argument names to use as an x-axis for the plot
         x_vals=[
+            (32, 32, 1026),
             (1024, 1024, 1024),
             (2048, 2048, 2048),
             (4096, 4096, 4096),

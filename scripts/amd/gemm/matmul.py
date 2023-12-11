@@ -116,6 +116,7 @@ def matmul_kernel_splitK(
     stride_am, stride_ak,
     stride_bk, stride_bn,
     stride_cm, stride_cn,
+    splik_v,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
@@ -139,6 +140,7 @@ def matmul_kernel_splitK(
     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
     pid_m = first_pid_m + (pid % group_size_m)
     pid_n = (pid % num_pid_in_group) // group_size_m
+    splitk_v=SPLIT_K
 
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
@@ -186,16 +188,13 @@ def matmul_kernel_splitK(
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
-        c
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-
+    c_buf_ptr[pid_z, :] = accumulator
 
 @triton.jit
 def splitK_reduce(
-    c_ptr,
-    # Matrix dimensions
-    c_buf_ptr,
+    c_ptr, c_buf_ptr,
     M, N, K,
     stride_cm, stride_cn,
     # The stride variables represent how much to increase the ptr by when moving by 1
@@ -223,6 +222,7 @@ def splitK_reduce(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+
 
     if SPLIT_K == 1:
         tl.store(c_ptrs, c, mask=c_mask)
@@ -254,18 +254,23 @@ def matmul(a, b, activation=""):
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
+    splitk_value=META['SPLIT_K']
+    c_buf = torch.zeros((splitk_value,M, N), device=a.device, dtype=a.dtype)
     matmul_kernel_splitK[grid_splitK](
-        a, b, c,
+        a, b, c, c_buf,
         M, N, K,
+        splitk_v,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
         ACTIVATION=activation
     )
-    splitk_value=META['SPLIT_K']
-    c_buf = torch.zeros((splitk_value,M, N), device=a.device, dtype=a.dtype)
-    grid=(splitk_value, )
-    splitK_reduce[grid](c, c_buf)
+    grid=(splitk_v, )
+    splitK_reduce[grid](
+        c, c_buf,
+        c.stride(0), c.stride(1),
+        ACTIVATION=activation
+        )
 
     return c.to(a.dtype)
 

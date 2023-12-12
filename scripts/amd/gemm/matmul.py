@@ -116,7 +116,6 @@ def matmul_kernel_splitK(
     stride_am, stride_ak,
     stride_bk, stride_bn,
     stride_cm, stride_cn,
-    splik_v,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
     SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
@@ -140,7 +139,6 @@ def matmul_kernel_splitK(
     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
     pid_m = first_pid_m + (pid % group_size_m)
     pid_n = (pid % num_pid_in_group) // group_size_m
-    splitk_v=SPLIT_K
 
     # ----------------------------------------------------------
     # Create pointers for the first blocks of A and B.
@@ -190,7 +188,19 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c_buf_ptr[pid_z, :] = accumulator
+    c=accumulator.to(tl.float16)
+    # -----------------------------------------------------------
+    # Write back the block of the output matrix C with masks.
+    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+    c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+    if SPLIT_K == 1:
+        tl.store(c_ptrs, c, mask=c_mask)
+    else:
+        c_ptrs=c_ptr + SPLIT_K * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        tl.store(c_ptrs, accumulator, mask=c_mask)
+
 
 @triton.jit
 def splitK_reduce(
@@ -202,7 +212,7 @@ def splitK_reduce(
     # by to get the element one row down (A has M rows).
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
-    SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr,
+    SPLIT_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     ACTIVATION: tl.constexpr):
 
@@ -216,18 +226,17 @@ def splitK_reduce(
     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
     pid_m = first_pid_m + (pid % group_size_m)
     pid_n = (pid % num_pid_in_group) // group_size_m
-    # -----------------------------------------------------------
-    # Write back the block of the output matrix C with masks.
+
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
+    c=tl.load(c_buf_ptr,mask=c_mask )
 
-    if SPLIT_K == 1:
-        tl.store(c_ptrs, c, mask=c_mask)
-    else:
-        tl.atomic_add(c_ptrs, c, mask=c_mask)
+    for k in range(0, SPLIT_K):
+        c1=c1+c[k,:]
+    tl.store(c_ptrs, c1, mask=c_mask)
 
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
 @triton.jit
@@ -248,29 +257,38 @@ def matmul(a, b, activation=""):
     K, N = b.shape
     # Allocates output.
     c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
+    c_buf = torch.zeros((M, N, 10), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
-    splitk_value=META['SPLIT_K']
-    c_buf = torch.zeros((splitk_value,M, N), device=a.device, dtype=a.dtype)
     matmul_kernel_splitK[grid_splitK](
-        a, b, c, c_buf,
+        a, b, c_buf,
         M, N, K,
-        splitk_v,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
         c.stride(0), c.stride(1),
         ACTIVATION=activation
     )
-    grid=(splitk_v, )
-    splitK_reduce[grid](
-        c, c_buf,
-        c.stride(0), c.stride(1),
-        ACTIVATION=activation
-        )
+#    grid= lambda META: (triton.cdiv(K, splitk_v), )
+    best_config = matmul_kernel_splitK.get_best_config()
+    block_m = best_config.kwargs['BLOCK_SIZE_M']
+    block_n = best_config.kwargs['BLOCK_SIZE_N']
+    block_k = best_config.kwargs['BLOCK_SIZE_K']
+    group_m = best_config.kwargs['GROUP_SIZE_M']
+    split_k = best_config.kwargs['SPLIT_K']
+    if(split_k >1):
+        splitK_reduce[grid_splitK](
+            c, c_buf,
+            M, N, K,
+            c.stride(0), c.stride(1),
+            BLOCK_SIZE_M=block_m, BLOCK_SIZE_N=block_n, BLOCK_SIZE_K=block_k,
+            SPLIT_K=split_k,
+            GROUP_SIZE_M=group_m,
+            ACTIVATION=activation
+            )
 
     return c.to(a.dtype)
 

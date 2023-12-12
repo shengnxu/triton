@@ -198,7 +198,7 @@ def matmul_kernel_splitK(
     if SPLIT_K == 1:
         tl.store(c_ptrs, c, mask=c_mask)
     else:
-        c_ptrs=c_ptr + SPLIT_K * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        c_ptrs=c_ptr + pid_z * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
         tl.store(c_ptrs, accumulator, mask=c_mask)
 
 

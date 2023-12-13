@@ -191,6 +191,7 @@ def _fwd_kernel_splitK(
     q = tl.load(  # noqa: F821
         tl.advance(Q_block_ptr, (0, 0)), boundary_check=(0,)
     )
+    q = (q * qk_scale).to(tl.float16)
 
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
@@ -215,7 +216,6 @@ def _fwd_kernel_splitK(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # for i in range(elem_num):  # noqa: F821
         qk += tl.dot(q, k)  # noqa: F821
-        qk *= qk_scale
 
         # TODO: This is slow, and only needed at the last iteration.
         # Maybe we can unroll the last iteration instead?

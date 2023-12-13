@@ -229,13 +229,19 @@ def splitK_reduce(
 
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    c_block_ptrs = c_buf_ptr +pid_z*M*N+stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
-    c=tl.load(c_buf_ptr,mask=c_mask )
+    c=tl.load(c_block_ptrs, mask=c_mask )
+    c_block_ptrs = c_block_ptrs + M*N
+    c1=tl.load(c_block_ptrs, mask=c_mask )
 
-    for k in range(0, SPLIT_K):
-        c1=c1+c[k,:]
+    for k in range(2, SPLIT_K):
+        c_block_ptrs = c_block_ptrs + M*N
+        c=c1
+        c1=tl.load(c_block_ptrs)
+        c=c+c1
     tl.store(c_ptrs, c1, mask=c_mask)
 
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.

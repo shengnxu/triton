@@ -107,7 +107,7 @@ def get_full_tuning_space(use_split_k):
 @triton.jit
 def matmul_kernel_splitK(
     # Pointers to matrices
-    a_ptr, b_ptr, c_ptr,
+    a_ptr, b_ptr, c_ptr, c_buf_ptr,
     # Matrix dimensions
     M, N, K,
     # The stride variables represent how much to increase the ptr by when moving by 1
@@ -188,7 +188,7 @@ def matmul_kernel_splitK(
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
         accumulator = leaky_relu(accumulator)
-    c=accumulator.to(tl.float16)
+    c=accumulator.to(c_ptr.type.element_ty)
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -198,8 +198,8 @@ def matmul_kernel_splitK(
     if SPLIT_K == 1:
         tl.store(c_ptrs, c, mask=c_mask)
     else:
-        c_ptrs=c_ptr + pid_z * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-        tl.store(c_ptrs, accumulator, mask=c_mask)
+        c_buf_ptrs=c_buf_ptr + pid_z * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        tl.store(c_buf_ptrs, accumulator, mask=c_mask)
 
 
 @triton.jit
@@ -238,10 +238,9 @@ def splitK_reduce(
     c1=tl.load(c_block_ptrs, mask=c_mask )
 
     for k in range(2, SPLIT_K):
-        c_block_ptrs = c_block_ptrs + M*N
-        c=c1
+        c_block_ptrs += M*N
         c1=tl.load(c_block_ptrs)
-        c=c+c1
+        c += c1
     tl.store(c_ptrs, c1, mask=c_mask)
 
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
@@ -271,7 +270,7 @@ def matmul(a, b, activation=""):
         META['SPLIT_K']
     )
     matmul_kernel_splitK[grid_splitK](
-        a, b, c_buf,
+        a, b, c, c_buf,
         M, N, K,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),

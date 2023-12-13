@@ -186,8 +186,8 @@ def matmul_kernel_splitK(
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
-    if ACTIVATION == "leaky_relu":
-        accumulator = leaky_relu(accumulator)
+   # if ACTIVATION == "leaky_relu":
+    #    accumulator = leaky_relu(accumulator)
     c=accumulator.to(c_ptr.type.element_ty)
     # -----------------------------------------------------------
     # Write back the block of the output matrix C with masks.
@@ -200,7 +200,6 @@ def matmul_kernel_splitK(
     else:
         c_buf_ptrs=c_buf_ptr + pid_z * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
         tl.store(c_buf_ptrs, accumulator, mask=c_mask)
-
 
 @triton.jit
 def splitK_reduce(
@@ -217,7 +216,6 @@ def splitK_reduce(
     ACTIVATION: tl.constexpr):
 
     pid = tl.program_id(axis=0)
-    pid_z = tl.program_id(axis=1)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
@@ -226,22 +224,26 @@ def splitK_reduce(
     group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
     pid_m = first_pid_m + (pid % group_size_m)
     pid_n = (pid % num_pid_in_group) // group_size_m
-
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    c_block_ptrs = c_buf_ptr +pid_z*M*N+stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
-    c=tl.load(c_block_ptrs, mask=c_mask )
-    c_block_ptrs = c_block_ptrs + M*N
-    c1=tl.load(c_block_ptrs, mask=c_mask )
+    # Initialize the accumulator
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-    for k in range(2, SPLIT_K):
-        c_block_ptrs += M*N
-        c1=tl.load(c_block_ptrs)
-        c += c1
-    tl.store(c_ptrs, c1, mask=c_mask)
+    # Loop over the splits and accumulate
+    for k in range(SPLIT_K):
+        c_block_ptrs = c_buf_ptr + k * M * N + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        partial_result = tl.load(c_block_ptrs, mask=c_mask)
+        accumulator += partial_result
+
+    # Apply activation function if necessary
+    if ACTIVATION == "leaky_relu":
+        accumulator = leaky_relu(accumulator)
+
+    # Store the final accumulated result
+    c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+    tl.store(c_ptrs, accumulator, mask=c_mask)
 
 # We can fuse `leaky_relu` by providing it as an `ACTIVATION` meta-parameter in `_matmul`.
 @triton.jit
@@ -284,8 +286,10 @@ def matmul(a, b, activation=""):
     block_k = best_config.kwargs['BLOCK_SIZE_K']
     group_m = best_config.kwargs['GROUP_SIZE_M']
     split_k = best_config.kwargs['SPLIT_K']
+    grid = lambda META: (
+        triton.cdiv(M, META['BLOCK_SIZE_M'])*triton.cdiv(N, META['BLOCK_SIZE_N']), )
     if(split_k >1):
-        splitK_reduce[grid_splitK](
+        splitK_reduce[grid](
             c, c_buf,
             M, N, K,
             c.stride(0), c.stride(1),

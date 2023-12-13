@@ -475,21 +475,6 @@ def get_split_k(B: int, G: int, H: int, Mk: int) -> int:
     return split_k
 
 
-def next_power_of_2(n: int):
-    """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
-
-
-# @register_operator
-# class FwOp(AttentionFwOpBase):
 class _attention(torch.autograd.Function):
 
     OPERATOR = _fwd_kernel_splitK
@@ -623,7 +608,7 @@ class _attention(torch.autograd.Function):
             out = torch.empty((B, M, G, H, Kq), device=q.device, dtype=q.dtype)
 
         # Merge together
-        splitK_pow2 = next_power_of_2(split_k)
+        splitK_pow2 = triton.next_power_of_2(split_k)
         use_mask = splitK_pow2 > split_k
         if B * G * H * M >= 512:
             k_block_num = 1

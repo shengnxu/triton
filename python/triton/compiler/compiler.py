@@ -160,6 +160,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
         pm.add_tritongpu_materialize_load_store_pass(num_warps, capability)
     if is_cuda and capability // 10 <= 8:
         pm.add_tritongpu_prefetch_pass()
+    pm.add_tritongpu_dot_slicing_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()

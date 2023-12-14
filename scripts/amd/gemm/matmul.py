@@ -264,7 +264,7 @@ def matmul(a, b, activation=""):
     K, N = b.shape
     # Allocates output.
     c = torch.zeros((M, N), device=a.device, dtype=a.dtype)
-    c_buf = torch.zeros((M, N, 10), device=a.device, dtype=a.dtype)
+    c_buf = torch.zeros((M, N, 10), device=a.device, dtype=torch.float32)
     # 1D launch kernel where each block gets its own program.
 
     grid_splitK = lambda META: (
@@ -330,7 +330,8 @@ def maxloc(tensor1, tensor2):
                   (128, 128, 64), (64, 128, 128), (32, 128, 64),
                   (64, 64, 32), (32, 32, 128), (128, 128, 64),
                   (64, 128, 128), (512, 512, 512), (1024, 1024, 1024),
-                  (16, 16, 1026), (32, 32, 1026)]
+                  (16, 16, 1026), (32, 32, 1026),
+                  (128, 32, 1026), (32, 128, 1026)]
     for datatype in [torch.float16]]
 )
 def test_correctness(M, N, K, datatype):
@@ -343,7 +344,7 @@ def test_correctness(M, N, K, datatype):
     torch_activation_output=torch.nn.functional.leaky_relu(torch_output)
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
-    rtol = 0 if torch.version.hip is None else 1e-2
+    rtol = 0 if torch.version.hip is None else 1e-3
     size_str = f'size, (M: {M}, N: {N}, K: {K})'
     if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
         print(f'✅ Triton and Torch match for {size_str}')

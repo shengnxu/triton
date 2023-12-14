@@ -11,17 +11,6 @@ def _strides(x: torch.Tensor, *stride_names: str):
     return {f"stride_{s}": x.stride(i) for i, s in enumerate(stride_names)}
 
 
-# @triton.autotune(
-#    configs=[
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128}, num_stages=1, num_warps=4),
-#    ],
-#    key=['Z', 'H', 'G', 'N_CTX_Q', 'N_CTX_K', 'BLOCK_DMODEL'],        
-# )
 @triton.jit
 def _fwd_kernel_splitK(
     Q,
@@ -505,25 +494,7 @@ class _attention(torch.autograd.Function):
 
         # attn_bias = inp.attn_bias
         seq_len = None
-        # q, k, v = inp.get_qkv_in_bmghk()
 
-        # if attn_bias is not None:
-        #     assert isinstance(attn_bias, BlockDiagonalCausalWithOffsetPaddedKeysMask)
-        #     # TODO: do we really need to do this cast? seems fishy but
-        #     # I just copied it from the decoder.py
-        #     attn_bias.k_seqinfo.to(inp.query.device)
-        #     attn_bias.q_seqinfo.to(inp.query.device)
-        #     seq_len = attn_bias.k_seqinfo.seqlen
-        #     B = len(seq_len)
-        #     G, H, Kq = q.shape[-3:]
-        #     Kkv = v.shape[-1]
-
-        #     # assume kv has been padded
-        #     q = q.reshape(B, -1, G, H, Kq)
-        #     k = k.reshape(B, -1, G, H, Kkv)
-        #     v = v.reshape(B, -1, G, H, Kkv)
-
-        # print(f"shape, q = {q.shape}, k = {k.shape}")
         # Transpose in the case of MQA/GQA
         mqa_swap_seqlen_head = False
         if k.shape[3] > 1 and k.stride(3) == 0 and v.stride(3) == 0:
@@ -662,15 +633,7 @@ def get_input_shapes():
     ] + [
         (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
         for i in range(8, 18)
-    ] + [
-        (1, 1, 16896, 8, 1, 128)
     ]
-
-    # cases = [
-    #     # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-    #     (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-    #     for i in range(17, 18)
-    # ]
 
     return cases
 
@@ -765,19 +728,6 @@ def bench_flash_attention(B, Mq, Mkv, Hq, Hkv, K, causal, mode, provider, dtype=
         fn = lambda: attention(q, k, v, sm_scale)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
-    # if provider == "flash":
-    #     qkv = torch.randn((BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True)
-    #     if FLASH_VER == 1:
-    #         lengths = torch.full((BATCH,), fill_value=N_CTX, device=device)
-    #         cu_seqlens = torch.zeros((BATCH + 1,), device=device, dtype=torch.int32)
-    #         cu_seqlens[1:] = lengths.cumsum(0)
-    #         qkv = qkv.reshape(BATCH * N_CTX, 3, H, D_HEAD)
-    #         fn = lambda: flash_attn_func(qkv, cu_seqlens, 0., N_CTX, causal=causal)
-    #     elif FLASH_VER == 2:
-    #         fn = lambda: flash_attn_func(qkv, causal=causal)
-    #     else:
-    #         raise ValueError(f'unknown {FLASH_VER = }')
-    #     ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     flops_per_matmul =  2 * B * Hq * (Mq * K * Mkv + Mq * Mkv * K)
     total_flops = 2 * flops_per_matmul
     totalBytes = ((B * Mkv * Hkv * K * 2) + (B * Mq * Hq * K) + (B * Mq * Hq * K)) * 2

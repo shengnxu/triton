@@ -25,11 +25,6 @@ LogicalResult convertMMA16816(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                               TritonGPUToLLVMTypeConverter *typeConverter,
                               ConversionPatternRewriter &rewriter);
 
-#ifdef USE_ROCM
-LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
-                          TritonGPUToLLVMTypeConverter *typeConverter,
-                          ConversionPatternRewriter &rewriter);
-#endif
 LogicalResult convertWGMMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                            TritonGPUToLLVMTypeConverter *typeConverter,
                            ConversionPatternRewriter &rewriter, Value thread);
@@ -59,9 +54,9 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
     bool isOuter = K == 1;
 
     NvidiaMmaEncodingAttr mmaLayout = D.getType()
-                                    .cast<RankedTensorType>()
-                                    .getEncoding()
-                                    .dyn_cast<NvidiaMmaEncodingAttr>();
+                                          .cast<RankedTensorType>()
+                                          .getEncoding()
+                                          .dyn_cast<NvidiaMmaEncodingAttr>();
     if (!isOuter && mmaLayout && supportMMA(op, mmaLayout.getVersionMajor())) {
       if (mmaLayout.isVolta())
         return convertMMA884(op, adaptor, getTypeConverter(), rewriter);
@@ -76,16 +71,6 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
       llvm::report_fatal_error(
           "Unsupported MMA kind found when converting DotOp to LLVM.");
     }
-
-#ifdef USE_ROCM
-    MfmaEncodingAttr mfmaLayout = D.getType()
-                                      .cast<RankedTensorType>()
-                                      .getEncoding()
-                                      .dyn_cast<MfmaEncodingAttr>();
-    if (!isOuter && mfmaLayout && supportMFMA(op)) {
-      return convertMFMA(op, adaptor, getTypeConverter(), rewriter);
-    }
-#endif
 
     if (D.getType()
             .cast<RankedTensorType>()
@@ -118,9 +103,9 @@ struct DotAsyncOpConversion
     bool isOuter = K == 1;
 
     NvidiaMmaEncodingAttr mmaLayout = D.getType()
-                                    .cast<RankedTensorType>()
-                                    .getEncoding()
-                                    .dyn_cast<NvidiaMmaEncodingAttr>();
+                                          .cast<RankedTensorType>()
+                                          .getEncoding()
+                                          .dyn_cast<NvidiaMmaEncodingAttr>();
     if (!isOuter && mmaLayout &&
         supportMMA(op.getOperand(0), mmaLayout.getVersionMajor())) {
       if (mmaLayout.isHopper()) {
@@ -146,8 +131,55 @@ struct DotWaitOpConversion
   matchAndRewrite(triton::nvidia_gpu::DotWaitOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto pendings = op.getPendings();
-    rewriter.replaceOpWithNewOp<triton::nvgpu::WGMMAWaitGroupOp>(
-        op, adaptor.getInput(), pendings);
+    Location loc = op.getLoc();
+    if (adaptor.getInputs().size() <= 1) {
+      Value intput =
+          adaptor.getInputs().size() == 1 ? adaptor.getInputs()[0] : Value();
+      rewriter.replaceOpWithNewOp<triton::nvgpu::WGMMAWaitGroupOp>(op, intput,
+                                                                   pendings);
+      return success();
+    }
+    std::vector<Type> types;
+    // Pack the inputs into a single struct.
+    for (Value input : adaptor.getInputs()) {
+      auto structType = input.getType().dyn_cast<LLVM::LLVMStructType>();
+      if (!structType)
+        return failure();
+      for (Type type : structType.getBody())
+        types.push_back(type);
+    }
+    auto packedType =
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(), types);
+    Value packed = rewriter.create<LLVM::UndefOp>(loc, packedType);
+    unsigned outputStructIndex = 0;
+    for (Value input : adaptor.getInputs()) {
+      auto structType = input.getType().dyn_cast<LLVM::LLVMStructType>();
+      for (unsigned i = 0; i < structType.getBody().size(); ++i) {
+        Value value = rewriter.create<LLVM::ExtractValueOp>(
+            loc, structType.getBody()[i], input, i);
+        packed = rewriter.create<LLVM::InsertValueOp>(
+            loc, packedType, packed, value, outputStructIndex++);
+      }
+    }
+    Value packedOutput =
+        rewriter.create<triton::nvgpu::WGMMAWaitGroupOp>(loc, packed, pendings);
+    // Unpack the output into the original struct types.
+    SmallVector<Value> outputs;
+    outputStructIndex = 0;
+    for (Value input : adaptor.getInputs()) {
+      auto structType = input.getType().cast<LLVM::LLVMStructType>();
+      Value unpacked = rewriter.create<LLVM::UndefOp>(loc, structType);
+      for (unsigned i = 0; i < structType.getBody().size(); ++i) {
+        Value value = rewriter.create<LLVM::ExtractValueOp>(
+            loc, packedType.getBody()[outputStructIndex], packedOutput,
+            outputStructIndex);
+        outputStructIndex++;
+        unpacked = rewriter.create<LLVM::InsertValueOp>(loc, structType,
+                                                        unpacked, value, i);
+      }
+      outputs.push_back(unpacked);
+    }
+    rewriter.replaceOp(op, outputs);
     return success();
   }
 };

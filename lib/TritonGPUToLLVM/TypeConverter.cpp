@@ -9,7 +9,6 @@ using namespace mlir::triton;
 using ::mlir::triton::gpu::BlockedEncodingAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
-using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
@@ -37,9 +36,6 @@ TritonGPUToLLVMTypeConverter::TritonGPUToLLVMTypeConverter(
   addConversion([&](mlir::Float8E5M2Type type) -> std::optional<Type> {
     return IntegerType::get(type.getContext(), 8);
   });
-  addConversion([&](mlir::Float8E5M2FNUZType type) -> std::optional<Type> {
-    return IntegerType::get(type.getContext(), 8);
-  });
   // Internally store bfloat16 as int16
   addConversion([&](BFloat16Type type) -> std::optional<Type> {
     return IntegerType::get(type.getContext(), 16);
@@ -64,13 +60,11 @@ Type TritonGPUToLLVMTypeConverter::convertTritonPointerType(
     for (size_t i = 0; i < 2 * shape.size(); ++i)
       types.push_back(IntegerType::get(ctx, 64));
 
-    types.push_back(
-        LLVM::LLVMPointerType::get(eleType, type.getAddressSpace()));
+    types.push_back(LLVM::LLVMPointerType::get(ctx, type.getAddressSpace()));
 
     return LLVM::LLVMStructType::getLiteral(ctx, types);
   }
-  return LLVM::LLVMPointerType::get(convertType(type.getPointeeType()),
-                                    type.getAddressSpace());
+  return LLVM::LLVMPointerType::get(ctx, type.getAddressSpace());
 }
 
 Value TritonGPUToLLVMTypeConverter::packLLElements(
@@ -105,37 +99,6 @@ Value TritonGPUToLLVMTypeConverter::packLLElements(
   return llvmStruct;
 }
 
-SmallVector<Value> TritonGPUToLLVMTypeConverter::packMfmaOperand(
-    const SmallVector<Value> &inValues, Type srcTy,
-    ConversionPatternRewriter &rewriter, Location loc) {
-  auto tensorTy = srcTy.dyn_cast<RankedTensorType>();
-  if (!tensorTy)
-    return inValues;
-  auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MfmaEncodingAttr>())) {
-    return inValues;
-  }
-
-  auto structType = this->convertType(srcTy).dyn_cast<LLVM::LLVMStructType>();
-  auto elementTypes = structType.getBody();
-  assert(elementTypes.size() > 0);
-  mlir::VectorType vecTy = elementTypes[0].dyn_cast<mlir::VectorType>();
-  if (!vecTy) return inValues;
-
-  unsigned size = vecTy.getNumElements();
-
-  SmallVector<Value> result;
-  for (int i = 0; i < inValues.size(); i += size) {
-    Value valVec = undef(vecTy);
-    for (unsigned j = 0; j < size; ++j) {
-      valVec = insert_element(vecTy, valVec, inValues[i + j], i32_val(j));
-    }
-    result.push_back(valVec);
-  }
-
-  return result;
-}
-
 SmallVector<Value> TritonGPUToLLVMTypeConverter::unpackLLElements(
     Location loc, Value llvmStruct, ConversionPatternRewriter &rewriter,
     Type type) {
@@ -162,22 +125,6 @@ Type TritonGPUToLLVMTypeConverter::getElementTypeForStruct(
   auto dotOpLayout = layout.dyn_cast<DotOperandEncodingAttr>();
   if (!dotOpLayout)
     return elemTy;
-
-#ifdef USE_ROCM
-  if (auto mfmaParent = dotOpLayout.getParent().dyn_cast<MfmaEncodingAttr>()) {
-    if (elemTy.isF32())
-      return elemTy;
-    if (elemTy.isInteger(16)) // aka BF16
-      return vec_ty(elemTy, dotOpLayout.getKWidth());
-    if (elemTy.isF16())
-      return vec_ty(elemTy, 4);
-    if (elemTy.isInteger(8) && dotOpLayout.getKWidth() == 4)
-      return IntegerType::get(ctx, 32);
-    if (elemTy.isInteger(8) && dotOpLayout.getKWidth() == 8)
-      return IntegerType::get(ctx, 64);
-  }
-#endif
-
   auto mmaParent = dotOpLayout.getParent().dyn_cast<NvidiaMmaEncodingAttr>();
   if (!mmaParent || mmaParent.isHopper())
     return elemTy;
@@ -196,7 +143,7 @@ Type TritonGPUToLLVMTypeConverter::convertTritonTensorType(
   if (auto shared_layout = layout.dyn_cast<SharedEncodingAttr>()) {
     SmallVector<Type, 4> types;
     // base ptr
-    auto ptrType = LLVM::LLVMPointerType::get(eltType, 3);
+    auto ptrType = LLVM::LLVMPointerType::get(ctx, 3);
     types.push_back(ptrType);
     // shape dims
     auto rank = type.getRank();

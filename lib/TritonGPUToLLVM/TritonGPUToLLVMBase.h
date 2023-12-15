@@ -31,6 +31,7 @@ using ::mlir::triton::gpu::BlockedEncodingAttr;
 using ::mlir::triton::gpu::CTALayoutAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 using ::mlir::triton::gpu::TMAMetadataTy;
 namespace ttng = ::mlir::triton::nvidia_gpu;
@@ -761,6 +762,34 @@ public:
     if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>())
       return emitOffsetForSliceLayout(sliceLayout, type);
     llvm_unreachable("unsupported emitOffsetForLayout");
+  }
+
+  void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
+                            SmallVector<SmallVector<unsigned>> &offsets,
+                            unsigned ctaOffsetX, unsigned ctaOffsetY) const {
+    auto nonKDim = mfmaLayout.getNonKDim();
+    // MFMA output tile consists of repeated "dot operand B" layout groups along
+    // row axis. This variable defines number of these groups.
+    const unsigned numGroups = (nonKDim == 32 ? 4 : 1);
+    const unsigned elemsPerThreadPerGroup = 4;
+    auto warpSize = getWarpSize(mfmaLayout);
+    assert(warpSize == 64);
+    auto shapePerCta = getShapePerCTATile(mfmaLayout);
+    for (unsigned block = 0; block < numGroups; block++) {
+      unsigned rowOrColOffset =
+          block * elemsPerThreadPerGroup * warpSize / nonKDim;
+      for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
+        if (mfmaLayout.getIsTransposed()) {
+          offsets.push_back(
+              {ctaOffsetX * shapePerCta[0],
+               ctaOffsetY * shapePerCta[1] + elem + rowOrColOffset});
+        } else {
+          offsets.push_back(
+              {ctaOffsetX * shapePerCta[0] + elem + rowOrColOffset,
+               ctaOffsetY * shapePerCta[1]});
+        }
+      }
+    }
   }
 
   // -----------------------------------------------------------------------

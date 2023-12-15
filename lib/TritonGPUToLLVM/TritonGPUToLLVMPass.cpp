@@ -21,10 +21,7 @@
 #include "triton/Dialect/NVGPU/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#ifndef USE_ROCM
-#else
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
-#endif
 #include "triton/Tools/Sys/GetPlatform.hpp"
 
 #include "BarrierOpToLLVM.h"
@@ -65,10 +62,6 @@ static void addWSNamedAttrs(Operation *op,
       op->setAttr(attr.getName(), attr.getValue());
 }
 
-#ifdef USE_ROCM
-constexpr int LDSSize = 65536;
-constexpr int kPtrBitWidth = 64;
-#endif
 class TritonLLVMFunctionConversionTarget : public ConversionTarget {
 public:
   explicit TritonLLVMFunctionConversionTarget(MLIRContext &ctx, Target target)
@@ -81,7 +74,6 @@ public:
       break;
     case Target::ROCDL:
       addLegalDialect<ROCDL::ROCDLDialect>();
-      addLegalDialect<mlir::scf::SCFDialect>();
       break;
     }
     addLegalOp<mlir::UnrealizedConversionCastOp>();
@@ -169,8 +161,7 @@ struct FuncOpConversion : public FuncOpConversionBase {
     // memory to the function arguments.
     auto loc = funcOp.getLoc();
     auto ctx = funcOp->getContext();
-    auto ptrTy = LLVM::LLVMPointerType::get(
-        this->getTypeConverter()->convertType(rewriter.getI8Type()), 3);
+    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(), 3);
     // 1. Modify the function type to add the new argument.
     auto funcTy = funcOp.getFunctionType();
     auto amendedInputTy = llvm::to_vector<4>(funcTy.getInputs());
@@ -233,24 +224,21 @@ struct FuncOpConversion : public FuncOpConversionBase {
           ArrayAttr::get(ctx, rewriter.getStringAttr("noinline")));
       rewriter.eraseOp(amendedFuncOp);
     }
-#ifndef USE_ROCM
     // Set an attribute for maxntidx, it could be used in latter LLVM codegen
     // for `nvvm.annotation` metadata.
     newFuncOp->setAttr("nvvm.maxntid", rewriter.getI32ArrayAttr(32 * numWarps));
-#endif
     // The call graph is updated by mapping the old function to the new one.
     allocation.mapFuncOp(funcOp, newFuncOp);
 
     // Append arguments to receive TMADesc in global memory in the runtime
-    auto i8PtrTy = LLVM::LLVMPointerType::get(
-        this->getTypeConverter()->convertType(rewriter.getI8Type()), 1);
+    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(), 1);
     auto numArgs = newFuncOp.getBody().front().getNumArguments();
     auto funcTy = newFuncOp.getFunctionType().cast<LLVM::LLVMFunctionType>();
     SmallVector<Type> newInputsTy(funcTy.getParams().begin(),
                                   funcTy.getParams().end());
     for (unsigned i = 0; i < numTMA; ++i) {
-      newFuncOp.getBody().front().addArgument(i8PtrTy, funcOp.getLoc());
-      newInputsTy.push_back(i8PtrTy);
+      newFuncOp.getBody().front().addArgument(ptrTy, funcOp.getLoc());
+      newInputsTy.push_back(ptrTy);
     }
     newFuncOp.setType(
         LLVM::LLVMFunctionType::get(funcTy.getReturnType(), newInputsTy));
@@ -306,9 +294,8 @@ private:
     // of shared memory and append it to the operands of the callOp.
     auto loc = callOp.getLoc();
     auto caller = callOp->getParentOfType<FunctionOpInterface>();
-    auto ptrTy = LLVM::LLVMPointerType::get(
-        this->getTypeConverter()->convertType(rewriter.getI8Type()),
-        NVVM::kSharedMemorySpace);
+    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(),
+                                            NVVM::kSharedMemorySpace);
     auto promotedOperands = this->getTypeConverter()->promoteOperands(
         callOp.getLoc(), /*opOperands=*/callOp->getOperands(),
         adaptor.getOperands(), rewriter);
@@ -322,7 +309,9 @@ private:
     }
     // function has a shared mem buffer
     auto offset = funcAllocation->getOffset(bufferId);
-    auto offsetValue = gep(ptrTy, base, i32_val(offset));
+    auto offsetValue =
+        gep(ptrTy, this->getTypeConverter()->convertType(rewriter.getI8Type()),
+            base, i32_val(offset));
     promotedOperands.push_back(offsetValue);
     return promotedOperands;
   }
@@ -382,7 +371,6 @@ public:
       break;
     case Target::ROCDL:
       addLegalDialect<ROCDL::ROCDLDialect>();
-      addLegalDialect<mlir::scf::SCFDialect>();
       break;
     }
     addLegalDialect<mlir::triton::nvgpu::NVGPUDialect>();
@@ -401,7 +389,7 @@ struct ConvertTritonGPUToLLVM
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<triton::nvgpu::NVGPUDialect, LLVM::LLVMDialect,
-                    NVVM::NVVMDialect, ROCDL::ROCDLDialect>();
+                    NVVM::NVVMDialect>();
   }
 
   ConvertTritonGPUToLLVM(int32_t computeCapability, Target target,
@@ -420,13 +408,17 @@ struct ConvertTritonGPUToLLVM
     int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(mod);
     int threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
 
+    // Hack: WSMaterialization may have changed the effective number of warps,
+    // in a way that isn't reflected in triton_gpu.num-warps.  If so, we have to
+    // respect that here.
+    if (Attribute attr = mod->getAttr("triton_gpu.num-warp-groups-per-cta")) {
+      numWarps *= attr.cast<IntegerAttr>().getInt();
+    }
+
     // Preprocess
     decomposeFp8e4b15Convert(mod);
+    decomposeSplatToSharedLayout(mod, numWarps, threadsPerWarp, numCTAs);
     decomposeMmaToDotOperand(mod, numWarps, threadsPerWarp, numCTAs);
-#ifdef USE_ROCM
-    decomposeMfmaToDotOperand(mod, numWarps, threadsPerWarp, numCTAs);
-    reduceCvtOpLDSUsage(mod);
-#endif
     decomposeBlockedToDotOperand(mod);
     decomposeInsertSliceAsyncOp(mod);
     decomposeMixedModeDotOp(mod);
@@ -627,9 +619,8 @@ private:
       } else {
         funcSmem = funcOp.getArgument(funcOp.getNumArguments() - 1);
       }
-      auto ptrTy =
-          LLVM::LLVMPointerType::get(typeConverter.convertType(b.getI8Type()),
-                                     NVVM::NVVMMemorySpace::kSharedMemorySpace);
+      auto ptrTy = LLVM::LLVMPointerType::get(
+          ctx, NVVM::NVVMMemorySpace::kSharedMemorySpace);
       funcSmem = b.create<LLVM::BitcastOp>(loc, ptrTy, funcSmem);
       allocation.setFunctionSharedMemoryValue(funcOp, funcSmem);
     });
@@ -669,6 +660,31 @@ private:
     });
   }
 
+  void decomposeSplatToSharedLayout(ModuleOp mod, int numWarps,
+                                    int threadsPerWarp, int numCTAs) const {
+    // Replace `splat -> shared` with `splat -> blocked -> shared`.
+    mod.walk([&](triton::SplatOp splatOp) -> void {
+      auto dstType = splatOp.getType().cast<RankedTensorType>();
+      auto shared =
+          dstType.getEncoding().dyn_cast<triton::gpu::SharedEncodingAttr>();
+      if (shared) {
+        OpBuilder builder(splatOp);
+        SmallVector<unsigned, 4> sizePerThread(dstType.getRank(), 1);
+        auto newType = RankedTensorType::get(
+            dstType.getShape(), dstType.getElementType(),
+            triton::gpu::BlockedEncodingAttr::get(
+                mod.getContext(), dstType.getShape(), sizePerThread,
+                getOrder(shared), numWarps, threadsPerWarp, numCTAs));
+        auto newSplat = builder.create<triton::SplatOp>(
+            splatOp.getLoc(), newType, splatOp.getOperand());
+        auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(
+            splatOp.getLoc(), dstType, newSplat.getResult());
+        splatOp.replaceAllUsesWith(newConvert.getResult());
+        splatOp.erase();
+      }
+    });
+  }
+
   void decomposeMmaToDotOperand(ModuleOp mod, int numWarps, int threadsPerWarp,
                                 int numCTAs) const {
     // Replace `mma -> dot_op` with `mma -> blocked -> dot_op`
@@ -698,181 +714,6 @@ private:
       }
     });
   }
-
-#ifdef USE_ROCM
-  void decomposeMfmaToDotOperand(ModuleOp mod, int numWarps, int threadsPerWarp,
-                                 int numCTAs) const {
-    // Replace `mfma -> dot_op` with `mfma -> blocked -> dot_op`
-    // unless certain conditions are met
-    mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
-      OpBuilder builder(cvtOp);
-      auto srcType = cvtOp.getOperand().getType().cast<RankedTensorType>();
-      auto dstType = cvtOp.getType().cast<RankedTensorType>();
-      auto srcMfma =
-          srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-      auto dstDotOp =
-          dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
-      if (srcMfma && dstDotOp && !isMfmaToDotShortcut(srcType, dstType)) {
-        auto tmpType = RankedTensorType::get(
-            dstType.getShape(), dstType.getElementType(),
-            triton::gpu::BlockedEncodingAttr::get(
-                mod.getContext(), srcType.getShape(), getSizePerThread(srcMfma),
-                getOrder(srcMfma), numWarps, threadsPerWarp, numCTAs));
-        auto tmp = builder.create<triton::gpu::ConvertLayoutOp>(
-            cvtOp.getLoc(), tmpType, cvtOp.getOperand());
-        auto newConvert = builder.create<triton::gpu::ConvertLayoutOp>(
-            cvtOp.getLoc(), dstType, tmp);
-        cvtOp.replaceAllUsesWith(newConvert.getResult());
-        cvtOp.erase();
-      }
-    });
-  }
-
-  int getCvtOpLDSUsage(triton::gpu::ConvertLayoutOp &cvtOp) const {
-    unsigned inVec = 0;
-    unsigned outVec = 0;
-    auto smemShape = getScratchConfigForCvtLayout(cvtOp, inVec, outVec);
-    unsigned elems = std::accumulate(smemShape.begin(), smemShape.end(), 1,
-                                     std::multiplies{});
-    auto srcType = cvtOp.getOperand().getType().cast<RankedTensorType>();
-    auto bytes =
-        srcType.getElementType().isa<triton::PointerType>()
-            ? elems * kPtrBitWidth / 8
-            : elems * std::max<int>(8, srcType.getElementTypeBitWidth()) / 8;
-
-    return bytes;
-  }
-
-  bool isPowerOfTwo(unsigned x) const { return x && (x & (x - 1)) == 0; }
-
-  std::vector<std::pair<int, int>> factorizePowerOf2(int n) const {
-    assert(isPowerOfTwo(n));
-    int x = log2(n);
-    std::vector<std::pair<int, int>> pairs;
-
-    for (int i = 0; i <= x / 2; ++i) {
-      int j = x - i;
-      pairs.push_back({pow(2, i), pow(2, j)});
-      pairs.push_back({pow(2, j), pow(2, i)});
-    }
-
-    return pairs;
-  }
-
-  std::pair<triton::gpu::ConvertLayoutOp, triton::gpu::ConvertLayoutOp>
-  createNewConvertOps(ModuleOp &mod, OpBuilder &builder,
-                      triton::gpu::ConvertLayoutOp &cvtOp,
-                      std::pair<unsigned, unsigned> warpsPerCta) const {
-    unsigned warpsPerCtaX = warpsPerCta.first;
-    unsigned warpsPerCtaY = warpsPerCta.second;
-    auto srcType = cvtOp.getOperand().getType().cast<RankedTensorType>();
-    auto dstType = cvtOp.getType().cast<RankedTensorType>();
-
-    auto srcMfma =
-        srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-    auto newMfmaEnc = triton::gpu::MfmaEncodingAttr::get(
-        mod.getContext(), srcMfma.getNonKDim(), {warpsPerCtaX, warpsPerCtaY},
-        srcMfma.getIsTransposed(), srcMfma.getCTALayout());
-
-    auto newDstType = RankedTensorType::get(
-        dstType.getShape(), dstType.getElementType(), dstType.getEncoding());
-    auto newSrcType = RankedTensorType::get(
-        srcType.getShape(), srcType.getElementType(), newMfmaEnc);
-
-    auto tmpCvt = builder.create<triton::gpu::ConvertLayoutOp>(
-        cvtOp.getLoc(), newSrcType, cvtOp.getOperand());
-    auto newEpilogueCvt = builder.create<triton::gpu::ConvertLayoutOp>(
-        cvtOp.getLoc(), newDstType, tmpCvt);
-
-    return std::make_pair(tmpCvt, newEpilogueCvt);
-  }
-
-  // Try to reduce LDS usage of cvt(mfma->blocked) op by changing the shape of
-  // WarpsPerCta attribute in mfma layout. The implicit LDS usage of
-  // cvt(mfma->blocked) op depends on the number of warps per CTA that mfma
-  // layout uses along x dimension and block layout uses across y dimension.
-  //
-  // clang-format off
-  //
-  // LDS usage of this op is roughly calculated as:
-  // LDS_USAGE = getShapePerCTA(mfma_layout)[0] * getShapePerCTA(blocked_layout)[1] * sizeof(data_type)
-  // LDS_USAGE = warpsPerCTA(mfma_layout)[0] * warpsPerCta(blocked_layout)[1] * C,
-  // where C = 32 * sizePerWarp(blocked_layout)[1] * threadsPerWarp(blocked_layout)[1] * sizeof(data_type)
-  //
-  // clang-format on
-  //
-  // When LDS_USAGE exceeds the size of LDS, try to lower LDS usage by
-  // decomposing cvt(mfma->blocked) op into 2 conversions: cvt(mfma->mfma_tmp)
-  // and cvt(mfma_tmp->blocked), where mfma_tmp has WarpsPerCta attribute that
-  // minimizes uses of LDS for these conversions.
-  void reduceCvtOpLDSUsage(ModuleOp mod) const {
-    mod.walk([&](triton::gpu::ConvertLayoutOp cvtOp) -> void {
-      OpBuilder builder(cvtOp);
-
-      auto srcType = cvtOp.getOperand().getType().cast<RankedTensorType>();
-      auto dstType = cvtOp.getType().cast<RankedTensorType>();
-
-      auto srcMfma =
-          srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
-      auto dstBlocked =
-          dstType.getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
-
-      if (!srcMfma || !dstBlocked) {
-        return;
-      }
-
-      auto currLDSUsage = getCvtOpLDSUsage(cvtOp);
-      if (currLDSUsage <= LDSSize) {
-        return;
-      }
-
-      unsigned numWarps =
-          srcMfma.getWarpsPerCTA()[0] * srcMfma.getWarpsPerCTA()[1];
-
-      triton::gpu::ConvertLayoutOp tmpCvt;
-      triton::gpu::ConvertLayoutOp newEpilogueCvt;
-
-      // Find all possible shapes of WarpsPerCTA by finding all possible
-      // factorizations of numWarps. Pick shape for which both conversions in
-      // decomposition use LDS less than LDSSize and for which sum of LDS usage
-      // is minimal. If no such shape exists, do not decompose.
-      unsigned minLDSUsage = 2 * LDSSize;
-      int minIdx = -1;
-      auto factorizedNumWarps = factorizePowerOf2(numWarps);
-
-      for (int i = 0; i < factorizedNumWarps.size(); i++) {
-        auto warpsPerCTAPair = factorizedNumWarps[i];
-        std::tie(tmpCvt, newEpilogueCvt) =
-            createNewConvertOps(mod, builder, cvtOp, warpsPerCTAPair);
-
-        int tmpCvtLDS = getCvtOpLDSUsage(tmpCvt);
-        int newCvtLDS = getCvtOpLDSUsage(newEpilogueCvt);
-        if (tmpCvtLDS <= LDSSize && newCvtLDS <= LDSSize) {
-          int LDSUsage = tmpCvtLDS + newCvtLDS;
-          if (LDSUsage < minLDSUsage) {
-            minLDSUsage = LDSUsage;
-            minIdx = i;
-          }
-        }
-        newEpilogueCvt.erase();
-        tmpCvt.erase();
-      }
-
-      if (minIdx == -1) {
-        return;
-      }
-
-      assert(minIdx >= 0 && minIdx < factorizedNumWarps.size());
-      auto warpsPerCTAPair = factorizedNumWarps[minIdx];
-      std::tie(tmpCvt, newEpilogueCvt) =
-          createNewConvertOps(mod, builder, cvtOp, warpsPerCTAPair);
-
-      cvtOp.replaceAllUsesWith(newEpilogueCvt.getResult());
-      cvtOp.erase();
-    });
-  }
-
-#endif
 
   void decomposeBlockedToDotOperand(ModuleOp mod) const {
     // Replace `blocked -> dot_op` with `blocked -> shared -> dot_op`
@@ -935,10 +776,8 @@ private:
       auto mask = insertSliceAsyncOp.getMask();
       auto srcTy = src.getType().cast<RankedTensorType>();
       auto dstTy = dst.getType().cast<RankedTensorType>();
-      auto srcLayout = srcTy.getEncoding();
-      assert((srcLayout.isa<BlockedEncodingAttr, SliceEncodingAttr>() &&
-              "Unexpected srcLayout"));
-
+      auto srcBlocked =
+          srcTy.getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
       auto resSharedLayout =
           dstTy.getEncoding().dyn_cast<triton::gpu::SharedEncodingAttr>();
       auto resElemTy = dstTy.getElementType();
@@ -958,17 +797,15 @@ private:
 
       // If the load byte width is not eligible or the current compute
       // capability does not support async copy, then we do decompose
-#ifndef USE_ROCM
       if (triton::gpu::InsertSliceAsyncOp::getEligibleLoadByteWidth(
               computeCapability)
               .contains(byteWidth)) {
         return;
       }
-#endif
 
       // load
       auto tmpTy =
-          RankedTensorType::get(srcTy.getShape(), resElemTy, srcLayout);
+          RankedTensorType::get(srcTy.getShape(), resElemTy, srcBlocked);
       auto loadOp = builder.create<triton::LoadOp>(
           insertSliceAsyncOp.getLoc(), tmpTy, insertSliceAsyncOp.getSrc(),
           insertSliceAsyncOp.getMask(), insertSliceAsyncOp.getOther(),
@@ -1001,19 +838,11 @@ private:
     });
 
     mod.walk([&](triton::gpu::AsyncCommitGroupOp asyncCommitGroupOp) -> void {
-#ifdef USE_ROCM
-      asyncCommitGroupOp.erase();
-#else
       if (!triton::gpu::AsyncCommitGroupOp::isSupported(computeCapability))
         asyncCommitGroupOp.erase();
-#endif
     });
 
     mod.walk([&](triton::gpu::AsyncWaitOp asyncWaitOp) -> void {
-#ifdef USE_ROCM
-      // AsyncWait is not supported for ROCM and should be removed
-      asyncWaitOp.erase();
-#else
       if (!triton::gpu::AsyncWaitOp::isSupported(computeCapability)) {
         // async wait is supported in Ampere and later
         asyncWaitOp.erase();
@@ -1025,7 +854,6 @@ private:
         addWSNamedAttrs(newWaitOp, asyncWaitOp->getAttrs());
         asyncWaitOp.erase();
       }
-#endif
     });
   }
 
@@ -1047,9 +875,9 @@ private:
           dotOp.getA().getType().cast<RankedTensorType>().getElementType();
       Type promoteType;
       NvidiaMmaEncodingAttr mmaLayout = D.getType()
-                                      .cast<RankedTensorType>()
-                                      .getEncoding()
-                                      .dyn_cast<NvidiaMmaEncodingAttr>();
+                                            .cast<RankedTensorType>()
+                                            .getEncoding()
+                                            .dyn_cast<NvidiaMmaEncodingAttr>();
       if (mmaLayout) {
         bool isNativeHopperFP8 =
             AElType.isFloat8E5M2() || AElType.isFloat8E4M3FNUZ();
@@ -1058,30 +886,6 @@ private:
         if (!isFP8 || (isNativeHopperFP8 && mmaLayout.isHopper()))
           return;
         promoteType = builder.getF16Type();
-#ifdef USE_ROCM
-      } else if (MfmaEncodingAttr mfmaLayout =
-                     D.getType()
-                         .cast<RankedTensorType>()
-                         .getEncoding()
-                         .dyn_cast<MfmaEncodingAttr>()) {
-        Type BElType =
-            dotOp.getB().getType().cast<RankedTensorType>().getElementType();
-
-        auto maxBitWidth = std::max(AElType.getIntOrFloatBitWidth(),
-                                    BElType.getIntOrFloatBitWidth());
-
-        // TODO check mfma tensor core version compatibility
-        if (maxBitWidth == 8)
-          return;
-
-        if (AElType == BElType)
-          return;
-
-        if (maxBitWidth < 16)
-          promoteType = builder.getF16Type();
-        else if (maxBitWidth <= 32)
-          promoteType = builder.getF32Type();
-#endif
       } else {
         // FMA case.
         Type AElType =

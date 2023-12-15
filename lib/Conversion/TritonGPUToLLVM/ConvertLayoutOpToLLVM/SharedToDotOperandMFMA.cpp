@@ -140,46 +140,34 @@ computeTensorElemMapping(ConversionPatternRewriter &rewriter, Location loc,
   auto numM = reps[0];
   auto numK = reps[1];
   const int loadsPerThread = numOfElems / loadVecSize;
-  llvm::SmallVector<llvm::SmallVector<Value>> mapping(numM * numK *
-                                                      loadsPerThread);
+  llvm::SmallVector<llvm::SmallVector<Value>> mapping(numK * loadsPerThread);
 
   Value _0 = i32_val(0);
   Value _32 = i32_val(32);
   Value nonKDim = i32_val(iNonKDim);
 
-  for (int block = 0; block < numM; ++block) {
-    Value blockVOffset = i32_val(block * elemsPerInstr[0] * warpsPerGroup);
-    Value blockHOffset = _0;
-    Value waveVOffset = mul(waveId, i32_val(elemsPerInstr[0]));
-    Value waveHOffset = _0;
-    for (int tile = 0; tile < numK; ++tile) {
-      Value tileVOffset = _0;
-      Value tileHOffset = i32_val(tile * elemsPerInstr[1]);
+  for (int tile = 0; tile < numK; ++tile) {
+    Value tileVOffset = _0;
+    Value tileHOffset = i32_val(tile * elemsPerInstr[1]);
 
-      Value laneVOffset = urem(laneId, nonKDim);
-      Value laneHOffset;
-      if (iNonKDim == 32)
-        laneHOffset = select(icmp_uge(laneId, _32), i32_val(numOfElems), _0);
-      else
-        laneHOffset = mul(udiv(laneId, nonKDim), i32_val(numOfElems));
+    Value laneVOffset = urem(laneId, nonKDim);
+    Value laneHOffset;
+    if (iNonKDim == 32)
+      laneHOffset = select(icmp_uge(laneId, _32), i32_val(numOfElems), _0);
+    else
+      laneHOffset = mul(udiv(laneId, nonKDim), i32_val(numOfElems));
 
-      for (int loadId = 0; loadId < loadsPerThread; ++loadId) {
-        Value elemVOffset = _0;
-        Value elemHOffset = i32_val(loadId * loadVecSize);
+    for (int loadId = 0; loadId < loadsPerThread; ++loadId) {
+      Value elemVOffset = _0;
+      Value elemHOffset = i32_val(loadId * loadVecSize);
 
-        Value sliceVOffset = add(
-            add(add(add(blockVOffset, waveVOffset), tileVOffset), laneVOffset),
-            elemVOffset);
-        Value sliceHOffset = add(
-            add(add(add(blockHOffset, waveHOffset), tileHOffset), laneHOffset),
-            elemHOffset);
+      Value sliceVOffset = add(add(tileVOffset, laneVOffset), elemVOffset);
+      Value sliceHOffset = add(add(tileHOffset, laneHOffset), elemHOffset);
 
-        Value row = add(sliceVOffset, smemOffsets[0]);
-        Value col = add(sliceHOffset, smemOffsets[1]);
+      Value row = add(sliceVOffset, smemOffsets[0]);
+      Value col = add(sliceHOffset, smemOffsets[1]);
 
-        mapping[numK * loadsPerThread * block + loadsPerThread * tile +
-                loadId] = {row, col};
-      }
+      mapping[loadsPerThread * tile + loadId] = {row, col};
     }
   }
   return mapping;
@@ -350,11 +338,12 @@ bool fastPathAvailable(const SharedMemoryObject &smemObj,
 // @param cSwizzleOffset
 llvm::SmallVector<Value>
 fastPathComputeOffsetsTy1(ConversionPatternRewriter &rewriter, Location loc,
-                  const ArrayRef<int64_t> &elemsPerInstr, Value waveId,
-                  Value laneId, int warpsPerGroup, int numOfElems,
-                  ArrayRef<int64_t> reps, Value cSwizzleOffset) {
+                          const ArrayRef<int64_t> &elemsPerInstr, Value waveId,
+                          Value laneId, int warpsPerGroup, int numOfElems,
+                          ArrayRef<int64_t> reps, Value cSwizzleOffset) {
   const int loadVecSize = numOfElems;
-  const int loadsPerThread = 1; // 1 is just in case if we decide to use different loadVecSize
+  const int loadsPerThread =
+      1; // 1 is just in case if we decide to use different loadVecSize
   auto numM = reps[0];
   auto numK = reps[1];
   SmallVector<Value> offsets(numM * numK * loadsPerThread);
@@ -372,12 +361,13 @@ fastPathComputeOffsetsTy1(ConversionPatternRewriter &rewriter, Location loc,
     for (int tile = 0; tile < numK; ++tile) {
       Value tileOffset = i32_val(tile * elemsPerInstr[1]);
       for (int loadId = 0; loadId < loadsPerThread; ++loadId) {
-        Value rowOffset =
-            add(mul(urem(laneId, _32), i32_val(lineSize)), i32_val(loadId * loadVecSize));
+        Value rowOffset = add(mul(urem(laneId, _32), i32_val(lineSize)),
+                              i32_val(loadId * loadVecSize));
         Value elemOffset = add(rowOffset, colOffset);
         Value offset =
             add(add(add(waveOffset, blockOffset), tileOffset), elemOffset);
-        offsets[numK * loadsPerThread * block + loadsPerThread * tile + loadId] = offset;
+        offsets[numK * loadsPerThread * block + loadsPerThread * tile +
+                loadId] = offset;
       }
     }
   }
@@ -525,18 +515,21 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
   Type resElemTy = typeConverter->convertType(elemTy);
   Type smemPtrTy = getShemPtrTy(elemTy);
 
-  int loadsPerThread = offsets.size() / (numRepNonK * numRepK);
+  int loadsPerThread = offsets.size() / numRepK;
   int elemsPerLoad = numOfElems / loadsPerThread;
   assert(numOfElems % loadsPerThread == 0);
 
   for (int nonK = 0; nonK < numRepNonK; ++nonK) {
+    Value blockVOffset = i32_val(nonK * mfmaInstrNonK * warpsPerGroupNonK);
+    Value waveVOffset = mul(spatialWaveId, i32_val(mfmaInstrNonK));
+    Value rowOffset = add(blockVOffset, waveVOffset);
+    Value offAdjust = mul(rowOffset, i32_val(shape[order[0]]));
     for (int k = 0; k < numRepK; ++k) {
       auto vecTy = vec_ty(resElemTy, numOfElems);
       Value valVec = undef(vecTy);
       for (unsigned loadId = 0; loadId < loadsPerThread; ++loadId) {
         auto loadVecTy = vec_ty(elemTy, elemsPerLoad);
-        Value loadOffset = offsets[nonK * loadsPerThread * numRepK +
-                                   k * loadsPerThread + loadId];
+        Value loadOffset = add(offAdjust, offsets[k * loadsPerThread + loadId]);
         Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
                                     getShemPtrTy(loadVecTy));
         Value loadedValue = load(loadAddress);

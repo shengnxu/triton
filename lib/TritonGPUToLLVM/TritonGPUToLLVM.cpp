@@ -545,10 +545,24 @@ struct GetProgramIdOpConversion
   LogicalResult
   matchAndRewrite(triton::GetProgramIdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+#ifdef USE_ROCM
+    static constexpr mlir::gpu::Dimension dims[] = {mlir::gpu::Dimension::x,
+                                                  mlir::gpu::Dimension::y,
+                                                  mlir::gpu::Dimension::z};
+    Location loc = op->getLoc();
+    assert(op.getAxisAsInt() < 3);
+
+    Value blockId =
+        rewriter.create<::mlir::gpu::BlockIdOp>(loc, dims[op.getAxisAsInt()]);
+    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, i32_ty, blockId);
+    return success();
+#else
     Value programId = llGetPid(op.getAxisAsInt(), op->getLoc(),
                                op->getParentOfType<ModuleOp>(), rewriter);
     rewriter.replaceOp(op, programId);
     return success();
+#endif
   }
 };
 
@@ -560,6 +574,17 @@ struct GetNumProgramsOpConversion
   LogicalResult
   matchAndRewrite(triton::GetNumProgramsOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+#ifdef USE_ROCM
+    static constexpr mlir::gpu::Dimension dims[] = {mlir::gpu::Dimension::x,
+                                                  mlir::gpu::Dimension::y,
+                                                  mlir::gpu::Dimension::z};
+    Location loc = op->getLoc();
+    assert(op.getAxis() < 3);
+    Value blockId =
+        rewriter.create<::mlir::gpu::GridDimOp>(loc, dims[op.getAxis()]);
+    rewriter.replaceOpWithNewOp<arith::TruncIOp>(op, i32_ty, blockId);
+    return success();
+#else
     // It is not easy to get the compute capability here, so we use numCTAs to
     // decide the semantic of GetNumProgramsOp. If numCTAs = 1, then
     // GetNumProgramsOp is converted to "%nctaid", otherwise it is converted to
@@ -576,6 +601,7 @@ struct GetNumProgramsOpConversion
     Value numPrograms = getSRegValue(rewriter, loc, sreg);
     rewriter.replaceOp(op, numPrograms);
     return success();
+#endif
   }
 };
 

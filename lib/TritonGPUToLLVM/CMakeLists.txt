@@ -5,14 +5,9 @@ set(LLVM_OPTIONAL_SOURCES
 
 add_mlir_conversion_library(TritonGPUToLLVM_AMD
     ConvertLayoutOpToLLVM/SharedToDotOperandFMA.cpp
-    ConvertLayoutOpToLLVM/SharedToDotOperandMMAv1.cpp
-    ConvertLayoutOpToLLVM/SharedToDotOperandMMAv2.cpp
     ConvertLayoutOpToLLVM/SharedToDotOperandMFMA.cpp
     ConvertLayoutOpToLLVM.cpp
     DotOpToLLVM/FMA.cpp
-    DotOpToLLVM/MMAv1.cpp
-    DotOpToLLVM/MMAv2.cpp
-    DotOpToLLVM/WGMMA.cpp
     DotOpToLLVM/MFMA.cpp
     DotOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp

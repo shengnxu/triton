@@ -30,26 +30,12 @@ using ::mlir::LLVM::SharedMemoryObject;
 using ::mlir::triton::gpu::BlockedEncodingAttr;
 using ::mlir::triton::gpu::CTALayoutAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
-using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 using ::mlir::triton::gpu::TMAMetadataTy;
 namespace ttng = ::mlir::triton::nvidia_gpu;
 
 typedef DenseMap<Operation *, triton::MakeTensorPtrOp> TensorPtrMapT;
-
-namespace mlir {
-namespace LLVM {
-
-// Helper function for using printf in LLVM conversion.
-void vprintf(StringRef msg, ValueRange args,
-             ConversionPatternRewriter &rewriter);
-
-void vprintf_array(Value thread, ArrayRef<Value> arr, std::string info,
-                   std::string elem_repr, ConversionPatternRewriter &builder);
-
-} // namespace LLVM
-} // namespace mlir
 
 // FuncOpConversion/FuncOpConversionBase is borrowed from
 // https://github.com/llvm/llvm-project/blob/fae656b2dd80246c3c6f01e9c77c49560368752c/mlir/lib/Conversion/FuncToLLVM/FuncToLLVM.cpp#L276
@@ -193,10 +179,10 @@ public:
   // Key: {layout, shape, withCTAOffset}
   struct IndexCacheInfo {
     DenseMap<IndexCacheKeyT, SmallVector<Value>, CacheKeyDenseMapInfo>
-        *baseIndexCache;
+        *baseIndexCache = nullptr;
     DenseMap<IndexCacheKeyT, SmallVector<SmallVector<Value>>,
-             CacheKeyDenseMapInfo> *indexCache;
-    OpBuilder::InsertPoint *indexInsertPoint;
+             CacheKeyDenseMapInfo> *indexCache = nullptr;
+    OpBuilder::InsertPoint *indexInsertPoint = nullptr;
   };
 
   explicit ConvertTritonGPUOpToLLVMPatternBase(
@@ -263,6 +249,12 @@ public:
     return tid;
   }
 
+  Value GetCanonicalWarpId(ConversionPatternRewriter &rewriter,
+                           Location loc) const {
+    return rewriter.create<triton::nvgpu::CanonicalWarpIdOp>(
+        loc, rewriter.getI32Type());
+  }
+
   Value getClusterCTAId(ConversionPatternRewriter &rewriter,
                         Location loc) const {
     return rewriter.create<triton::nvgpu::ClusterCTAIdOp>(
@@ -275,8 +267,7 @@ public:
   template <typename T>
   Value getSharedMemoryBase(Location loc, ConversionPatternRewriter &rewriter,
                             T value) const {
-    auto ptrTy = LLVM::LLVMPointerType::get(
-        this->getTypeConverter()->convertType(rewriter.getI8Type()), 3);
+    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(), 3);
     FunctionOpInterface funcOp;
     if constexpr (std::is_pointer_v<T>)
       funcOp = value->template getParentOfType<FunctionOpInterface>();
@@ -289,7 +280,9 @@ public:
     assert(bufferId != Allocation::InvalidBufferId && "BufferId not found");
     size_t offset = funcAllocation->getOffset(bufferId);
     Value offVal = i32_val(offset);
-    Value base = gep(ptrTy, smem, offVal);
+    Value base =
+        gep(ptrTy, this->getTypeConverter()->convertType(rewriter.getI8Type()),
+            smem, offVal);
     return base;
   }
 
@@ -326,10 +319,10 @@ public:
     // then (x + y) XOR z = 0byyyyxxxx XOR 0b00000zzzz = (x XOR z) + y
     // This means that we can use some immediate offsets for shared memory
     // operations.
-    resElemTy = getTypeConverter()->convertType(resElemTy);
-    auto dstPtrTy = ptr_ty(getTypeConverter()->convertType(resElemTy), 3);
+    auto dstPtrTy = ptr_ty(rewriter.getContext(), 3);
     auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
-    Value dstPtrBase = gep(dstPtrTy, smemObj.base, dstOffset);
+    Value dstPtrBase = gep(dstPtrTy, getTypeConverter()->convertType(resElemTy),
+                           smemObj.base, dstOffset);
 
     auto srcEncoding = srcTy.getEncoding();
     auto srcShape = srcTy.getShape();
@@ -438,7 +431,8 @@ public:
       Value colOff = add(colOffSwizzled, colOffOrdered);
       // compute non-immediate offset
       offset = add(offset, add(rowOff, mul(colOff, strideCol)));
-      Value currPtr = gep(dstPtrTy, dstPtrBase, offset);
+      Value currPtr = gep(dstPtrTy, getTypeConverter()->convertType(resElemTy),
+                          dstPtrBase, offset);
       // compute immediate offset
       Value immediateOff;
       if (outOrder.size() == 2) {
@@ -449,7 +443,8 @@ public:
         immediateOff = i32_val(immedateOffCol);
       }
 
-      ret[elemIdx] = gep(dstPtrTy, currPtr, immediateOff);
+      ret[elemIdx] = gep(dstPtrTy, getTypeConverter()->convertType(resElemTy),
+                         currPtr, immediateOff);
     }
     return ret;
   }
@@ -465,7 +460,8 @@ public:
            "Unexpected rank of loadSharedToDistributed");
     auto srcTy = src.getType().cast<RankedTensorType>();
     auto dstDistributedLayout = dstTy.getEncoding();
-    if (auto mmaLayout = dstDistributedLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
+    if (auto mmaLayout =
+            dstDistributedLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
       assert((!mmaLayout.isVolta()) &&
              "ConvertLayout Shared->MMAv1 is not supported yet");
     }
@@ -494,8 +490,8 @@ public:
     SmallVector<Value> outVals(outElems);
     for (unsigned i = 0; i < numVecs; ++i) {
       Value smemAddr = sharedPtrs[i * minVec];
-      smemAddr = bitcast(smemAddr, ptr_ty(wordTy, 3));
-      Value valVec = load(smemAddr);
+      smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+      Value valVec = load(wordTy, smemAddr);
       for (unsigned v = 0; v < minVec; ++v) {
         Value currVal = extract_element(dstElemTy, valVec, i32_val(v));
         outVals[i * minVec + v] = currVal;
@@ -512,11 +508,12 @@ public:
                                 ConversionPatternRewriter &rewriter) const {
     auto srcTy = src.getType().cast<RankedTensorType>();
     auto srcShape = srcTy.getShape();
-    assert((srcShape.size() == 1 || srcShape.size() == 2) &&
+    assert(srcShape.size() == 2 &&
            "Unexpected rank of storeDistributedToShared");
     auto dstTy = dst.getType().cast<RankedTensorType>();
     auto srcDistributedLayout = srcTy.getEncoding();
-    if (auto mmaLayout = srcDistributedLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
+    if (auto mmaLayout =
+            srcDistributedLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
       assert((!mmaLayout.isVolta()) &&
              "ConvertLayout MMAv1->Shared is not supported yet");
     }
@@ -538,13 +535,9 @@ public:
     auto wordTy = vec_ty(elemTy, minVec);
     Value word;
 
-    SmallVector<Value> srcStrides;
-    SmallVector<Value> offsetVals;
-    for (int i = 0; i < srcShape.size(); i++) {
-      srcStrides.push_back(dstStrides[i]);
-      offsetVals.push_back(i32_val(0));
-    }
-    SharedMemoryObject smemObj(smemBase, srcStrides, offsetVals);
+    SmallVector<Value> srcStrides = {dstStrides[0], dstStrides[1]};
+    SmallVector<Value> offsetVals = {i32_val(0), i32_val(0)};
+    SharedMemoryObject smemObj(smemBase, elemTy, srcStrides, offsetVals);
 
     DenseMap<unsigned, Value> sharedPtrs =
         getSwizzledSharedPtrs(loc, inVec, srcTy, dstSharedLayout, dstElemTy,
@@ -556,7 +549,7 @@ public:
       word = insert_element(wordTy, word, inVals[i], i32_val(i % minVec));
       if (i % minVec == minVec - 1) {
         Value smemAddr = sharedPtrs[i / minVec * minVec];
-        smemAddr = bitcast(smemAddr, ptr_ty(wordTy, 3));
+        smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
         store(word, smemAddr);
       }
     }
@@ -580,7 +573,7 @@ public:
       auto warpsPerCTA = triton::gpu::getWarpsPerCTA(layout);
       auto order = triton::gpu::getOrder(layout);
       auto shapePerCTATile = triton::gpu::getShapePerCTATile(layout, shape);
-      Value warpSize = i32_val(triton::gpu::getWarpSize(layout));
+      Value warpSize = i32_val(32);
       Value laneId = urem(tid, warpSize);
       Value warpId = udiv(tid, warpSize);
       SmallVector<Value> multiDimWarpId =
@@ -726,8 +719,6 @@ public:
         if (mmaLayout.isAmpere() || mmaLayout.isHopper())
           result = emitBaseIndexWithinCTAForMmaLayoutV2V3(loc, rewriter,
                                                           mmaLayout, type);
-      } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-        result = emitBaseIndexForMfmaLayout(loc, rewriter, mfmaLayout, type);
       } else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
         auto parentLayout = sliceLayout.getParent();
         auto parentShape = sliceLayout.paddedShape(type.getShape());
@@ -767,45 +758,10 @@ public:
       if (mmaLayout.isHopper())
         return emitOffsetForMmaLayoutV3(mmaLayout, type);
     }
-    if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-      return emitOffsetForMfmaLayout(mfmaLayout, type);
-    }
     if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>())
       return emitOffsetForSliceLayout(sliceLayout, type);
     llvm_unreachable("unsupported emitOffsetForLayout");
   }
-
-#ifdef USE_ROCM
-  void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
-                            SmallVector<SmallVector<unsigned>> &offsets,
-                            unsigned ctaOffsetX, unsigned ctaOffsetY) const {
-    auto nonKDim = mfmaLayout.getNonKDim();
-    // MFMA output tile consists of repeated "dot operand B" layout groups along
-    // row axis. This variable defines number of these groups.
-    DenseMap<int, int> groups{{4, 1}, {16, 1}, {32, 4}};
-    unsigned numGroups = groups.at(nonKDim);
-
-    const unsigned elemsPerThreadPerGroup = 4;
-    auto warpSize = getWarpSize(mfmaLayout);
-    assert(warpSize == 64);
-    auto shapePerCta = getShapePerCTATile(mfmaLayout);
-    for (unsigned block = 0; block < numGroups; block++) {
-      unsigned rowOrColOffset =
-          block * elemsPerThreadPerGroup * warpSize / nonKDim;
-      for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
-        if (mfmaLayout.getIsTransposed()) {
-          offsets.push_back(
-              {ctaOffsetX * shapePerCta[0],
-               ctaOffsetY * shapePerCta[1] + elem + rowOrColOffset});
-        } else {
-          offsets.push_back(
-              {ctaOffsetX * shapePerCta[0] + elem + rowOrColOffset,
-               ctaOffsetY * shapePerCta[1]});
-        }
-      }
-    }
-  }
-#endif
 
   // -----------------------------------------------------------------------
   // Emit indices
@@ -829,15 +785,12 @@ public:
       } else if (auto mma = layout.dyn_cast<NvidiaMmaEncodingAttr>()) {
         result =
             emitIndicesForDistributedLayout(loc, b, mma, type, withCTAOffset);
-      } else if (auto mfma = layout.dyn_cast<MfmaEncodingAttr>()) {
-        result = 
-            emitIndicesForDistributedLayout(loc, b, mfma, type, withCTAOffset);
       } else if (auto slice = layout.dyn_cast<SliceEncodingAttr>()) {
         result =
             emitIndicesForDistributedLayout(loc, b, slice, type, withCTAOffset);
       } else {
         llvm_unreachable(
-            "emitIndices for layouts other than blocked & slice not "
+            "emitIndices for layouts other than blocked, mma, and slice not "
             "implemented yet");
       }
       if (cache) {
@@ -870,7 +823,7 @@ private:
       const BlockedEncodingAttr &blockedLayout, RankedTensorType type) const {
     auto shape = type.getShape();
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(triton::gpu::getWarpSize(blockedLayout));
+    Value warpSize = i32_val(32);
     Value laneId = urem(threadId, warpSize);
     Value warpId = udiv(threadId, warpSize);
     auto sizePerThread = blockedLayout.getSizePerThread();
@@ -980,25 +933,23 @@ private:
     Value _2 = i32_val(2);
     Value _4 = i32_val(4);
     Value _16 = i32_val(16);
-    Value warpSize = i32_val(triton::gpu::getWarpSize(mmaLayout));
+    Value _32 = i32_val(32);
     Value _fpw0 = i32_val(fpw[0]);
     Value _fpw1 = i32_val(fpw[1]);
 
     // A info
-    auto aEncoding = DotOperandEncodingAttr::get(ctx, 0, mmaLayout, 0);
-    auto aRep = aEncoding.getMMAv1Rep();
-    auto aSpw = aEncoding.getMMAv1ShapePerWarp();
+    auto aRep = mmaLayout.getMMAv1Rep(0);
+    auto aSpw = mmaLayout.getMMAv1ShapePerWarp(0);
     // B info
-    auto bEncoding = DotOperandEncodingAttr::get(ctx, 1, mmaLayout, 0);
-    auto bSpw = bEncoding.getMMAv1ShapePerWarp();
-    auto bRep = bEncoding.getMMAv1Rep();
+    auto bSpw = mmaLayout.getMMAv1ShapePerWarp(1);
+    auto bRep = mmaLayout.getMMAv1Rep(1);
 
     SmallVector<int, 2> rep({aRep[0], bRep[1]});
     SmallVector<int, 2> spw({aSpw[0], bSpw[1]});
     SmallVector<unsigned, 2> shapePerCTA({spw[0] * wpt[0], spw[1] * wpt[1]});
 
-    Value lane = urem(thread, warpSize);
-    Value warp = udiv(thread, warpSize);
+    Value lane = urem(thread, _32);
+    Value warp = udiv(thread, _32);
 
     Value warp0 = urem(warp, i32_val(wpt[0]));
     Value warp12 = udiv(warp, i32_val(wpt[0]));
@@ -1045,15 +996,11 @@ private:
 
     // TODO: seems like the apttern below to get `rep`/`spw` appears quite often
     // A info
-    auto aEncoding =
-        DotOperandEncodingAttr::get(type.getContext(), 0, mmaLayout, 0);
-    auto aRep = aEncoding.getMMAv1Rep();
-    auto aSpw = aEncoding.getMMAv1ShapePerWarp();
+    auto aRep = mmaLayout.getMMAv1Rep(0);
+    auto aSpw = mmaLayout.getMMAv1ShapePerWarp(0);
     // B info
-    auto bEncoding =
-        DotOperandEncodingAttr::get(type.getContext(), 1, mmaLayout, 0);
-    auto bSpw = bEncoding.getMMAv1ShapePerWarp();
-    auto bRep = bEncoding.getMMAv1Rep();
+    auto bSpw = mmaLayout.getMMAv1ShapePerWarp(1);
+    auto bRep = mmaLayout.getMMAv1Rep(1);
 
     auto wpt = mmaLayout.getWarpsPerCTA();
     static constexpr std::array<int, 3> fpw{{2, 2, 1}};
@@ -1119,7 +1066,7 @@ private:
     auto shapePerCTA = getShapePerCTA(mmaLayout, shape);
 
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(triton::gpu::getWarpSize(mmaLayout));
+    Value warpSize = i32_val(32);
     Value laneId = urem(threadId, warpSize);
     Value warpId = udiv(threadId, warpSize);
 
@@ -1185,75 +1132,6 @@ private:
     return ret;
   }
 
-  // -----------------------------------------------------------------------
-  // Mfma layout indices
-  // -----------------------------------------------------------------------
-
-  SmallVector<Value>
-  emitBaseIndexForMfmaLayout(Location loc, ConversionPatternRewriter &rewriter,
-                             const MfmaEncodingAttr &mfmaLayout,
-                             RankedTensorType type) const {
-    auto shape = type.getShape();
-    auto _warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-    assert(_warpsPerCTA.size() == 2);
-    SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
-                                      i32_val(_warpsPerCTA[1])};
-    int nonKDim = mfmaLayout.getNonKDim();
-
-    Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
-    Value effectiveWarpSize = warpSize;
-    if (nonKDim == 4) {
-      const int uniqueValuesPerWarp = 4;
-      effectiveWarpSize = i32_val(uniqueValuesPerWarp);
-    }
-    Value laneId = urem(threadId, effectiveWarpSize);
-
-    Value warpId = udiv(threadId, warpSize);
-    Value warpId0 =
-        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / nonKDim));
-    Value warpId1 = urem(urem(udiv(warpId, warpsPerCTA[0]), warpsPerCTA[1]),
-                         i32_val(shape[1] / nonKDim));
-
-    Value offWarp0 = mul(warpId0, i32_val(nonKDim));
-    Value offWarp1 = mul(warpId1, i32_val(nonKDim));
-
-    SmallVector<Value> multiDimBase(2);
-    if (mfmaLayout.getIsTransposed()) {
-      multiDimBase[1] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp1);
-      multiDimBase[0] = add(urem(laneId, i32_val(nonKDim)), offWarp0);
-    } else {
-      multiDimBase[0] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp0);
-      multiDimBase[1] = add(urem(laneId, i32_val(nonKDim)), offWarp1);
-    }
-    return multiDimBase;
-  }
-
-  SmallVector<SmallVector<unsigned>>
-  emitOffsetForMfmaLayout(const MfmaEncodingAttr &mfmaLayout,
-                          RankedTensorType type) const {
-    auto tensorShape = type.getShape();
-    SmallVector<SmallVector<unsigned>> offsets;
-    auto shapePerCTA = getShapePerCTA(mfmaLayout, tensorShape);
-    auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-
-    SmallVector<unsigned> numWarpsPerDim(2);
-    for (unsigned d = 0; d < 2; ++d) {
-      unsigned inPerCTA = std::min<unsigned>(tensorShape[d], shapePerCTA[d]);
-      unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
-      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getNonKDim());
-    }
-
-    for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {
-      for (unsigned j = 0; j < numWarpsPerDim[1]; ++j) {
-        emitMfmaOffsetForCTA(mfmaLayout, offsets, i, j);
-      }
-    }
-    return offsets;
-  }
-
   // Emit indices calculation within each ConversionPattern, and returns a
   // [elemsPerThread X rank] index matrix.
   SmallVector<SmallVector<Value>> emitIndicesForDistributedLayout(
@@ -1303,135 +1181,7 @@ private:
     return resultOffsets;
   }
 
-private:
-  static SmallString<16> getUniqueFormatGlobalName(mlir::ModuleOp moduleOp) {
-    const char formatStringPrefix[] = "printfFormat_";
-    // Get a unique global name.
-    unsigned stringNumber = 0;
-    SmallString<16> stringConstName;
-    do {
-      stringConstName.clear();
-      (formatStringPrefix + Twine(stringNumber++)).toStringRef(stringConstName);
-    } while (moduleOp.lookupSymbol(stringConstName));
-    return stringConstName;
-  }
-
-  template <typename T>
-  static LLVM::LLVMFuncOp
-  getOrDefineFunction(T &moduleOp, const Location loc,
-                      ConversionPatternRewriter &rewriter, StringRef name,
-                      LLVM::LLVMFunctionType type) {
-    LLVM::LLVMFuncOp ret;
-    if (!(ret = moduleOp.template lookupSymbol<LLVM::LLVMFuncOp>(name))) {
-      ConversionPatternRewriter::InsertionGuard guard(rewriter);
-      rewriter.setInsertionPointToStart(moduleOp.getBody());
-      ret = rewriter.create<LLVM::LLVMFuncOp>(loc, name, type,
-                                              LLVM::Linkage::External);
-    }
-    return ret;
-  }
-
 protected:
-  // The code is borrowed from https://reviews.llvm.org/D110448
-  // from GPUPrintfOpToHIPLowering::matchAndRewrite().
-  void llPrintfHIP(mlir::Location loc, mlir::ModuleOp moduleOp, StringRef msg,
-                   ValueRange args, ConversionPatternRewriter &rewriter,
-                   bool stderr = false) const {
-
-    auto typeConverter = getTypeConverter();
-    mlir::Type llvmI8 = typeConverter->convertType(rewriter.getI8Type());
-    mlir::Type i8Ptr = typeConverter->getPointerType(llvmI8);
-    mlir::Type llvmI32 = typeConverter->convertType(rewriter.getI32Type());
-    mlir::Type llvmI64 = typeConverter->convertType(rewriter.getI64Type());
-
-    auto ocklBegin = getOrDefineFunction(
-        moduleOp, loc, rewriter,
-        (stderr ? "__ockl_fprintf_stderr_begin" : "__ockl_printf_begin"),
-        (LLVM::LLVMFunctionType::get(llvmI64, stderr ? ArrayRef<mlir::Type>()
-                                                     : llvmI64)));
-    LLVM::LLVMFuncOp ocklAppendArgs;
-    if (!args.empty()) {
-      ocklAppendArgs = getOrDefineFunction(
-          moduleOp, loc, rewriter, "__ockl_printf_append_args",
-          LLVM::LLVMFunctionType::get(llvmI64,
-                                      {llvmI64, /*numArgs*/ llvmI32, llvmI64,
-                                       llvmI64, llvmI64, llvmI64, llvmI64,
-                                       llvmI64, llvmI64, /*isLast*/ llvmI32}));
-    }
-    auto ocklAppendStringN = getOrDefineFunction(
-        moduleOp, loc, rewriter, "__ockl_printf_append_string_n",
-        LLVM::LLVMFunctionType::get(
-            llvmI64,
-            {llvmI64, i8Ptr, /*length (bytes)*/ llvmI64, /*isLast*/ llvmI32}));
-
-    /// Start the printf hostcall
-    Value zeroI64 = rewriter.create<LLVM::ConstantOp>(loc, llvmI64, 0);
-    auto printfBeginCall = rewriter.create<LLVM::CallOp>(
-        loc, ocklBegin, stderr ? ValueRange() : zeroI64);
-    Value printfDesc = printfBeginCall.getResult();
-
-    // Get a unique global name for the format.
-    SmallString<16> stringConstName = getUniqueFormatGlobalName(moduleOp);
-
-    SmallString<32> formatString(msg);
-    formatString.push_back('\n'); // Triton adds CR for each print.
-    formatString.push_back('\0'); // Null terminate for C
-    size_t formatStringSize = formatString.size_in_bytes();
-
-    Value prefixString =
-        LLVM::addStringToModule(loc, rewriter, "printfFormat_", formatString);
-
-    auto prefixPtrType = ocklAppendStringN.getArgumentTypes()[1];
-    prefixString = bitcast(prefixString, prefixPtrType);
-
-    Value stringLen =
-        rewriter.create<LLVM::ConstantOp>(loc, llvmI64, formatStringSize);
-
-    Value oneI32 = rewriter.create<LLVM::ConstantOp>(loc, llvmI32, 1);
-    Value zeroI32 = rewriter.create<LLVM::ConstantOp>(loc, llvmI32, 0);
-
-    auto appendFormatCall = rewriter.create<LLVM::CallOp>(
-        loc, ocklAppendStringN,
-        ValueRange{printfDesc, prefixString, stringLen,
-                   args.empty() ? oneI32 : zeroI32});
-    printfDesc = appendFormatCall.getResult();
-
-    // __ockl_printf_append_args takes 7 values per append call
-    constexpr size_t argsPerAppend = 7;
-    size_t nArgs = args.size();
-    for (size_t group = 0; group < nArgs; group += argsPerAppend) {
-      size_t bound = std::min(group + argsPerAppend, nArgs);
-      size_t numArgsThisCall = bound - group;
-
-      SmallVector<mlir::Value, 2 + argsPerAppend + 1> arguments;
-      arguments.push_back(printfDesc);
-      arguments.push_back(
-          rewriter.create<LLVM::ConstantOp>(loc, llvmI32, numArgsThisCall));
-      for (size_t i = group; i < bound; ++i) {
-        Value arg = args[i];
-        if (auto floatType = arg.getType().dyn_cast<FloatType>()) {
-          if (!floatType.isF64())
-            arg = rewriter.create<LLVM::FPExtOp>(
-                loc, typeConverter->convertType(rewriter.getF64Type()), arg);
-          arg = rewriter.create<LLVM::BitcastOp>(loc, llvmI64, arg);
-        }
-        if (arg.getType().getIntOrFloatBitWidth() != 64)
-          arg = rewriter.create<LLVM::ZExtOp>(loc, llvmI64, arg);
-
-        arguments.push_back(arg);
-      }
-      // Pad out to 7 arguments since the hostcall always needs 7
-      for (size_t extra = numArgsThisCall; extra < argsPerAppend; ++extra) {
-        arguments.push_back(zeroI64);
-      }
-
-      auto isLast = (bound == nArgs) ? oneI32 : zeroI32;
-      arguments.push_back(isLast);
-      auto call = rewriter.create<LLVM::CallOp>(loc, ocklAppendArgs, arguments);
-      printfDesc = call.getResult();
-    }
-  }
-
   TritonGPUToLLVMTypeConverter *converter;
   ModuleAllocation *allocation;
   IndexCacheInfo indexCacheInfo;

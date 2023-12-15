@@ -25,21 +25,13 @@
 #include "../ConvertLayoutOpToLLVM.h"
 #include "../Utility.h"
 
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
-
-Type getShemPtrTy(Type elemTy) {
-  if (elemTy.isBF16()) {
-    auto ctx = elemTy.getContext();
-    return ptr_ty(type::i16Ty(ctx), 3);
-  }
-
-  return ptr_ty(elemTy, 3);
-}
 
 // Get a waveId for M axis.
 Value getWaveM(ConversionPatternRewriter &rewriter, Location loc, Value wave,
@@ -269,7 +261,7 @@ Value computeBasePtr(ConversionPatternRewriter &rewriter, Location loc,
   Type type = base.getType();
   for (int i = 0; i < smemObj.strides.size(); ++i) {
     Value offset = sub(i32_val(0), mul(smemObj.offsets[i], smemObj.strides[i]));
-    base = gep(type, base, offset);
+    base = gep(type, smemObj.baseElemType, base, offset);
   }
   return base;
 }
@@ -451,11 +443,12 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto order = sharedLayout.getOrder();
 
   auto aElemTy = aTensorTy.getElementType();
-  auto aElemsPerInstr = encoding.getMFMAElemsPerInstr();
+  int kWidth = encoding.getKWidth();
+  auto aElemsPerInstr = mfmaLayout.getMFMAElemsPerInstrForOperands(kWidth, 0);
   auto mfmaInstrM = aElemsPerInstr[0];
   auto mfmaInstrK = aElemsPerInstr[1];
 
-  auto numReps = encoding.getMFMARep(shape, aElemTy);
+  auto numReps = mfmaLayout.getMFMARepForOperands(shape, aElemTy, kWidth, 0);
   auto numRepM = numReps[0];
   auto numRepK = numReps[1];
 
@@ -472,6 +465,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   unsigned int maxNumWarps = shape[0] / mfmaInstrM;
   int warpsPerGroupM = std::min(warpsPerCTA[0], maxNumWarps);
   aElemTy = typeConverter->convertType(aElemTy);
+  Type smemPtrTy = ptr_ty(rewriter.getContext(), 3);
+  Type smemElemTy = aElemTy;
 
   SmallVector<Value> ha;
   if (fastPathAvailable(smemObj, sharedLayout, mfmaLayout)) {
@@ -490,7 +485,6 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     }
     Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
-    Type smemPtrTy = getShemPtrTy(aElemTy);
     Type resElemTy = typeConverter->convertType(aElemTy);
 
     int loadsPerThread = offsets.size() / (numRepM * numRepK);
@@ -505,9 +499,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
           Value loadOffset =
               offsets[m * loadsPerThread * numRepK + k * loadsPerThread + loadId];
-          Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
-                                      getShemPtrTy(loadVecTy));
-          Value vectorValue = load(loadAddress);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
+          Value vectorValue = load(smemElemTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
               Value elemVal =
@@ -536,7 +529,6 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
     Type resElemTy = typeConverter->convertType(aElemTy);
 
-    Type smemPtrTy = getShemPtrTy(aElemTy);
 
     int loadsPerThread = offsets.size() / (numReps[0] * numReps[1]);
     int elemsPerLoad = numOfElems / loadsPerThread;
@@ -549,9 +541,8 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
           Value loadOffset = offsets[m * loadsPerThread * numRepK +
                                      k * loadsPerThread + loadId];
-          Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
-                                      getShemPtrTy(loadVecTy));
-          Value vectorValue = load(loadAddress);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
+          Value vectorValue = load(smemElemTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
               Value elemVal =
@@ -596,11 +587,12 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   auto order = sharedLayout.getOrder();
 
   auto bElemTy = bTensorTy.getElementType();
-  auto bElemsPerInstr = encoding.getMFMAElemsPerInstr();
+  int kWidth = encoding.getKWidth();
+  auto bElemsPerInstr = mfmaLayout.getMFMAElemsPerInstrForOperands(kWidth, 1);
   auto mfmaInstrK = bElemsPerInstr[0];
   auto mfmaInstrN = bElemsPerInstr[1];
 
-  auto numReps = encoding.getMFMARep(shape, bElemTy);
+  auto numReps = mfmaLayout.getMFMARepForOperands(shape, bElemTy, kWidth, 1);
   auto numRepK = numReps[0];
   auto numRepN = numReps[1];
 
@@ -618,6 +610,8 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
   unsigned int maxNumWarps = shape[1] / mfmaInstrN;
   int warpsPerGroupN = std::min(warpsPerCTA[1], maxNumWarps);
   bElemTy = typeConverter->convertType(bElemTy);
+  Type smemPtrTy = ptr_ty(rewriter.getContext(), 3);
+  Type smemElemTy = bElemTy;
 
   SmallVector<Value> hb;
   if (fastPathAvailable(smemObj, sharedLayout, mfmaLayout)) {
@@ -641,7 +635,6 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
     Value smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
 
     Type resElemTy = typeConverter->convertType(bElemTy);
-    Type smemPtrTy = getShemPtrTy(bElemTy);
 
     const int loadsPerThread = offsets.size() / (numRepN * numRepK);
     const int elemsPerLoad = numOfElems / loadsPerThread;
@@ -655,9 +648,8 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(bElemTy, elemsPerLoad);
           Value loadOffset =
               offsets[n * loadsPerThread * numRepK + k * loadsPerThread + loadId];
-          Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
-                                      getShemPtrTy(loadVecTy));
-          Value vectorValue = load(loadAddress);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
+          Value vectorValue = load(smemElemTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
               Value elemVal =
@@ -685,7 +677,6 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
 
     Value smemBase = computeBasePtr(rewriter, loc, smemObj);
     Type resElemTy = typeConverter->convertType(bElemTy);
-    Type smemPtrTy = getShemPtrTy(bElemTy);
 
     int loadsPerThread = offsets.size() / (numReps[0] * numReps[1]);
     int elemsPerLoad = numOfElems / loadsPerThread;
@@ -697,9 +688,8 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(bElemTy, elemsPerLoad);
           Value loadOffset = offsets[n * loadsPerThread * numRepK +
                                      k * loadsPerThread + loadId];
-          Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
-                                      getShemPtrTy(loadVecTy));
-          Value vectorValue = load(loadAddress);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
+          Value vectorValue = load(smemElemTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
               Value elemVal =

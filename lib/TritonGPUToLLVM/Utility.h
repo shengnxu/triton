@@ -6,14 +6,12 @@
 #include "triton/Analysis/Utility.h"
 #include "triton/Conversion/MLIRTypes.h"
 #include "triton/Conversion/TritonGPUToLLVM/PTXAsmFormat.h"
-#include "triton/Conversion/TritonGPUToLLVM/GCNAsmFormat.h"
 
 // Shortcuts for some commonly used LLVM ops to keep code simple and intuitive
 // Operators
 #define inttoptr(...) rewriter.create<LLVM::IntToPtrOp>(loc, __VA_ARGS__)
 #define ptrtoint(...) rewriter.create<LLVM::PtrToIntOp>(loc, __VA_ARGS__)
 #define zext(...) rewriter.create<LLVM::ZExtOp>(loc, __VA_ARGS__)
-#define trunc(...) rewriter.create<LLVM::TruncOp>(loc, __VA_ARGS__)
 #define sext(...) rewriter.create<LLVM::SExtOp>(loc, __VA_ARGS__)
 #define fpext(...) rewriter.create<LLVM::FPExtOp>(loc, __VA_ARGS__)
 #define trunc(...) rewriter.create<LLVM::TruncOp>(loc, __VA_ARGS__)
@@ -24,9 +22,6 @@
 #define fadd(...) rewriter.create<LLVM::FAddOp>(loc, __VA_ARGS__)
 #define mul(...) rewriter.create<LLVM::MulOp>(loc, __VA_ARGS__)
 #define fmul(...) rewriter.create<LLVM::FMulOp>(loc, __VA_ARGS__)
-#define shl(...) rewriter.create<LLVM::ShlOp>(loc, __VA_ARGS__)
-#define lshr(...) rewriter.create<LLVM::LShrOp>(loc, __VA_ARGS__)
-#define ashr(...) rewriter.create<LLVM::AShrOp>(loc, __VA_ARGS__)
 #define smax(...) rewriter.create<LLVM::SMaxOp>(loc, __VA_ARGS__)
 #define umax(...) rewriter.create<LLVM::UMaxOp>(loc, __VA_ARGS__)
 #define fmax(...) rewriter.create<LLVM::MaxNumOp>(loc, __VA_ARGS__)
@@ -36,13 +31,10 @@
 #define shl(...) rewriter.create<LLVM::ShlOp>(loc, __VA_ARGS__)
 #define lshr(...) rewriter.create<LLVM::LShrOp>(loc, __VA_ARGS__)
 #define and_(...) rewriter.create<LLVM::AndOp>(loc, __VA_ARGS__)
-#define or_(...) rewriter.create<LLVM::OrOp>(loc, __VA_ARGS__)
 #define xor_(...) rewriter.create<LLVM::XOrOp>(loc, __VA_ARGS__)
 #define or_(...) rewriter.create<LLVM::OrOp>(loc, __VA_ARGS__)
 #define bitcast(val__, type__)                                                 \
   rewriter.create<LLVM::BitcastOp>(loc, type__, val__)
-#define addrspacecast(val__, type__)                                           \
-  rewriter.create<LLVM::AddrSpaceCastOp>(loc, type__, val__)
 #define gep(...) rewriter.create<LLVM::GEPOp>(loc, __VA_ARGS__)
 #define ptr_ty(...) LLVM::LLVMPointerType::get(__VA_ARGS__)
 #define insert_val(...) rewriter.create<LLVM::InsertValueOp>(loc, __VA_ARGS__)
@@ -134,6 +126,7 @@
 namespace mlir {
 namespace triton {
 
+
 // Delinearize supposing order is [0, 1, .. , n]
 template <typename T>
 llvm::SmallVector<T> getMultiDimIndexImpl(T linearIndex,
@@ -217,9 +210,10 @@ Value createLLVMIntegerConstant(OpBuilder &builder, Location loc, short width,
 /// (1) load_dsmem(addr, ctaId)
 /// (2) load_dsmem(addr, ctaId, vec)
 Value createLoadDSmem(Location loc, PatternRewriter &rewriter, Value addr,
-                      Value ctaId);
+                      Value ctaId, Type elemTy);
 SmallVector<Value> createLoadDSmem(Location loc, PatternRewriter &rewriter,
-                                   Value addr, Value ctaId, unsigned vec);
+                                   Value addr, Value ctaId, unsigned vec,
+                                   Type elemTy);
 
 /// Usage of macro store_dsmem
 /// (1) store_dsmem(addr, ctaId, value, pred)
@@ -242,6 +236,7 @@ getStridesFromShapeAndOrder(ArrayRef<int64_t> shape, ArrayRef<unsigned> order,
 struct SharedMemoryObject {
   Value base; // i32 ptr. The start address of the shared memory object after
               // the initial allocation or the last slicing operation.
+  Type baseElemType;
   // We need to store strides as Values, not integers, because the
   // extract_slice instruction can take a slice at arbitrary offsets.
   // Take $a[16:32, 16:32] as an example; though we know the stride of $a[0] is
@@ -259,15 +254,16 @@ struct SharedMemoryObject {
   // We can use offsets to recover the previous base.
   // The offsets are zero at the initial allocation.
 
-  SharedMemoryObject(Value base, ArrayRef<Value> strides,
+  SharedMemoryObject(Value base, Type baseElemType, ArrayRef<Value> strides,
                      ArrayRef<Value> offsets)
-      : base(base), strides(strides.begin(), strides.end()),
+      : base(base), baseElemType(baseElemType),
+        strides(strides.begin(), strides.end()),
         offsets(offsets.begin(), offsets.end()) {}
 
-  SharedMemoryObject(Value base, ArrayRef<int64_t> shape,
+  SharedMemoryObject(Value base, Type baseElemType, ArrayRef<int64_t> shape,
                      ArrayRef<unsigned> order, Location loc,
                      ConversionPatternRewriter &rewriter)
-      : base(base) {
+      : base(base), baseElemType(baseElemType) {
     strides = getStridesFromShapeAndOrder(shape, order, loc, rewriter);
     offsets.append(order.size(), i32_val(0));
   }
@@ -298,12 +294,12 @@ struct SharedMemoryObject {
     Value cSwizzleOffset = getCSwizzleOffset(order);
     Value offset = sub(i32_val(0), cSwizzleOffset);
     Type type = base.getType();
-    return gep(type, base, offset);
+    return gep(type, baseElemType, base, offset);
   }
 };
 
 SharedMemoryObject
-getSharedMemoryObjectFromStruct(Location loc, Value llvmStruct,
+getSharedMemoryObjectFromStruct(Location loc, Value llvmStruct, Type elemTy,
                                 ConversionPatternRewriter &rewriter);
 
 // Convert an \param index to a multi-dim coordinate given \param shape and
@@ -332,12 +328,12 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred);
 
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
-                 Value pred);
+                 Type elemTy, Value pred);
 
 Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
                int i);
 Value shflUpSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
-                 int i, Value laneId);
+                 int i);
 Value shflIdxSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
                   int i);
 Value shflIdxSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
@@ -347,9 +343,6 @@ Value addStringToModule(Location loc, ConversionPatternRewriter &rewriter,
                         StringRef key, StringRef content);
 
 } // namespace LLVM
-
-bool isF8(Type eType);
-
 } // namespace mlir
 
 #endif

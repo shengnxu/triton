@@ -284,7 +284,7 @@ public:
 } // namespace
 
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonGPUTransforms/Passes.h.inc"
 
 class TritonAMDGPUAccelerateMatmulPass
     : public TritonAMDGPUAccelerateMatmulBase<

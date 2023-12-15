@@ -1098,7 +1098,7 @@ static SmallVector<Value> reorderValues(const SmallVector<Value> &values,
   // If the parent of the dot operand is in block encoding, we don't need to
   // reorder elements
   auto parentEncoding =
-      dyn_cast<triton::gpu::MmaEncodingAttr>(ouEncoding.getParent());
+      dyn_cast<triton::gpu::NvidiaMmaEncodingAttr>(ouEncoding.getParent());
   if (!parentEncoding)
     return values;
   size_t inBitWidth = inTensorTy.getElementType().getIntOrFloatBitWidth();
@@ -1180,7 +1180,7 @@ inline SmallVector<Value> unpackI32(const SmallVector<Value> &inValues,
   if (!tensorTy)
     return inValues;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && (encoding.getParent().isa<MmaEncodingAttr>() or 
+  if (!(encoding && (encoding.getParent().isa<NvidiaMmaEncodingAttr>() or 
         encoding.getParent().isa<MfmaEncodingAttr>()))) {
     return inValues;
   }
@@ -1205,7 +1205,7 @@ inline SmallVector<Value> packI32(const SmallVector<Value> &inValues,
   if (!tensorTy)
     return inValues;
   auto encoding = tensorTy.getEncoding().dyn_cast<DotOperandEncodingAttr>();
-  if (!(encoding && encoding.getParent().isa<MmaEncodingAttr>()))
+  if (!(encoding && encoding.getParent().isa<NvidiaMmaEncodingAttr>()))
     return inValues;
   SmallVector<Value> outValues;
   auto eltType = typeConverter->convertType(tensorTy.getElementType());

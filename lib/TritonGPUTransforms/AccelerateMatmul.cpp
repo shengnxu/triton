@@ -39,7 +39,7 @@ using tt::DotOp;
 using ttg::BlockedEncodingAttr;
 using ttg::ConvertLayoutOp;
 using ttg::DotOperandEncodingAttr;
-using ttg::MmaEncodingAttr;
+using ttg::NvidiaMmaEncodingAttr;
 using ttg::SliceEncodingAttr;
 
 // higher mma version is prefered, will fallback to lower version if not
@@ -210,7 +210,7 @@ public:
     // TODO: Check data-types and SM compatibility
     auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
     if (!oldRetType.getEncoding() ||
-        oldRetType.getEncoding().isa<ttg::MmaEncodingAttr>())
+        oldRetType.getEncoding().isa<ttg::NvidiaMmaEncodingAttr>())
       return failure();
 
     auto AType = dotOp.getOperand(0).getType().cast<RankedTensorType>();
@@ -234,7 +234,7 @@ public:
     auto oldAType = a.getType().cast<RankedTensorType>();
     auto oldBType = b.getType().cast<RankedTensorType>();
 
-    ttg::MmaEncodingAttr mmaEnc;
+    ttg::NvidiaMmaEncodingAttr mmaEnc;
     if (versionMajor == 1) {
       SetVector<Operation *> aBwdSlices, bBwdSlices;
       auto isCvt = [](Operation *op) { return isa<ConvertLayoutOp>(op); };
@@ -266,7 +266,7 @@ public:
       if (bOp)
         isBRow = getCvtArgOrder(bOp)[0] == 1;
 
-      mmaEnc = ttg::MmaEncodingAttr::get(
+      mmaEnc = ttg::NvidiaMmaEncodingAttr::get(
           oldRetType.getContext(), versionMajor, numWarps, CTALayout,
           instrShape, oldAType.getShape(), oldBType.getShape(), retShapePerCTA,
           isARow, isBRow, mmaV1Counter++);
@@ -274,7 +274,7 @@ public:
       int versionMinor = computeCapability == 75 ? 1 : 0;
       auto warpsPerTile = getWarpsPerTile(dotOp, retShapePerCTA, versionMajor,
                                           numWarps, instrShape);
-      mmaEnc = ttg::MmaEncodingAttr::get(oldRetType.getContext(), versionMajor,
+      mmaEnc = ttg::NvidiaMmaEncodingAttr::get(oldRetType.getContext(), versionMajor,
                                          versionMinor, warpsPerTile, CTALayout,
                                          instrShape);
     }

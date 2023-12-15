@@ -54,7 +54,7 @@ public:
     if (!encoding.isa<triton::gpu::MfmaEncodingAttr>())
       return mlir::failure();
 #else
-    if (!encoding.isa<triton::gpu::MmaEncodingAttr>())
+    if (!encoding.isa<triton::gpu::NvidiaMmaEncodingAttr>())
       return mlir::failure();
 #endif
 

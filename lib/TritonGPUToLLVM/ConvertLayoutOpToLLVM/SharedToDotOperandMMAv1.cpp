@@ -31,7 +31,7 @@ computeOffsets(Value threadId, bool isARow, bool isBRow, ArrayRef<int> fpw,
                  .getEncoding()
                  .cast<DotOperandEncodingAttr>()
                  .getParent()
-                 .cast<MmaEncodingAttr>()
+                 .cast<NvidiaMmaEncodingAttr>()
                  .getWarpsPerCTA();
 
   Value _1 = i32_val(1);
@@ -97,7 +97,7 @@ static Value loadA(Value tensor, const SharedMemoryObject &smemObj,
                  .getEncoding()
                  .cast<DotOperandEncodingAttr>()
                  .getParent()
-                 .cast<MmaEncodingAttr>()
+                 .cast<NvidiaMmaEncodingAttr>()
                  .getWarpsPerCTA();
 
   auto *ctx = rewriter.getContext();
@@ -220,7 +220,7 @@ static Value loadB(Value tensor, const SharedMemoryObject &smemObj,
                  .getEncoding()
                  .cast<DotOperandEncodingAttr>()
                  .getParent()
-                 .cast<MmaEncodingAttr>()
+                 .cast<NvidiaMmaEncodingAttr>()
                  .getWarpsPerCTA();
   // smem
   auto strides = smemObj.strides;
@@ -342,7 +342,7 @@ using ValueTable = std::map<std::pair<int, int>, std::pair<Value, Value>>;
 SmallVector<CoordTy> getMNCoords(Value thread, Location loc,
                                  ConversionPatternRewriter &rewriter,
                                  ArrayRef<unsigned int> wpt,
-                                 const MmaEncodingAttr &mmaLayout,
+                                 const NvidiaMmaEncodingAttr &mmaLayout,
                                  ArrayRef<int64_t> shape, bool isARow,
                                  bool isBRow, bool isAVec4, bool isBVec4) {
   static constexpr std::array<int, 3> fpw{{2, 2, 1}};

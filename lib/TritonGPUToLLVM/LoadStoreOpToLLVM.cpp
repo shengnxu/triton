@@ -479,7 +479,7 @@ struct StoreAsyncOpConversion
                   ConversionPatternRewriter &rewriter) const override {
     auto srcTy = op.getSrc().getType().cast<RankedTensorType>();
     auto srcEncoding = srcTy.getEncoding();
-    if (srcEncoding.isa<MmaEncodingAttr>()) {
+    if (srcEncoding.isa<NvidiaMmaEncodingAttr>()) {
       return lowerStoreAsyncWithSlice(op, adaptor, rewriter);
     } else {
       return lowerStoreAsync(op, adaptor, rewriter);
@@ -747,7 +747,7 @@ struct StoreAsyncOpConversion
     auto shapePerCTA = getShapePerCTA(CTASplitNum, tensorShape);
 
     auto srcLayout = srcTy.getEncoding();
-    auto mmaLayout = srcLayout.dyn_cast<MmaEncodingAttr>();
+    auto mmaLayout = srcLayout.dyn_cast<NvidiaMmaEncodingAttr>();
 
     unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
 

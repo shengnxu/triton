@@ -1,7 +1,6 @@
 add_library(rocm_libraries SHARED IMPORTED )
 set(LLVM_OPTIONAL_SOURCES
     GCNAsmFormat.cpp
-    PTXAsmFormat.cpp
   )
 
 add_mlir_conversion_library(TritonGPUToLLVM_AMD
@@ -37,6 +36,7 @@ add_mlir_conversion_library(TritonGPUToLLVM_AMD
     ${PROJECT_BINARY_DIR}/include/triton/Conversion/TritonGPUToLLVM
 
     DEPENDS
+    TritonGPUConversionPassIncGen
     TritonGPUConversionPassIncGen_AMD
 
     LINK_COMPONENTS

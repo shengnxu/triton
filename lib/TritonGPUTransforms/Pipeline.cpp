@@ -489,7 +489,7 @@ void LoopPipeliner::checkHopperDots(SetVector<Operation *> &ops) {
   for (Operation &op : forOp) {
     if (auto dotOp = dyn_cast<tt::DotOp>(&op)) {
       auto resTy = dotOp.getResult().getType().dyn_cast<RankedTensorType>();
-      if (auto resEnc = resTy.getEncoding().dyn_cast<ttg::MmaEncodingAttr>()) {
+      if (auto resEnc = resTy.getEncoding().dyn_cast<ttg::NvidiaMmaEncodingAttr>()) {
         if (resEnc && resEnc.isHopper()) {
           // Don't pipeline valid dots that depend on ops other than scf.yield
           // and scf.for
@@ -1622,7 +1622,7 @@ void PipelinePass::asyncLaunchDots(scf::ForOp forOp) {
   for (Operation &op : *loop) {
     if (auto dotOp = dyn_cast<tt::DotOp>(&op)) {
       auto resTy = dotOp.getResult().getType().dyn_cast<RankedTensorType>();
-      if (auto resEnc = resTy.getEncoding().dyn_cast<ttg::MmaEncodingAttr>()) {
+      if (auto resEnc = resTy.getEncoding().dyn_cast<ttg::NvidiaMmaEncodingAttr>()) {
         if (resEnc && resEnc.isHopper()) {
           // Don't pipeline valid dots that depend on ops other than scf.yield
           // and scf.for

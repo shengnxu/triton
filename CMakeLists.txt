@@ -6,18 +6,21 @@ project(TritonAMD)
 
 find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_DIR})
 include(TableGen) 
+include_directories(${MLIR_INCLUDE_DIRS})
 
 # Assuming TRITON_ROOT_DIR is passed to cmake as -DTRITON_ROOT_DIR=<path>.
 # Include the Triton project.
 if(DEFINED TRITON_ROOT_DIR)
+    include_directories(${TRITON_ROOT_DIR})
     add_subdirectory(${TRITON_ROOT_DIR} triton_build)
+    include_directories(${CMAKE_BINARY_DIR}/triton_build/include)
+    include_directories(${TRITON_ROOT_DIR}/include)
 endif()
 
-# Set the C++ standard you want to use (for example, C++14).
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 # Set optimization flags.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O2 -DUSE_ROCM -D__STDC_FORMAT_MACROS  -fPIC -std=gnu++17 -fvisibility=hidden -fvisibility-inlines-hidden")
 
 # Include the directories that contain additional CMakeLists.txt files.
 # This will process the CMakeLists.txt inside these directories.

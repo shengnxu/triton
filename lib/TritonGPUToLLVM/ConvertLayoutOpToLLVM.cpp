@@ -29,7 +29,7 @@ using ValueTable = std::map<std::pair<int, int>, std::pair<Value, Value>>;
 SmallVector<CoordTy> getMNCoords(Value thread, Location loc,
                                  ConversionPatternRewriter &rewriter,
                                  ArrayRef<unsigned int> wpt,
-                                 const MmaEncodingAttr &mmaLayout,
+                                 const NvidiaMmaEncodingAttr &mmaLayout,
                                  ArrayRef<int64_t> shape, bool isARow,
                                  bool isBRow, bool isAVec4, bool isBVec4);
 
@@ -89,7 +89,7 @@ public:
       return lowerSharedToDotOperand(op, adaptor, rewriter);
     }
     // forwarding on mma->mma shortcut, lower distributed->distributed otherwise
-    if (srcLayout.isa<MmaEncodingAttr>() && dstLayout.isa<MmaEncodingAttr>()) {
+    if (srcLayout.isa<NvidiaMmaEncodingAttr>() && dstLayout.isa<NvidiaMmaEncodingAttr>()) {
       if (isMmaToMmaShortcut(srcTy, dstTy)) {
         return lowerMmaToMma(op, adaptor, rewriter);
       }
@@ -97,7 +97,7 @@ public:
     if (isaDistributedLayout(srcLayout) && isaDistributedLayout(dstLayout)) {
       return lowerDistributedToDistributed(op, adaptor, rewriter);
     }
-    if (srcLayout.isa<MmaEncodingAttr>() &&
+    if (srcLayout.isa<NvidiaMmaEncodingAttr>() &&
         dstLayout.isa<DotOperandEncodingAttr>()) {
       return lowerMmaToDotOperand(op, adaptor, rewriter);
     }
@@ -167,7 +167,7 @@ private:
       }
       return multiDimOffset;
     }
-    if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
+    if (auto mmaLayout = layout.dyn_cast<NvidiaMmaEncodingAttr>()) {
       auto shapePerCTA = getShapePerCTA(mmaLayout, shape);
       auto instrShape = mmaLayout.getInstrShape();
       SmallVector<Value> mmaColIdx(4);
@@ -385,10 +385,10 @@ private:
                               bool isDestMma = false) const {
     unsigned accumNumCTAsEachRep = 1;
     auto layout = type.getEncoding();
-    MmaEncodingAttr mma = layout.dyn_cast<MmaEncodingAttr>();
+    NvidiaMmaEncodingAttr mma = layout.dyn_cast<NvidiaMmaEncodingAttr>();
     auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>();
     if (sliceLayout)
-      mma = sliceLayout.getParent().cast<MmaEncodingAttr>();
+      mma = sliceLayout.getParent().cast<NvidiaMmaEncodingAttr>();
 
     auto order = getOrder(layout);
     auto rank = type.getRank();
@@ -593,19 +593,19 @@ private:
 
     // For Volta, all the coords for a CTA are calculated.
     bool isSrcMmaV1{}, isDstMmaV1{};
-    if (auto mmaLayout = srcLayout.dyn_cast<MmaEncodingAttr>()) {
+    if (auto mmaLayout = srcLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
       isSrcMmaV1 = mmaLayout.isVolta();
     }
     if (auto sliceLayout = srcLayout.dyn_cast<SliceEncodingAttr>()) {
-      isSrcMmaV1 = sliceLayout.getParent().isa<MmaEncodingAttr>() &&
-                   sliceLayout.getParent().cast<MmaEncodingAttr>().isVolta();
+      isSrcMmaV1 = sliceLayout.getParent().isa<NvidiaMmaEncodingAttr>() &&
+                   sliceLayout.getParent().cast<NvidiaMmaEncodingAttr>().isVolta();
     }
-    if (auto mmaLayout = dstLayout.dyn_cast<MmaEncodingAttr>()) {
+    if (auto mmaLayout = dstLayout.dyn_cast<NvidiaMmaEncodingAttr>()) {
       isDstMmaV1 = mmaLayout.isVolta();
     }
     if (auto sliceLayout = dstLayout.dyn_cast<SliceEncodingAttr>()) {
-      isDstMmaV1 = sliceLayout.getParent().isa<MmaEncodingAttr>() &&
-                   sliceLayout.getParent().cast<MmaEncodingAttr>().isVolta();
+      isDstMmaV1 = sliceLayout.getParent().isa<NvidiaMmaEncodingAttr>() &&
+                   sliceLayout.getParent().cast<NvidiaMmaEncodingAttr>().isVolta();
     }
 
     for (unsigned d = 0; d < rank; ++d) {
@@ -666,7 +666,7 @@ private:
 #ifdef USE_ROCM
           srcLayout.isa<MfmaEncodingAttr>() ||
 #endif
-          srcLayout.isa<MmaEncodingAttr>()) {
+          srcLayout.isa<NvidiaMmaEncodingAttr>()) {
         if (isSrcMmaV1)
           processReplicaForMMAV1(loc, rewriter, /*stNotRd*/ true, srcTy,
                                  multiDimRepId, inVec, paddedRepShape, outOrd,
@@ -702,7 +702,7 @@ private:
 #ifdef USE_ROCM
           dstLayout.isa<MfmaEncodingAttr>() ||
 #endif
-          dstLayout.isa<MmaEncodingAttr>()) {
+          dstLayout.isa<NvidiaMmaEncodingAttr>()) {
         if (isDstMmaV1)
           processReplicaForMMAV1(loc, rewriter, /*stNotRd*/ false, dstTy,
                                  multiDimRepId, outVec, paddedRepShape, outOrd,
@@ -784,7 +784,7 @@ private:
     smemBase = bitcast(smemBase, elemPtrTy);
 
     int32_t elemSize = elemTy.getIntOrFloatBitWidth();
-    auto mmaLayout = srcLayout.dyn_cast<MmaEncodingAttr>();
+    auto mmaLayout = srcLayout.dyn_cast<NvidiaMmaEncodingAttr>();
     unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
     if (mmaLayout && mmaLayout.isHopper() && elemSize == 16 &&
         inOrd == outOrd && numElems >= 16) {
@@ -907,7 +907,7 @@ private:
 
     Value res;
     if (auto mmaLayout =
-            dotOperandLayout.getParent().dyn_cast_or_null<MmaEncodingAttr>()) {
+            dotOperandLayout.getParent().dyn_cast_or_null<NvidiaMmaEncodingAttr>()) {
       res = lowerSharedToDotOperandMMA(op, adaptor, rewriter, mmaLayout,
                                        dotOperandLayout, isOuter);
 #ifdef USE_ROCM
@@ -1123,7 +1123,7 @@ private:
   // shared -> dot_operand if the result layout is mma
   Value lowerSharedToDotOperandMMA(
       triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter &rewriter, const MmaEncodingAttr &mmaLayout,
+      ConversionPatternRewriter &rewriter, const NvidiaMmaEncodingAttr &mmaLayout,
       const DotOperandEncodingAttr &dotOperandLayout, bool isOuter) const {
     auto loc = op.getLoc();
     Value src = op.getSrc();

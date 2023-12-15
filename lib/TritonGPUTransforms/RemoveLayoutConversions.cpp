@@ -24,7 +24,7 @@ namespace {
 using triton::DotOp;
 using triton::gpu::ConvertLayoutOp;
 using triton::gpu::DotOperandEncodingAttr;
-using triton::gpu::MmaEncodingAttr;
+using triton::gpu::NvidiaMmaEncodingAttr;
 using triton::gpu::SliceEncodingAttr;
 
 // -----------------------------------------------------------------------------
@@ -168,11 +168,11 @@ static bool hasConvertToMMATransisitiveUse(Operation *op, Attribute encoding) {
                                     .cast<RankedTensorType>()
                                     .getEncoding();
         if (auto mmaLayout =
-                dstEncoding.dyn_cast<triton::gpu::MmaEncodingAttr>())
+                dstEncoding.dyn_cast<triton::gpu::NvidiaMmaEncodingAttr>())
           return (mmaLayout.getVersionMajor() > 1) ? true
                                                    : mmaLayout == encoding;
         if (dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>())
-          return encoding.cast<triton::gpu::MmaEncodingAttr>()
+          return encoding.cast<triton::gpu::NvidiaMmaEncodingAttr>()
                      .getVersionMajor() > 1;
       }
       auto yield = dyn_cast<scf::YieldOp>(op);
@@ -250,7 +250,7 @@ void LayoutPropagation::initAnchorLayout() {
           // back to mma further down to avoid generating reduction with MMA
           // layout that may have lower performance.
           // This can be improved with more aggressive backward propagation.
-          if (tensorType.getEncoding().isa<triton::gpu::MmaEncodingAttr>() &&
+          if (tensorType.getEncoding().isa<triton::gpu::NvidiaMmaEncodingAttr>() &&
               !hasConvertToMMATransisitiveUse(op, tensorType.getEncoding()))
             continue;
 #ifdef USE_ROCM
@@ -382,7 +382,7 @@ void LayoutPropagation::resolveConflicts() {
                   triton::AtomicCASOp>(op);
     for (Attribute e : info.encodings) {
       if ((isLoadOrStore && e.isa<triton::gpu::BlockedEncodingAttr>()) ||
-          (!isLoadOrStore && e.isa<triton::gpu::MmaEncodingAttr>())) {
+          (!isLoadOrStore && e.isa<triton::gpu::NvidiaMmaEncodingAttr>())) {
         encoding = e;
         break;
       }

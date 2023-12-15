@@ -1,27 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
-
-# build third_party backend for upstream and exit
-# TODO: check if this is working in CI
-if(HIP_BACKEND_MODE)
-    message(STATUS "ROCM Third Party Backend Mode is ON")
-    add_subdirectory(python/triton/third_party/hip)
-    return()
-endif()
-
-# stand alone build
-if(POLICY CMP0116)
-# Introduced in cmake 3.20
-# https://cmake.org/cmake/help/latest/policy/CMP0116.html
-  cmake_policy(SET CMP0116 OLD)
-endif()
-
 include(ExternalProject)
-
 set(CMAKE_CXX_STANDARD 17)
-
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
-
-project(triton)
+project(triton-rocm)
 include(CTest)
 
 if(NOT WIN32)
@@ -230,7 +211,6 @@ endif()
 # link_directories(${LLVM_LIBRARY_DIR})
 add_subdirectory(include)
 add_subdirectory(lib)
-add_subdirectory(bin)
 
 # find_package(PythonLibs REQUIRED)
 set(TRITON_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -311,7 +291,3 @@ if (${CODEGEN_BACKENDS_LEN} GREATER 0)
     add_subdirectory(third_party/${CODEGEN_BACKEND})
   endforeach()
 endif()
-
-add_subdirectory(test)
-
-add_subdirectory(unittest)

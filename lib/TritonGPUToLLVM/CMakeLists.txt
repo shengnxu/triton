@@ -48,9 +48,7 @@ add_mlir_conversion_library(TritonGPUToLLVM_AMD
     TritonAnalysis
     TritonIR
     TritonGPUIR
-    TritonGPUTransforms
-    TritonNvidiaGPUTransforms
-    NVGPUIR
+    TritonGPUTransforms_AMD
 )
 
 add_mlir_library(ASMBuilder_AMD

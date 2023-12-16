@@ -31,6 +31,8 @@ add_subdirectory(include)
 add_subdirectory(lib)
 
 
+get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
+get_property(conversion_libs GLOBAL PROPERTY MLIR_CONVERSION_LIBS)
 include_directories(~/.triton/pybind11/pybind11-2.11.1/include/)
 set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/python/)
 set(PYTHON_SRC ${PYTHON_SRC_PATH}/main.cc ${PYTHON_SRC_PATH}/triton.cc)
@@ -43,11 +45,15 @@ add_library(triton_amd SHARED ${PYTHON_SRC})
 set(TRITON_LIBRARIES
   TritonAnalysis
   TritonTransforms
-  TritonGPUTransforms
   TritonNvidiaGPUTransforms
   TritonLLVMIR
-  ${dialect_libs}
+  TritonGPUIR
+  TritonGPUTransforms
+  TritonGPUToLLVM
+  TritonGPUTransforms_AMD
+  TritonGPUToLLVM_AMD
   ${conversion_libs}
+  ${dialect_libs}
 
   # optimizations
   MLIRBytecodeWriter
@@ -71,3 +77,8 @@ elseif(APPLE)
 else()
   target_link_libraries(triton_amd ${TRITON_LIBRARIES})
 endif()
+
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
+# set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
+# set(PYTHON_LDFLAGS "-undefined dynamic_lookup -flto")
+target_link_libraries(triton_amd ${PYTHON_LDFLAGS})

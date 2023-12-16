@@ -35,6 +35,12 @@ LogicalResult convertAsyncWGMMA(triton::nvidia_gpu::DotAsyncOp op,
                                 ConversionPatternRewriter &rewriter,
                                 Value thread);
 
+#ifdef USE_ROCM
+LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
+                          TritonGPUToLLVMTypeConverter *typeConverter,
+                          ConversionPatternRewriter &rewriter);
+#endif
+
 struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
   using ConvertTritonGPUOpToLLVMPattern<
       triton::DotOp>::ConvertTritonGPUOpToLLVMPattern;
@@ -71,6 +77,16 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
       llvm::report_fatal_error(
           "Unsupported MMA kind found when converting DotOp to LLVM.");
     }
+
+#ifdef USE_ROCM
+    MfmaEncodingAttr mfmaLayout = D.getType()
+                                      .cast<RankedTensorType>()
+                                      .getEncoding()
+                                      .dyn_cast<MfmaEncodingAttr>();
+    if (!isOuter && mfmaLayout && supportMFMA(op)) {
+      return convertMFMA(op, adaptor, getTypeConverter(), rewriter);
+    }
+#endif
 
     if (D.getType()
             .cast<RankedTensorType>()

@@ -38,20 +38,19 @@ add_mlir_conversion_library(TritonGPUToLLVM_AMD
     Core
 
     LINK_LIBS PUBLIC
-    # ASMBuilder
-    # MLIRIR
-    # MLIRPass
-    # MLIRGPUDialect
-    # MLIRGPUToNVVMTransforms
-    # MLIRGPUToROCDLTransforms
-    # MLIRGPUTransforms
-    # TritonAnalysis
-    # TritonIR
-    # TritonGPUIR
-    # TritonGPUTransforms
-    # TritonNvidiaGPUTransforms
-    # NVGPUIR
-    # rocm_libraries
+    ASMBuilder
+    MLIRIR
+    MLIRPass
+    MLIRGPUDialect
+    MLIRGPUToNVVMTransforms
+    MLIRGPUToROCDLTransforms
+    MLIRGPUTransforms
+    TritonAnalysis
+    TritonIR
+    TritonGPUIR
+    TritonGPUTransforms
+    TritonNvidiaGPUTransforms
+    NVGPUIR
 )
 
 add_mlir_library(ASMBuilder_AMD

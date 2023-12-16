@@ -17,6 +17,7 @@ if(DEFINED TRITON_ROOT_DIR)
     add_subdirectory(${TRITON_ROOT_DIR} triton_build)
     include_directories(${CMAKE_BINARY_DIR}/triton_build/include)
     include_directories(${TRITON_ROOT_DIR}/include)
+    include_directories(${TRITON_ROOT_DIR}/python)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -29,3 +30,44 @@ set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O2 -DUSE_ROCM -D__STDC_FORMAT_MACROS  -fP
 add_subdirectory(include)
 add_subdirectory(lib)
 
+
+include_directories(~/.triton/pybind11/pybind11-2.11.1/include/)
+set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/python/)
+set(PYTHON_SRC ${PYTHON_SRC_PATH}/main.cc ${PYTHON_SRC_PATH}/triton.cc)
+find_package(Python3 REQUIRED COMPONENTS Development Interpreter)
+include_directories(${Python3_INCLUDE_DIRS})
+link_directories(${Python3_LIBRARY_DIRS})
+link_libraries(${Python3_LIBRARIES})
+add_link_options(${Python3_LINK_OPTIONS})
+add_library(triton_amd SHARED ${PYTHON_SRC})
+set(TRITON_LIBRARIES
+  TritonAnalysis
+  TritonTransforms
+  TritonGPUTransforms
+  TritonNvidiaGPUTransforms
+  TritonLLVMIR
+  ${dialect_libs}
+  ${conversion_libs}
+
+  # optimizations
+  MLIRBytecodeWriter
+  MLIRPass
+  MLIRTransforms
+  MLIRLLVMDialect
+  MLIRSupport
+  MLIRTargetLLVMIRExport
+  MLIRMathToLLVM
+  MLIRNVVMToLLVMIRTranslation
+  MLIRROCDLToLLVMIRTranslation
+  MLIRIR
+)
+
+if(WIN32)
+  target_link_libraries(triton_amd PRIVATE ${TRITON_LIBRARIES}
+  )
+elseif(APPLE)
+  target_link_libraries(triton_amd ${TRITON_LIBRARIES}
+  )
+else()
+  target_link_libraries(triton_amd ${TRITON_LIBRARIES})
+endif()

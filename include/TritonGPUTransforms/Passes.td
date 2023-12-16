@@ -3,7 +3,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def TritonGPUPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
+def TritonAMDGPUPipeline : Pass<"tritonamdgpu-pipeline", "mlir::ModuleOp"> {
   let summary = "pipeline";
 
   let description = [{
@@ -11,7 +11,7 @@ def TritonGPUPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
     needed at the next iteration
   }];
 
-  let constructor = "mlir::createTritonGPUPipelinePass()";
+  let constructor = "mlir::createTritonAMDGPUPipelinePass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
@@ -34,7 +34,7 @@ def TritonGPUPipeline : Pass<"tritongpu-pipeline", "mlir::ModuleOp"> {
   ];
 }
 
-def TritonGPUStreamPipeline : Pass<"tritongpu-stream-pipeline", "mlir::ModuleOp"> {
+def TritonAMDGPUStreamPipeline : Pass<"tritonamdgpu-stream-pipeline", "mlir::ModuleOp"> {
   let summary = "pipeline";
 
   let description = [{
@@ -42,14 +42,14 @@ def TritonGPUStreamPipeline : Pass<"tritongpu-stream-pipeline", "mlir::ModuleOp"
     tile
   }];
 
-  let constructor = "mlir::createTritonGPUStreamPipelinePass()";
+  let constructor = "mlir::createTritonAMDGPUStreamPipelinePass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::scf::SCFDialect",
                            "mlir::arith::ArithDialect"];
 }
 
-def TritonGPUPrefetch : Pass<"tritongpu-prefetch", "mlir::ModuleOp"> {
+def TritonAMDGPUPrefetch : Pass<"tritonamdgpu-prefetch", "mlir::ModuleOp"> {
   let summary = "prefetch";
 
   let description = [{
@@ -57,32 +57,11 @@ def TritonGPUPrefetch : Pass<"tritongpu-prefetch", "mlir::ModuleOp"> {
     that may have their operands constructed at the end of the previous iteration
   }];
 
-  let constructor = "mlir::createTritonGPUPrefetchPass()";
+  let constructor = "mlir::createTritonAMDGPUPrefetchPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::scf::SCFDialect",
                            "mlir::arith::ArithDialect"];
-}
-
-def TritonGPUAccelerateMatmul : Pass<"tritongpu-accelerate-matmul", "mlir::ModuleOp"> {
-  let summary = "accelerate matmul";
-
-  let description = [{
-    Optimize the input/output layout of `dot` instruction to make them compatible hardware accelerators
-    (e.g., Nvidia tensor cores)
-  }];
-
-  let constructor = "mlir::createTritonGPUAccelerateMatmulPass()";
-
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
-                           "mlir::triton::TritonDialect"];
-
-  let options = [
-    Option<"computeCapability", "compute-capability",
-           "int32_t", /*default*/"80",
-           "device compute capability">
-  ];
 }
 
 def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir::ModuleOp"> {
@@ -108,7 +87,7 @@ def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir:
   ];
 }
 
-def TritonGPUOptimizeDotOperands : Pass<"tritongpu-optimize-dot-operands", "mlir::ModuleOp"> {
+def TritonAMDGPUOptimizeDotOperands : Pass<"tritonamdgpu-optimize-dot-operands", "mlir::ModuleOp"> {
   let summary = "fuse transpositions";
 
   let description = [{
@@ -116,71 +95,71 @@ def TritonGPUOptimizeDotOperands : Pass<"tritongpu-optimize-dot-operands", "mlir
     hardware-accelerated transpositions.
   }];
 
-  let constructor = "mlir::createTritonGPUOptimizeDotOperandsPass()";
+  let constructor = "mlir::createTritonAMDGPUOptimizeDotOperandsPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
                            "mlir::triton::TritonDialect"];
 }
 
-def TritonGPUCoalesce: Pass<"tritongpu-coalesce", "mlir::ModuleOp"> {
+def TritonAMDGPUCoalesce: Pass<"tritonamdgpu-coalesce", "mlir::ModuleOp"> {
   let summary = "coalesce";
 
   let description = [{
     TODO
   }];
 
-  let constructor = "mlir::createTritonGPUCoalescePass()";
+  let constructor = "mlir::createTritonAMDGPUCoalescePass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect"];
 }
 
 
-def TritonGPURemoveLayoutConversions : Pass<"tritongpu-remove-layout-conversions", "mlir::ModuleOp"> {
+def TritonAMDGPURemoveLayoutConversions : Pass<"tritonamdgpu-remove-layout-conversions", "mlir::ModuleOp"> {
   let summary = "remove superfluous layout conversions";
 
   let description = [{
   }];
 
-  let constructor = "mlir::createTritonGPURemoveLayoutConversionsPass()";
+  let constructor = "mlir::createTritonAMDGPURemoveLayoutConversionsPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];
 
 }
 
-def TritonGPUOptimizeEpilogue : Pass<"tritongpu-optimize-epilogue", "mlir::ModuleOp"> {
+def TritonAMDGPUOptimizeEpilogue : Pass<"tritonamdgpu-optimize-epilogue", "mlir::ModuleOp"> {
   let summary = "Optimize epilogue: (1) Store accumulators directly without going thorough SMEM in epilogue.";
 
   let description = [{
   }];
 
-  let constructor = "mlir::createTritonGPUOptimizeEpiloguePass()";
+  let constructor = "mlir::createTritonAMDGPUOptimizeEpiloguePass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];
 
 }
 
-def TritonGPUReorderInstructions: Pass<"tritongpu-reorder-instructions", "mlir::ModuleOp"> {
+def TritonAMDGPUReorderInstructions: Pass<"tritonamdgpu-reorder-instructions", "mlir::ModuleOp"> {
   let summary = "Reorder instructions";
 
   let description = "This pass reorder instructions so as to (1) decrease register pressure (e.g., by moving "
                     "conversions from shared memory before their first use) and (2) promote LLVM instruction "
                     "order more friendly to `ptxas`.";
 
-  let constructor = "mlir::createTritonGPUReorderInstructionsPass()";
+  let constructor = "mlir::createTritonAMDGPUReorderInstructionsPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];
 }
 
-def TritonGPUDecomposeConversions: Pass<"tritongpu-decompose-conversions", "mlir::ModuleOp"> {
+def TritonAMDGPUDecomposeConversions: Pass<"tritonamdgpu-decompose-conversions", "mlir::ModuleOp"> {
   let summary = "Decompose convert[distributed -> dotOperand] into convert[distributed -> shared -> dotOperand]";
 
   let description = "Decomposing conversions this way makes it possible to use CSE and re-use #shared tensors";
 
-  let constructor = "mlir::createTritonGPUDecomposeConversionsPass()";
+  let constructor = "mlir::createTritonAMDGPUDecomposeConversionsPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];

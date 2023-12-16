@@ -6,7 +6,7 @@
 #include "triton/Analysis/AxisInfo.h"
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+#include "TritonGPUTransforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "llvm/ADT/MapVector.h"
 
@@ -37,7 +37,7 @@ using namespace mlir;
 namespace ttg = triton::gpu;
 
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonGPUTransforms/Passes.h.inc"
 
 namespace {
 
@@ -518,7 +518,7 @@ void LoopPipeliner::emitPrologue() {
   OpBuilder builder(forOp);
   // Get init operands for loop carried values
   for (BlockArgument &arg : forOp.getRegionIterArgs()) {
-    OpOperand &operand = forOp.getOpOperandForRegionIterArg(arg);
+    OpOperand &operand = *forOp.getTiedLoopInit(arg);
     prologueMap.map(arg, operand.get());
   }
 
@@ -796,7 +796,7 @@ scf::ForOp LoopPipeliner::createNewForOp() {
 }
 
 // Stream Pipeline
-struct PipelinePass : public TritonGPUStreamPipelineBase<PipelinePass> {
+struct PipelinePass : public TritonAMDGPUStreamPipelineBase<PipelinePass> {
   PipelinePass() = default;
 
   void runOnOperation() override {
@@ -825,7 +825,7 @@ struct PipelinePass : public TritonGPUStreamPipelineBase<PipelinePass> {
       pipeliner.emitEpilogue(newResults);
 
       // Replace the original loop
-      for (const auto &pair : newResults)
+      for (auto &pair : newResults)
         std::get<0>(pair).replaceAllUsesWith(std::get<1>(pair));
       forOp->erase();
     });
@@ -833,6 +833,6 @@ struct PipelinePass : public TritonGPUStreamPipelineBase<PipelinePass> {
 };
 } // anonymous namespace
 
-std::unique_ptr<Pass> mlir::createTritonGPUStreamPipelinePass() {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUStreamPipelinePass() {
   return std::make_unique<PipelinePass>();
 }

@@ -8,6 +8,7 @@ find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_DIR})
 include(TableGen) 
 include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 
 # Assuming TRITON_ROOT_DIR is passed to cmake as -DTRITON_ROOT_DIR=<path>.
 # Include the Triton project.

@@ -214,7 +214,7 @@ class _attention(torch.autograd.Function):
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H)
 
-        num_warps = 4
+        num_warps = 1
         #print(f"q shape after = {q.shape}")
         #print(f"k shape after = {k.shape}")
         #print(f"v shape after = {v.shape}")
@@ -255,8 +255,8 @@ attention = _attention.apply
 def get_input_shapes():
     cases = [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-        (1, 1, 2**i, 48, 1, 128)
-        for i in [13] # Mkv = 2048 and 8192
+        (1, 1, 2**i, 2048, 1, 128)
+        for i in [11] # Mkv = 2048 and 8192
     ]# + [
     #    # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
     #    (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)

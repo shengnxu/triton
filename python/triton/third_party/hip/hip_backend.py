@@ -8,8 +8,8 @@ from typing import Any, Tuple
 
 
 from triton.common import _build
-from triton.common.backend import BaseBackend, register_backend
-from triton.compiler.make_launcher import get_cache_manager, version_key, make_so_cache_key
+from triton.common.backend import BaseBackend, register_backend, compute_core_version_key
+from triton.compiler.make_launcher import get_cache_manager, make_so_cache_key
 from triton.compiler.utils import generate_cu_signature
 from triton.runtime import jit
 from triton.runtime.driver import HIPDriver
@@ -25,7 +25,7 @@ else:
 
 def make_stub(name, signature, constants, ids, **kwargs):
     # name of files that are cached
-    so_cache_key = make_so_cache_key(version_key(), signature, constants, ids, **kwargs)
+    so_cache_key = make_so_cache_key(compute_core_version_key(), signature, constants, ids, **kwargs)
     so_cache_manager = get_cache_manager(so_cache_key)
     so_name = f"{name}.so"
     # retrieve stub from cache if it exists
@@ -112,10 +112,13 @@ static inline void gpuAssert(hipError_t code, const char *file, int line)
    if (code != HIP_SUCCESS)
    {{
       const char* prefix = "Triton Error [HIP]: ";
-       const char* str = hipGetErrorString(code);
+      const char* str = hipGetErrorString(code);
       char err[1024] = {{0}};
       snprintf(err, 1024, "%s Code: %d, Messsage: %s", prefix, code, str );
+      PyGILState_STATE gil_state;
+      gil_state = PyGILState_Ensure();
       PyErr_SetString(PyExc_RuntimeError, err);
+      PyGILState_Release(gil_state);
    }}
 }}
 
@@ -201,15 +204,14 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0] == "*" else "" for i, ty in signature.items()])};
+  Py_BEGIN_ALLOW_THREADS;
   _launch(gridX, gridY, gridZ, num_warps, num_ctas, clusterDimX, clusterDimY, clusterDimZ, shared_memory, (hipStream_t)_stream, (hipFunction_t)_function{', ' + ', '.join(f"ptr_info{i}.dev_ptr" if ty[0]=="*" else f"_arg{i}"for i, ty in signature.items()) if len(signature) > 0 else ''});
+  Py_END_ALLOW_THREADS;
 
   if (launch_exit_hook != Py_None) {{
     PyObject_CallObject(launch_exit_hook, args);
   }}
 
-  if(PyErr_Occurred()) {{
-    return NULL;
-  }}
   // return None
   Py_INCREF(Py_None);
   return Py_None;
@@ -412,10 +414,20 @@ def llir_to_amdgcn_and_hsaco(mod: Any, gfx_arch: str, gfx_triple: str, gfx_featu
 
 
 class HIPBackend(BaseBackend):
+    _cached_rocm_version_key = None
+
     def __init__(self, device_type: str) -> None:
         super(HIPBackend, self).__init__(device_type)
         self.driver = HIPDriver()
         self.stub_so_path = ""
+
+    def get_version_key(self):
+        if self._cached_rocm_version_key is None:
+            key = compute_core_version_key()
+            ### TODO: Append ROCM version here if needed
+
+            self._cached_rocm_version_key = key
+        return self._cached_rocm_version_key
 
     def is_standalone(self):
         return not HIP_BACKEND_MODE
@@ -498,7 +510,6 @@ class HIPBackend(BaseBackend):
         return arch
 
     def make_launcher_stub(self, name, signature, constants, ids):
-        # print("HIPBackend.make_launcher_stub")
         self.stub_so_path = make_stub(name, signature, constants, ids)
         return self.stub_so_path
 

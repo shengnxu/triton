@@ -1,7 +1,11 @@
-From b45bde0476a4bd3d984732217146611fe4c489d3 Mon Sep 17 00:00:00 2001
+From 46dcddff7e23904493ec889fabc6b980179d7cd0 Mon Sep 17 00:00:00 2001
 From: Michael Melesse <micmelesse@gmail.com>
 Date: Mon, 11 Sep 2023 13:11:47 -0500
 Subject: [PATCH] Upstream patch for Gen Backend
+
+This is a combination of 2 commits.
+
+Upstream patch for Gen Backend
 
 This is a combination of 3 commits.
 
@@ -170,6 +174,8 @@ add unit test fixes
 ignore argmax in general
 
 update backend
+
+skip argmin
 ---
  python/test/unit/language/test_core.py | 74 ++++++++++++-----------
  python/triton/compiler/compiler.py     | 23 ++++++--
@@ -179,7 +185,7 @@ update backend
  5 files changed, 131 insertions(+), 55 deletions(-)
 
 diff --git a/python/test/unit/language/test_core.py b/python/test/unit/language/test_core.py
-index 1c92ef689..163f303b8 100644
+index 1c92ef689..b5b3e99a6 100644
 --- a/python/test/unit/language/test_core.py
 +++ b/python/test/unit/language/test_core.py
 @@ -25,11 +25,10 @@ torch_dtypes = ['bool'] + int_dtypes + ['uint8'] + float_dtypes + ['bfloat16']
@@ -233,8 +239,8 @@ index 1c92ef689..163f303b8 100644
 -    if is_hip():
 -        pytest.skip("test_reduce2d not supported on HIP")
 -    # triton kernel
-+    if is_hip() and op == "argmax":
-+        pytest.skip("test_reduce not supported on HIP")
++    if is_hip() and (op == "argmax" or op == "argmin"):
++        pytest.skip(f"test_reduce{op} not supported on HIP")
 +    check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
  
      @triton.jit

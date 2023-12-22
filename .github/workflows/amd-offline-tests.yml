@@ -190,7 +190,6 @@ jobs:
           # check out the upstream at shared last commit
           UPSTREAM_REPO_DIR=$ROOT_DIR/triton_upstream
           rm -rf $UPSTREAM_REPO_DIR
-          # git clone --recurse-submodules --branch update_backend_current_ifu https://github.com/micmelesse/triton $UPSTREAM_REPO_DIR
           git clone --recurse-submodules https://github.com/openai/triton $UPSTREAM_REPO_DIR
           cd $UPSTREAM_REPO_DIR
           git checkout $UPSTREAM_COMMIT_HASH
@@ -209,7 +208,6 @@ jobs:
           cd $UPSTREAM_REPO_DIR
           cd $UPSTREAM_REPO_DIR/python
           pip uninstall -y triton
-          # pip install -U matplotlib pandas filelock tabulate
           
           echo `pwd`
           export TRITON_CODEGEN_AMD_HIP_BACKEND=1

@@ -195,7 +195,7 @@ jobs:
           cd $UPSTREAM_REPO_DIR
           git checkout $UPSTREAM_COMMIT_HASH
           git log -1 --pretty=format:"%H, %an, %ad, %s"
-          git apply $SCRIPT_PATH/0001-Use-Gen-Backend-with-Dots-working.patch # apply patch until upstreamed
+          git apply $SCRIPT_PATH/0001-Upstream-patch-for-Gen-Backend.patch # apply patch until upstreamed
           git status
           
           # checkout backend in upstream

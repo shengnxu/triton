@@ -196,26 +196,42 @@ static SmallVector<Value> Fp8E4M3FNUZ_to_Fp32(
 #endif
 
 #ifdef USE_ROCM
+// Depend on whether we focus more on performance, we may skip
+// the processing of submornal values
+static Value Fp16_to_Fp8E5M2FNUZ_oneValue(
+  Location loc, ConversionPatternRewriter &rewriter, Value v) {
+  auto vi16 = bitcast(v, i16_ty);
+  auto e = and_(i16_ty, vi16, int_val(16, 0x7C00));
+  auto sign = and_(i16_ty, vi16, int_val(16, 0x8000));
+
+  // normal value
+  auto a = and_(i16_ty, vi16, int_val(16, 0x7FFFF));
+  auto a1 = add(i16_ty, a, int_val(16, 0x0400));
+  auto o1 = or_(i16_ty, a1, sign);
+
+  // subnormal value, e is 0
+  auto m = and_(i16_ty, vi16, int_val(16, 0x03FF));
+  auto m2 = shl(m, int_val(16, 1));
+  auto o2 = or_(i16_ty, sign, or_(i16_ty, int_val(16, 1), m2));
+
+  auto e_is_zero = icmp_eq(e, int_val(16, 0));
+  auto e_is_all1 = icmp_eq(e, int_val(16, 0x7C00));
+
+  auto ot = select(e_is_zero, o2, o1);
+  auto o = select(e_is_all1, vi16, ot);
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  auto res = bitcast(o, fp8x2VecTy); 
+
+  return extract_element(i8_ty, res, i32_val(1));
+}
+
 static SmallVector<Value>
 Fp16_to_Fp8E5M2FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  Value a = undef(fp16x2VecTy);
-  a = insert_element(fp16x2VecTy, a, v[0], i32_val(0));
-  a = insert_element(fp16x2VecTy, a, v[1], i32_val(1));
-  auto a1 = bitcast(a, i32_ty);
-  auto sign = and_(i32_ty, a1, i32_val(0x80008000));
-  auto a2 = and_(i32_ty, a1, i32_val(0x7FFF7FFF));
-  auto a3 = add(i32_ty, a2, i32_val(0x04000400));
-  auto o = or_(i32_ty, a3, sign);
-
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  auto ov = bitcast(o, fp8x4VecTy);
-
-  return {
-    extract_element(i8_ty, ov, i32_val(0)),
-    extract_element(i8_ty, ov, i32_val(2))
-  };
+  SmallVector<Value> result(2);
+  result[0] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp16_to_Fp8E5M2FNUZ_oneValue(loc, rewriter, v[1]);
+  return result;
 }
 
 static SmallVector<Value> Fp16_to_Fp8E5M2FNUZ_HW(
@@ -310,25 +326,10 @@ static Value Fp8E5M2FNUZ_to_Fp16_oneValue(
 static SmallVector<Value>
 Fp8E5M2FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  Value a = undef(fp8x4VecTy);
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
-  a = insert_element(fp8x4VecTy, a, v[0], i32_val(1));
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
-  a = insert_element(fp8x4VecTy, a, v[1], i32_val(3));
-  a = bitcast(a, i32_ty);
-
-  auto sign = and_(i32_ty, a, i32_val(0x80008000));
-  auto av = and_(i32_ty, a, i32_val(0x7FFF7FFF));
-  auto a1 = sub(i32_ty, av, i32_val(0x40004000));
-  auto o = or_(i32_ty, a1, sign);
-
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  auto fp16x2Vec0 = bitcast(o, fp16x2VecTy);
-
-  return {extract_element(f16_ty, fp16x2Vec0, i32_val(0)),
-    extract_element(f16_ty, fp16x2Vec0, i32_val(1))
-  };
+  SmallVector<Value> res(2);
+  res[0] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[0]);
+  res[1] = Fp8E5M2FNUZ_to_Fp16_oneValue(loc, rewriter, v[1]);
+  return res;
 }
 
 static SmallVector<Value>
@@ -864,29 +865,69 @@ static const std::string Fp16_to_Fp8E4M3B15x4 =
 // does not handle denormals and has
 // more than a single NaN values.
 #ifdef USE_ROCM
+static Value Fp8E4M3FNUZ_to_Fp16_oneValue(
+  Location loc, ConversionPatternRewriter &rewriter, Value v) {
+  auto fp8x2VecTy = vec_ty(i8_ty, 2);
+  Value a = undef(fp8x2VecTy);
+  a = insert_element(fp8x2VecTy, a, int_val(8, 0), i32_val(0));
+  a = insert_element(fp8x2VecTy, a, v, i32_val(1));
+  a = bitcast(a, i16_ty);
+
+  auto e_mask = int_val(16, 0x7A00);
+  auto e = and_(i16_ty, a, e_mask);
+
+  auto m = and_(i16_ty, a, int_val(16, 0x0700));
+  auto sign = and_(i16_ty, a, int_val(16, 0x8000));
+
+  // check whether all exponents are zeros
+  auto e_is_zero = icmp_eq(e, int_val(16, 0x0));
+  auto b = and_(i16_ty, a, int_val(16, 0x7FFF));
+  auto b1 = lshr(i16_ty, b, int_val(16, 1));
+
+  // case 1, e is nonzero, add exponent by 6
+  auto o0v = add(i16_ty, b1, int_val(16, 0x0C00));
+  auto o0 = or_(i16_ty, o0v, sign);
+
+  // case 2, e is nonzero, add exponent by 7
+  auto o1v = add(i16_ty, b1, int_val(16, 0x1C00));
+  auto o1 = or_(i16_ty, o1v, sign);
+
+  auto io = select(e_is_zero, o0, o1);
+  return bitcast(io, f16_ty);
+}
+
 static SmallVector<Value>
 Fp8E4M3FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  Value a = undef(fp8x4VecTy);
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
-  a = insert_element(fp8x4VecTy, a, v[0], i32_val(1));
-  a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
-  a = insert_element(fp8x4VecTy, a, v[1], i32_val(3));
-  a = bitcast(a, i32_ty);
-
-  auto sign = and_(i32_ty, a, i32_val(0x80008000));
-  auto uv = and_(i32_ty, a, i32_val(0x7FFF7FFF));
-  auto a1 = add(i32_ty, a, i32_val(0x1C001C00));
-  auto o = or_(i32_ty, a1, sign);
-
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  auto of16 = bitcast(o, fp16x2VecTy);
-
-  return {extract_element(f16_ty, of16, i32_val(0)),
-      extract_element(f16_ty, of16, i32_val(1))
-  };
+  SmallVector<Value> result(2);
+  result[0] = Fp8E4M3FNUZ_to_Fp16_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp8E4M3FNUZ_to_Fp16_oneValue(loc, rewriter, v[1]);
+  return result;
 }
+
+// static SmallVector<Value>
+// Fp8E4M3FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
+// 		   const SmallVector<Value> &v) {
+//   auto fp8x4VecTy = vec_ty(i8_ty, 4);
+//   Value a = undef(fp8x4VecTy);
+//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
+//   a = insert_element(fp8x4VecTy, a, v[0], i32_val(1));
+//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
+//   a = insert_element(fp8x4VecTy, a, v[1], i32_val(3));
+//   a = bitcast(a, i32_ty);
+
+//   auto sign = and_(i32_ty, a, i32_val(0x80008000));
+//   auto uv = and_(i32_ty, a, i32_val(0x7FFF7FFF));
+//   auto a1 = add(i32_ty, a, i32_val(0x1C001C00));
+//   auto o = or_(i32_ty, a1, sign);
+
+//   auto fp16x2VecTy = vec_ty(f16_ty, 2);
+//   auto of16 = bitcast(o, fp16x2VecTy);
+
+//   return {extract_element(f16_ty, of16, i32_val(0)),
+//       extract_element(f16_ty, of16, i32_val(1))
+//   };
+// }
 
 static SmallVector<Value>
 Fp8E4M3FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
@@ -937,24 +978,11 @@ static Value Fp16_to_Fp8E4M3FNUZ_oneValue(
 static SmallVector<Value>
 Fp16_to_Fp8E4M3FNUZ_SW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {
-  auto fp16x2VecTy = vec_ty(f16_ty, 2);
-  Value a = undef(fp16x2VecTy);
-  a = insert_element(fp16x2VecTy, a, v[0], i32_val(0));
-  a = insert_element(fp16x2VecTy, a, v[1], i32_val(1));
-  Value a1 = bitcast(a, i32_ty);
+  SmallVector<Value> result(2);
+  result[0] = Fp16_to_Fp8E4M3FNUZ_oneValue(loc, rewriter, v[0]);
+  result[1] = Fp16_to_Fp8E4M3FNUZ_oneValue(loc, rewriter, v[1]);
 
-  auto sign = and_(i32_ty, a1, i32_val(0x80008000));
-  auto uv = and_(i32_ty, a1, i32_val(0x7FFF7FFF));
-
-  auto a2 = sub(i32_ty, uv, i32_val(0x1C001C00));
-  auto o = or_(i32_ty, sign, a2);
-
-  auto fp8x4VecTy = vec_ty(i8_ty, 4);
-  auto of8 = bitcast(o, fp8x4VecTy);
-
-  return {extract_element(i8_ty, of8, i32_val(1)),
-      extract_element(i8_ty, of8, i32_val(3))
-  };
+  return result;
 }
 
 static SmallVector<Value>

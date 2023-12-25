@@ -912,30 +912,6 @@ Fp8E4M3FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
   return result;
 }
 
-// static SmallVector<Value>
-// Fp8E4M3FNUZ_to_Fp16_SW(Location loc, ConversionPatternRewriter &rewriter,
-// 		   const SmallVector<Value> &v) {
-//   auto fp8x4VecTy = vec_ty(i8_ty, 4);
-//   Value a = undef(fp8x4VecTy);
-//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(0));
-//   a = insert_element(fp8x4VecTy, a, v[0], i32_val(1));
-//   a = insert_element(fp8x4VecTy, a, int_val(8, 0), i32_val(2));
-//   a = insert_element(fp8x4VecTy, a, v[1], i32_val(3));
-//   a = bitcast(a, i32_ty);
-
-//   auto sign = and_(i32_ty, a, i32_val(0x80008000));
-//   auto uv = and_(i32_ty, a, i32_val(0x7FFF7FFF));
-//   auto a1 = add(i32_ty, a, i32_val(0x1C001C00));
-//   auto o = or_(i32_ty, a1, sign);
-
-//   auto fp16x2VecTy = vec_ty(f16_ty, 2);
-//   auto of16 = bitcast(o, fp16x2VecTy);
-
-//   return {extract_element(f16_ty, of16, i32_val(0)),
-//       extract_element(f16_ty, of16, i32_val(1))
-//   };
-// }
-
 static SmallVector<Value>
 Fp8E4M3FNUZ_to_Fp16_HW(Location loc, ConversionPatternRewriter &rewriter,
 		   const SmallVector<Value> &v) {

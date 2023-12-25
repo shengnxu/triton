@@ -1242,7 +1242,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                           [tl.float8e5b16, tl.float8e4b8],
                                           [tl.float8e4b8, tl.float8e5b16],
                                           [tl.float8e5b16, tl.float8e5b16]]
-                          for out_dtype in [torch.float32]
+                          for out_dtype in [torch.float32, torch.float16, torch.bfloat16]
                         ])
 def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
     check_type_supported(out_dtype, device)

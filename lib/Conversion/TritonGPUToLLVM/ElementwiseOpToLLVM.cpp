@@ -613,6 +613,7 @@ Fp8E5M2FNUZ_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
   ret[1] = cvtFp32ToBf16(loc, rewriter, ret[1]);
   return ret;
 }
+
 // bf16 to fp8e5m2fnuz
 static SmallVector<Value>
 Bf16_to_Fp8E5M2FNUZ(Location loc, ConversionPatternRewriter &rewriter,

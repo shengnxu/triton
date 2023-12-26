@@ -1045,7 +1045,7 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
         if out_dtype == torch.bfloat16 and (in_dtype == tl.float8e4b15 or in_dtype == tl.float8e4b15x4):
            pytest.skip(f"Type conversion between {in_dtype} and {out_dtype} is not available on hardware")
     elif backend.get_matrix_core_version() == 2:
-        if not (out_dtype == torch.bfloat16 and in_dtype == tl.float8e5):
+        if out_dtype == torch.bfloat16 and in_dtype != tl.float8e5:
            pytest.skip(f"Type conversion between {in_dtype} and {out_dtype} is not available on hardware")
 
     @triton.jit

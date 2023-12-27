@@ -17,12 +17,13 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h"
+
 
 using namespace mlir;
 
 class TritonGPUDecomposeConversionsPass
-    : public TritonGPUDecomposeConversionsBase<
+    : public TritonAMDGPUDecomposeConversionsBase<
           TritonGPUDecomposeConversionsPass> {
 public:
   TritonGPUDecomposeConversionsPass() = default;
@@ -75,6 +76,6 @@ public:
   }
 };
 
-std::unique_ptr<Pass> mlir::createTritonGPUDecomposeConversionsPass() {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUDecomposeConversionsPass() {
   return std::make_unique<TritonGPUDecomposeConversionsPass>();
 }

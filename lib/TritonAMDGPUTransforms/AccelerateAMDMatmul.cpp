@@ -5,7 +5,7 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
-#include "TritonGPUTransforms/Passes.h"
+#include "TritonAMDGPUTransforms/Passes.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/Debug.h"
 #include <memory>
@@ -285,7 +285,7 @@ public:
 } // namespace
 
 #define GEN_PASS_CLASSES
-#include "TritonGPUTransforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h.inc"
 
 class TritonAMDGPUAccelerateMatmulPass
     : public TritonAMDGPUAccelerateMatmulBase<

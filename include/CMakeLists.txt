@@ -1,2 +1,2 @@
-add_subdirectory(TritonGPUToLLVM)
-add_subdirectory(TritonGPUTransforms)
+add_subdirectory(TritonAMDGPUToLLVM)
+add_subdirectory(TritonAMDGPUTransforms)

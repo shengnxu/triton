@@ -19,7 +19,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h"
 
 using namespace mlir;
 
@@ -37,7 +37,7 @@ willIncreaseRegisterPressure(triton::gpu::ConvertLayoutOp op) {
 }
 
 class TritonGPUReorderInstructionsPass
-    : public TritonGPUReorderInstructionsBase<
+    : public TritonAMDGPUReorderInstructionsBase<
           TritonGPUReorderInstructionsPass> {
 public:
   TritonGPUReorderInstructionsPass() = default;
@@ -135,6 +135,6 @@ public:
   }
 };
 
-std::unique_ptr<Pass> mlir::createTritonGPUReorderInstructionsPass() {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUReorderInstructionsPass() {
   return std::make_unique<TritonGPUReorderInstructionsPass>();
 }

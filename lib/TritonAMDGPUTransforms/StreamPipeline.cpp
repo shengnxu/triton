@@ -6,7 +6,7 @@
 #include "triton/Analysis/AxisInfo.h"
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "TritonGPUTransforms/Passes.h"
+#include "TritonAMDGPUTransforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "llvm/ADT/MapVector.h"
 
@@ -37,7 +37,7 @@ using namespace mlir;
 namespace ttg = triton::gpu;
 
 #define GEN_PASS_CLASSES
-#include "TritonGPUTransforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h.inc"
 
 namespace {
 

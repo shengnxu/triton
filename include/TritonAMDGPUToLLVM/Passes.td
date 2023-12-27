@@ -1,15 +1,15 @@
-#ifndef TRITONGPU_CONVERSION_PASSES
-#define TRITONGPU_CONVERSION_PASSES
+#ifndef TRITONAMDGPU_CONVERSION_PASSES
+#define TRITONAMDGPU_CONVERSION_PASSES
 
 include "mlir/Pass/PassBase.td"
 
 
-def ConvertTritonGPUToLLVM : Pass<"convert-triton-gpu-to-llvm", "mlir::ModuleOp"> {
+def ConvertTritonAMDGPUToLLVM : Pass<"convert-triton-amdgpu-to-llvm", "mlir::ModuleOp"> {
     let summary = "Convert TritonGPU to LLVM";
     let description = [{
 
     }];
-    let constructor = "mlir::triton::createConvertTritonGPUToLLVMPass()";
+    let constructor = "mlir::triton::createConvertTritonAMDGPUToLLVMPass()";
 
     let dependentDialects = ["mlir::arith::ArithDialect",
                              "mlir::math::MathDialect",
@@ -27,13 +27,6 @@ def ConvertTritonGPUToLLVM : Pass<"convert-triton-gpu-to-llvm", "mlir::ModuleOp"
         Option<"computeCapability", "compute-capability",
                "int32_t", /*default*/"80",
                "device compute capability">,
-        Option<"target", "target", "enum Target", "mlir::triton::Target::Default",
-               "compile for target compatible LLVM",
-               "llvm::cl::values("
-               "clEnumValN(mlir::triton::Target::NVVM, \"nvvm\", \"compile for "
-               "NVVM-compatible LLVM\"), "
-               "clEnumValN(mlir::triton::Target::ROCDL, \"rocdl\", \"compile for "
-               "ROCDL-compatible LLVM\"))">,
     ];
 }
 

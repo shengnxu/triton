@@ -14,7 +14,7 @@
 #include "mlir/Transforms/RegionUtils.h"
 #include "triton/Analysis/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+#include "TritonAMDGPUTransforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/TritonGPUConversion.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include <memory>
@@ -1055,6 +1055,6 @@ public:
   }
 };
 
-std::unique_ptr<Pass> mlir::createTritonGPURemoveLayoutConversionsPass() {
+std::unique_ptr<Pass> mlir::createTritonAMDGPURemoveLayoutConversionsPass() {
   return std::make_unique<TritonGPURemoveLayoutConversionsPass>();
 }

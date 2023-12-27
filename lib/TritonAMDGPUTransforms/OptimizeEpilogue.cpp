@@ -31,6 +31,8 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+#include "TritonAMDGPUTransforms/Passes.h"
+
 
 using namespace mlir;
 
@@ -136,6 +138,6 @@ public:
   }
 };
 
-std::unique_ptr<Pass> mlir::createTritonGPUOptimizeEpiloguePass() {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUOptimizeEpiloguePass() {
   return std::make_unique<TritonGPUOptimizeEpiloguePass>();
 }

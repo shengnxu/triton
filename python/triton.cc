@@ -1,7 +1,7 @@
 ﻿#include <pybind11/pybind11.h>
 #include "mlir/Pass/PassManager.h"
-#include "TritonGPUTransforms/Passes.h"
-#include "TritonGPUToLLVM/Passes.h"
+#include "TritonAMDGPUTransforms/Passes.h"
+#include "TritonAMDGPUToLLVM/Passes.h"
 
 namespace py = pybind11;
 
@@ -21,7 +21,7 @@ void init_tritonamd(py::module &_m) {
 
     .def("add_triton_gpu_to_llvm",
           [](mlir::PassManager &self) {
-            self.addPass(mlir::triton::createConvertTritonGPUToLLVMPass());
+            self.addPass(mlir::triton::createConvertTritonAMDGPUToLLVMPass());
           })
     ;
 

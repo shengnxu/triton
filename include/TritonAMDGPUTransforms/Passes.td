@@ -13,10 +13,7 @@ def TritonAMDGPUPipeline : Pass<"tritonamdgpu-pipeline", "mlir::ModuleOp"> {
 
   let constructor = "mlir::createTritonAMDGPUPipelinePass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
-                           "mlir::scf::SCFDialect",
-                           "mlir::arith::ArithDialect"];
+  let dependentDialects = [];
 
   let options = [
     Option<"numStages", "num-stages",
@@ -44,9 +41,7 @@ def TritonAMDGPUStreamPipeline : Pass<"tritonamdgpu-stream-pipeline", "mlir::Mod
 
   let constructor = "mlir::createTritonAMDGPUStreamPipelinePass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::scf::SCFDialect",
-                           "mlir::arith::ArithDialect"];
+  let dependentDialects = [];
 }
 
 def TritonAMDGPUPrefetch : Pass<"tritonamdgpu-prefetch", "mlir::ModuleOp"> {
@@ -59,9 +54,7 @@ def TritonAMDGPUPrefetch : Pass<"tritonamdgpu-prefetch", "mlir::ModuleOp"> {
 
   let constructor = "mlir::createTritonAMDGPUPrefetchPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::scf::SCFDialect",
-                           "mlir::arith::ArithDialect"];
+  let dependentDialects = [];
 }
 
 def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir::ModuleOp"> {
@@ -74,8 +67,7 @@ def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir:
 
   let constructor = "mlir::createTritonAMDGPUAccelerateMatmulPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 
   let options = [
     Option<"matrixCoreVersion", "matrix-core-version",
@@ -97,9 +89,7 @@ def TritonAMDGPUOptimizeDotOperands : Pass<"tritonamdgpu-optimize-dot-operands",
 
   let constructor = "mlir::createTritonAMDGPUOptimizeDotOperandsPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 }
 
 def TritonAMDGPUCoalesce: Pass<"tritonamdgpu-coalesce", "mlir::ModuleOp"> {
@@ -111,7 +101,7 @@ def TritonAMDGPUCoalesce: Pass<"tritonamdgpu-coalesce", "mlir::ModuleOp"> {
 
   let constructor = "mlir::createTritonAMDGPUCoalescePass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect"];
+  let dependentDialects = [];
 }
 
 
@@ -123,8 +113,7 @@ def TritonAMDGPURemoveLayoutConversions : Pass<"tritonamdgpu-remove-layout-conve
 
   let constructor = "mlir::createTritonAMDGPURemoveLayoutConversionsPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 
 }
 
@@ -136,8 +125,7 @@ def TritonAMDGPUOptimizeEpilogue : Pass<"tritonamdgpu-optimize-epilogue", "mlir:
 
   let constructor = "mlir::createTritonAMDGPUOptimizeEpiloguePass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 
 }
 
@@ -150,8 +138,7 @@ def TritonAMDGPUReorderInstructions: Pass<"tritonamdgpu-reorder-instructions", "
 
   let constructor = "mlir::createTritonAMDGPUReorderInstructionsPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 }
 
 def TritonAMDGPUDecomposeConversions: Pass<"tritonamdgpu-decompose-conversions", "mlir::ModuleOp"> {
@@ -161,8 +148,7 @@ def TritonAMDGPUDecomposeConversions: Pass<"tritonamdgpu-decompose-conversions",
 
   let constructor = "mlir::createTritonAMDGPUDecomposeConversionsPass()";
 
-  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::triton::TritonDialect"];
+  let dependentDialects = [];
 }
 
 #endif

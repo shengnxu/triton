@@ -1,4 +1,4 @@
-add_mlir_dialect_library(TritonGPUTransforms_AMD
+add_mlir_dialect_library(TritonAMDGPUTransforms
   AccelerateAMDMatmul.cpp
   DecomposeConversions.cpp
   OptimizeEpilogue.cpp
@@ -7,7 +7,7 @@ add_mlir_dialect_library(TritonGPUTransforms_AMD
   StreamPipeline.cpp
 
   DEPENDS
-  TritonGPUTransformsIncGen_AMD
+  TritonAMDGPUTransformsIncGen
 
   LINK_LIBS PUBLIC
   MLIRTransforms

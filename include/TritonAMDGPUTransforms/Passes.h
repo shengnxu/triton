@@ -14,8 +14,8 @@ std::unique_ptr<Pass> createTritonAMDGPUPipelinePass(int numStages = 3,
 std::unique_ptr<Pass> createTritonAMDGPUStreamPipelinePass();
 
 std::unique_ptr<Pass>
-createTritonAMDGPUAccelerateMatmulPass(int matrixCoreVersion = 0,
-                                       int matrixInstructionSize = 0);
+createTritonAMDGPUAccelerateMatmulPass(int matrixCoreVersion=0,
+                                       int matrixInstructionSize=0);
 
 std::unique_ptr<Pass> createTritonAMDGPUPrefetchPass();
 
@@ -37,7 +37,7 @@ std::unique_ptr<Pass> createTritonAMDGPUOptimizeEpiloguePass();
 
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
-#include "TritonGPUTransforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h.inc"
 
 } // namespace mlir
 #endif

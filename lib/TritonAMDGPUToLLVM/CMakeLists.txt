@@ -3,7 +3,7 @@ set(LLVM_OPTIONAL_SOURCES
     GCNAsmFormat.cpp
   )
 
-add_mlir_conversion_library(TritonGPUToLLVM_AMD
+add_mlir_conversion_library(TritonAMDGPUToLLVM
     ConvertLayoutOpToLLVM/SharedToDotOperandFMA.cpp
     ConvertLayoutOpToLLVM/SharedToDotOperandMFMA.cpp
     ConvertLayoutOpToLLVM.cpp
@@ -27,28 +27,11 @@ add_mlir_conversion_library(TritonGPUToLLVM_AMD
     RegReallocOpToLLVM.cpp
 
     ADDITIONAL_HEADER_DIRS
-    ${PROJECT_SOURCE_DIR}/include/triton/Conversion/TritonGPUToLLVM
-    ${PROJECT_BINARY_DIR}/include/triton/Conversion/TritonGPUToLLVM
+    ${PROJECT_SOURCE_DIR}/include/triton/Conversion/TritonAMDGPUToLLVM
+    ${PROJECT_BINARY_DIR}/include/triton/Conversion/TritonAMDGPUToLLVM
 
     DEPENDS
-    TritonGPUConversionPassIncGen
-    TritonGPUConversionPassIncGen_AMD
-
-    LINK_COMPONENTS
-    Core
-
-    LINK_LIBS PUBLIC
-    ASMBuilder
-    MLIRIR
-    MLIRPass
-    MLIRGPUDialect
-    MLIRGPUToNVVMTransforms
-    MLIRGPUToROCDLTransforms
-    MLIRGPUTransforms
-    TritonAnalysis
-    TritonIR
-    TritonGPUIR
-    TritonGPUTransforms_AMD
+    TritonAMDGPUConversionPassIncGen
 )
 
 add_mlir_library(ASMBuilder_AMD
@@ -56,8 +39,4 @@ add_mlir_library(ASMBuilder_AMD
 
   DEPENDS
   TritonTableGen
-
-  LINK_LIBS PUBLIC
-  MLIRAnalysis
-  MLIRLLVMDialect
 )

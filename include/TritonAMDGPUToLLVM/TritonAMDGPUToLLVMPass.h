@@ -1,9 +1,9 @@
 #ifndef TRITON_CONVERSION_TRITONGPU_TO_LLVM_PASS_H
 #define TRITON_CONVERSION_TRITONGPU_TO_LLVM_PASS_H
 
+#include "triton/Target/PTX/TmaMetadata.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "triton/Target/PTX/TmaMetadata.h"
 
 #include <memory>
 
@@ -17,12 +17,11 @@ namespace triton {
 enum Target { NVVM, ROCDL, Default = NVVM };
 
 #define GEN_PASS_DECL
-#include "triton/Conversion/TritonGPUToLLVM/Passes.h.inc"
+#include "TritonAMDGPUToLLVM/Passes.h.inc"
 
-std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonGPUToLLVMPass();
+std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonAMDGPUToLLVMPass();
 std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonGPUToLLVMPass(int32_t computeCapability, Target target,
-                                 mlir::triton::gpu::TMAMetadataTy *tmaMetadata);
+createConvertTritonAMDGPUToLLVMPass(int32_t computeCapability);
 
 } // namespace triton
 

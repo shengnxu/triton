@@ -14,6 +14,7 @@ include "mlir/Interfaces/DestinationStyleOpInterface.td"
 include "mlir/Interfaces/ViewLikeInterface.td"
 
 def ResultsAreSharedEncoding: NativeOpTrait<"ResultsAreSharedEncoding">;
+def OperandAndResultHaveSameEncoding: NativeOpTrait<"OperandAndResultHaveSameEncoding">;
 
 class TTG_Op<string mnemonic, list<Trait> traits = []> :
     Op<TritonGPU_Dialect, mnemonic, traits>;
@@ -181,7 +182,7 @@ def TTG_InsertSliceOp : TTG_Op<"insert_slice",
 
 def TTG_ViewSliceOp : TTG_Op<"view_slice",
                                 [AttrSizedOperandSegments,
-                                //  ResultsAreSharedEncoding,
+                                 OperandAndResultHaveSameEncoding,
                                  Pure,
                                  OffsetSizeAndStrideOpInterface
                                  ]> {

@@ -898,6 +898,9 @@ struct ViewSliceOpConversion
     Location loc = op->getLoc();
     auto srcTy = op.getSource().getType().dyn_cast<RankedTensorType>();
     auto srcLayout = srcTy.getEncoding().dyn_cast<BlockedEncodingAttr>();
+    assert(
+        srcLayout &&
+        "Currently only blocked layout is supported in view_slice instruction");
     auto srcShape = srcTy.getShape();
     auto resultTy = op.getType().template cast<RankedTensorType>();
     auto vals = this->getTypeConverter()->unpackLLElements(
@@ -908,6 +911,8 @@ struct ViewSliceOpConversion
     auto totalSizePerThread = sizePerThread[0] * sizePerThread[1];
     auto order = srcLayout.getOrder();
     auto shapePerCTA = getShapePerCTATile(srcLayout, srcShape);
+    shapePerCTA[0] = std::min(srcShape[0], (long)shapePerCTA[0]);
+    shapePerCTA[1] = std::min(srcShape[1], (long)shapePerCTA[1]);
 
     auto offsets = op.getStaticOffsets();
     auto sizes = op.getStaticSizes();

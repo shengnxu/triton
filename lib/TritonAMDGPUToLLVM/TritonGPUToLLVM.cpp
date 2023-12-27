@@ -899,26 +899,26 @@ void populateTritonGPUToLLVMPatterns(
     ModuleAllocation &moduleAllocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
-  // patterns.add<AddPtrOpConversion>(typeConverter, benefit);
-  // patterns.add<AllocTensorOpConversion>(typeConverter, moduleAllocation,
-  //                                       benefit);
-  // patterns.add<DeallocTensorOpConversion>(typeConverter, benefit);
-  // patterns.add<AsyncCommitGroupOpConversion>(typeConverter, benefit);
-  // patterns.add<AsyncWaitOpConversion>(typeConverter, benefit);
-  // patterns.add<AsyncBulkCommitGroupOpConversion>(typeConverter, benefit);
-  // patterns.add<AsyncBulkWaitOpConversion>(typeConverter, benefit);
-  // patterns.add<BroadcastOpConversion>(typeConverter, benefit);
-  // patterns.add<ExtractSliceOpConversion>(typeConverter, moduleAllocation,
-  //                                        benefit);
+  patterns.add<AddPtrOpConversion>(typeConverter, benefit);
+  patterns.add<AllocTensorOpConversion>(typeConverter, moduleAllocation,
+                                        benefit);
+  patterns.add<DeallocTensorOpConversion>(typeConverter, benefit);
+  patterns.add<AsyncCommitGroupOpConversion>(typeConverter, benefit);
+  patterns.add<AsyncWaitOpConversion>(typeConverter, benefit);
+  patterns.add<AsyncBulkCommitGroupOpConversion>(typeConverter, benefit);
+  patterns.add<AsyncBulkWaitOpConversion>(typeConverter, benefit);
+  patterns.add<BroadcastOpConversion>(typeConverter, benefit);
+  patterns.add<ExtractSliceOpConversion>(typeConverter, moduleAllocation,
+                                         benefit);
   patterns.add<GetProgramIdOpConversion>(typeConverter, benefit);
-  // patterns.add<GetNumProgramsOpConversion>(typeConverter, benefit);
-  // patterns.add<GetThreadIdOpConversion>(typeConverter, benefit);
-  // patterns.add<GetCanonicalWarpIdConversion>(typeConverter, benefit);
-  // patterns.add<GetClusterCTAIdOpConversion>(typeConverter, benefit);
-  // patterns.add<MakeRangeOpConversion>(typeConverter, indexCacheInfo, benefit);
-  // patterns.add<ReturnOpConversion>(typeConverter, benefit);
-  // patterns.add<PrintOpConversion>(typeConverter, benefit);
-  // patterns.add<AssertOpConversion>(typeConverter, benefit);
+  patterns.add<GetNumProgramsOpConversion>(typeConverter, benefit);
+  patterns.add<GetThreadIdOpConversion>(typeConverter, benefit);
+  patterns.add<GetCanonicalWarpIdConversion>(typeConverter, benefit);
+  patterns.add<GetClusterCTAIdOpConversion>(typeConverter, benefit);
+  patterns.add<MakeRangeOpConversion>(typeConverter, indexCacheInfo, benefit);
+  patterns.add<ReturnOpConversion>(typeConverter, benefit);
+  patterns.add<PrintOpConversion>(typeConverter, benefit);
+  patterns.add<AssertOpConversion>(typeConverter, benefit);
 }
 
 } // namespace mlir::triton

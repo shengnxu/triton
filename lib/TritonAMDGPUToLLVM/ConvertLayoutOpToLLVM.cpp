@@ -1,6 +1,6 @@
 #include "ConvertLayoutOpToLLVM.h"
 #include "Utility.h"
-
+#include "TritonGPUToLLVMBase.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/Utility.h"
 
@@ -10,6 +10,7 @@ using ::mlir::LLVM::linearize;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::LLVM::getStridesFromShapeAndOrder;
+using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getContigPerThread;
 using ::mlir::triton::gpu::getOrder;
@@ -95,15 +96,15 @@ public:
         return lowerMmaToMma(op, adaptor, rewriter);
       }
     }
+    if (isaDistributedLayout(srcLayout) && isaDistributedLayout(dstLayout)) {
+      return lowerDistributedToDistributed(op, adaptor, rewriter);
+    }
 #ifdef USE_ROCM
     if (srcLayout.isa<MfmaEncodingAttr>() &&
         dstLayout.isa<DotOperandEncodingAttr>()) {
       return lowerMfmaToDotOperand(op, adaptor, rewriter);
     }
 #endif
-    if (isaDistributedLayout(srcLayout) && isaDistributedLayout(dstLayout)) {
-      return lowerDistributedToDistributed(op, adaptor, rewriter);
-    }
     if (srcLayout.isa<NvidiaMmaEncodingAttr>() &&
         dstLayout.isa<DotOperandEncodingAttr>()) {
       return lowerMmaToDotOperand(op, adaptor, rewriter);
@@ -247,24 +248,24 @@ private:
             threadId, loc, rewriter, mmaLayout.getWarpsPerCTA(), mmaLayout,
             shape, isARow, isBRow, isAVec4, isBVec4);
         return coords[elemId];
-#ifdef USE_ROCM
-      } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-        auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type, false);
-        SmallVector<SmallVector<unsigned>> offsets;
-        assert(rank == 2);
-        SmallVector<Value> multiDimOffset(rank);
-        emitMfmaOffsetForCTA(mfmaLayout, offsets, multiDimCTAInRepId[0],
-                            multiDimCTAInRepId[1]);
-        multiDimOffset[0] = add(multiDimBase[0], i32_val(offsets[elemId][0]));
-        multiDimOffset[1] = add(multiDimBase[1], i32_val(offsets[elemId][1]));
-        return multiDimOffset;
-#endif
-      }
-      else {
+      } else {
         llvm_unreachable("Unexpected MMALayout version");
       }
       return multiDimOffset;
     }
+#ifdef USE_ROCM
+    if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+      auto multiDimBase = emitBaseIndexForLayout(loc, rewriter, layout, type, false);
+      SmallVector<SmallVector<unsigned>> offsets;
+      assert(rank == 2);
+      SmallVector<Value> multiDimOffset(rank);
+      emitMfmaOffsetForCTA(mfmaLayout, offsets, multiDimCTAInRepId[0],
+                           multiDimCTAInRepId[1]);
+      multiDimOffset[0] = add(multiDimBase[0], i32_val(offsets[elemId][0]));
+      multiDimOffset[1] = add(multiDimBase[1], i32_val(offsets[elemId][1]));
+      return multiDimOffset;
+    }
+#endif
     llvm_unreachable("unexpected layout in getMultiDimOffset");
   }
 
@@ -699,7 +700,7 @@ private:
       if (dstLayout.isa<BlockedEncodingAttr>() ||
           dstLayout.isa<SliceEncodingAttr>() ||
 #ifdef USE_ROCM
-          srcLayout.isa<MfmaEncodingAttr>() ||
+          dstLayout.isa<MfmaEncodingAttr>() ||
 #endif
           dstLayout.isa<NvidiaMmaEncodingAttr>()) {
         if (isDstMmaV1)
@@ -917,8 +918,7 @@ private:
       res = lowerSharedToDotOperandMFMA(op, adaptor, rewriter, mfmaLayout,
                                         dotOperandLayout, isOuter);
 #endif
-    }
-    else if (auto blockedLayout =
+    } else if (auto blockedLayout =
                    dotOperandLayout.getParent()
                        .dyn_cast_or_null<BlockedEncodingAttr>()) {
       auto dotOpLayout =
@@ -979,7 +979,7 @@ private:
     }
     return failure();
   }
-  #endif
+#endif
 
   // mma -> dot_operand
   LogicalResult
@@ -1032,6 +1032,7 @@ private:
           vecVals.push_back(packed);
         }
       }
+
 #ifndef USE_ROCM
       // This needs to be ordered the same way that
       // ldmatrix.x4 would order it
@@ -1061,8 +1062,9 @@ private:
     return failure();
   }
 
+
 #ifdef USE_ROCM
-  // shared -> dot_operand if the result layout is mma
+  // shared -> dot_operand if the result layout is mfma
   Value lowerSharedToDotOperandMFMA(
       triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter, const MfmaEncodingAttr &mfmaLayout,
@@ -1070,13 +1072,11 @@ private:
     auto loc = op.getLoc();
     Value src = op.getSrc();
     Value dst = op.getResult();
-
     auto llvmElemTy = getTypeConverter()->convertType(
         src.getType().cast<RankedTensorType>().getElementType());
 
     auto smemObj =
-        getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(), llvmElemTy, 
-                                        rewriter);
+        getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(), llvmElemTy, rewriter);
     Value res;
 
     if (!isOuter) {

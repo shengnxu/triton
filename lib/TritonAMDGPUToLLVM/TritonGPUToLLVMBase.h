@@ -720,7 +720,10 @@ public:
         if (mmaLayout.isAmpere() || mmaLayout.isHopper())
           result = emitBaseIndexWithinCTAForMmaLayoutV2V3(loc, rewriter,
                                                           mmaLayout, type);
-      } else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
+      } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+        result = emitBaseIndexForMfmaLayout(loc, rewriter, mfmaLayout, type);
+      } 
+      else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
         auto parentLayout = sliceLayout.getParent();
         auto parentShape = sliceLayout.paddedShape(type.getShape());
         RankedTensorType parentTy = RankedTensorType::get(
@@ -758,6 +761,9 @@ public:
         return emitOffsetForMmaLayoutV2(mmaLayout, type);
       if (mmaLayout.isHopper())
         return emitOffsetForMmaLayoutV3(mmaLayout, type);
+    }
+    if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+      return emitOffsetForMfmaLayout(mfmaLayout, type);
     }
     if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>())
       return emitOffsetForSliceLayout(sliceLayout, type);
@@ -814,7 +820,11 @@ public:
       } else if (auto mma = layout.dyn_cast<NvidiaMmaEncodingAttr>()) {
         result =
             emitIndicesForDistributedLayout(loc, b, mma, type, withCTAOffset);
-      } else if (auto slice = layout.dyn_cast<SliceEncodingAttr>()) {
+      } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+        result =
+            emitIndicesForDistributedLayout(loc, b, mfmaLayout, type, withCTAOffset);
+      } 
+      else if (auto slice = layout.dyn_cast<SliceEncodingAttr>()) {
         result =
             emitIndicesForDistributedLayout(loc, b, slice, type, withCTAOffset);
       } else {
@@ -1159,6 +1169,71 @@ private:
       }
     }
     return ret;
+  }
+
+    SmallVector<Value>
+  emitBaseIndexForMfmaLayout(Location loc, ConversionPatternRewriter &rewriter,
+                             const MfmaEncodingAttr &mfmaLayout,
+                             RankedTensorType type) const {
+    auto shape = type.getShape();
+    auto _warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+    assert(_warpsPerCTA.size() == 2);
+    SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
+                                      i32_val(_warpsPerCTA[1])};
+    int nonKDim = mfmaLayout.getNonKDim();
+
+    Value threadId = getThreadId(rewriter, loc);
+    Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
+    Value effectiveWarpSize = warpSize;
+    if (nonKDim == 4) {
+      const int uniqueValuesPerWarp = 4;
+      effectiveWarpSize = i32_val(uniqueValuesPerWarp);
+    }
+    Value laneId = urem(threadId, effectiveWarpSize);
+
+    Value warpId = udiv(threadId, warpSize);
+    Value warpId0 =
+        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / nonKDim));
+    Value warpId1 = urem(urem(udiv(warpId, warpsPerCTA[0]), warpsPerCTA[1]),
+                         i32_val(shape[1] / nonKDim));
+
+    Value offWarp0 = mul(warpId0, i32_val(nonKDim));
+    Value offWarp1 = mul(warpId1, i32_val(nonKDim));
+
+    SmallVector<Value> multiDimBase(2);
+    if (mfmaLayout.getIsTransposed()) {
+      multiDimBase[1] =
+          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp1);
+      multiDimBase[0] = add(urem(laneId, i32_val(nonKDim)), offWarp0);
+    } else {
+      multiDimBase[0] =
+          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp0);
+      multiDimBase[1] = add(urem(laneId, i32_val(nonKDim)), offWarp1);
+    }
+    return multiDimBase;
+  }
+
+  SmallVector<SmallVector<unsigned>>
+  emitOffsetForMfmaLayout(const MfmaEncodingAttr &mfmaLayout,
+                          RankedTensorType type) const {
+    auto tensorShape = type.getShape();
+    SmallVector<SmallVector<unsigned>> offsets;
+    auto shapePerCTA = getShapePerCTA(mfmaLayout, tensorShape);
+    auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
+
+    SmallVector<unsigned> numWarpsPerDim(2);
+    for (unsigned d = 0; d < 2; ++d) {
+      unsigned inPerCTA = std::min<unsigned>(tensorShape[d], shapePerCTA[d]);
+      unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
+      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getNonKDim());
+    }
+
+    for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {
+      for (unsigned j = 0; j < numWarpsPerDim[1]; ++j) {
+        emitMfmaOffsetForCTA(mfmaLayout, offsets, i, j);
+      }
+    }
+    return offsets;
   }
 
   // Emit indices calculation within each ConversionPattern, and returns a

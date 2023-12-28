@@ -1,5 +1,6 @@
 #include "Utility.h"
 #include "TypeConverter.h"
+#include "TritonGPUToLLVMBase.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "triton/Dialect/NVGPU/IR/Dialect.h"
 namespace mlir {
@@ -240,6 +241,10 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
+#if USE_ROCM
+  store(val, ptr);
+  return val;
+#else
   MLIRContext *ctx = rewriter.getContext();
   unsigned bits = std::max(8u, val.getType().getIntOrFloatBitWidth());
   const char *c = bits == 64 ? "l" : (bits == 16 ? "h" : "r");
@@ -250,6 +255,7 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
   auto &st = builder.create<>("st")->shared().b(bits);
   st(ptrOpr, valOpr).predicate(pred, "b");
   return builder.launch(rewriter, loc, void_ty(ctx));
+#endif
 }
 
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
@@ -286,6 +292,73 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     vec = insert_element(vecTy, vec, val1, i32_val(1));
     return bitcast(vec, val.getType());
   }
+
+#ifdef USE_ROCM
+  //On AMD, the ds_swizzle_b32 and ds_permute_b32 instructions work on 32bit/dwords
+  //so we need promote to 32 here.
+  if (bits == 8) {
+    Value i32Val = sext(i32_ty, val);
+    Value result = commonShflSync(loc, rewriter, i32Val, i, mode, clamp);
+    return trunc(i8_ty, result);
+  }
+
+  int iCst = cast<LLVM::ConstantOp>(*i.getDefiningOp()).getValue().cast<mlir::IntegerAttr>().getValue().getZExtValue();
+
+  GCNBuilder builder;
+  if (mode == NVVM::ShflKind::bfly) {
+    if (iCst > 16) {
+      Value threadId =
+          rewriter
+              .create<UnrealizedConversionCastOp>(
+                  loc, TypeRange{i32_ty},
+                  ValueRange{rewriter.create<::mlir::gpu::ThreadIdOp>(
+                      loc, rewriter.getIndexType(), ::mlir::gpu::Dimension::x)})
+              .getResult(0);
+      Value stride = i32_val(32);
+      Value byteOffset = i32_val(2);
+      Value lineId = add(threadId, stride);
+      Value permuteAddr = shl(lineId, byteOffset);
+      auto shfl = builder.create("ds_permute_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto addrOpr = builder.newOperand(permuteAddr, "v");
+      auto aOpr = builder.newOperand(val, "v");
+      (*shfl)(dOpr, addrOpr, aOpr);
+    } else {
+      // This map facilates the butterfly shuffle pattern for a stride less
+      // than 16. The pattern stride is the key of the map.
+      DenseMap<short, unsigned int> masks{
+          {16, 0x401F}, {8, 0x201F}, {4, 0x101F}, {2, 0x081F}, {1, 0x041F}};
+      auto shfl = builder.create("ds_swizzle_b32");
+      auto dOpr = builder.newOperand("=v");
+      auto aOpr = builder.newOperand(val, "v");
+      auto maskOpr =
+          builder.newConstantOperand("offset:" + std::to_string(masks[iCst]));
+      (*shfl)(dOpr, aOpr, maskOpr);
+    }
+  } else { // shuffle_up
+    assert(mode == NVVM::ShflKind::up && "Only shfl_bfly and shfl_up are supported");
+    auto mod = val.getParentBlock()->getParentOp()->getParentOfType<mlir::ModuleOp>();
+    Value threadId = rewriter.create<::mlir::gpu::ThreadIdOp>(loc, ::mlir::gpu::Dimension::x);
+    unsigned iWarpSize = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
+    Value warpSize = i32_val(iWarpSize);
+    Value laneId = urem(threadId, warpSize);
+    Value mask = icmp_slt(laneId, i32_val(iCst));
+    Value delta = sub(laneId, i32_val(iCst));
+    Value index = select(mask, laneId, delta);
+    Value byteOffset = i32_val(2);
+    Value permuteAddr = shl(index, byteOffset);
+    auto shfl = builder.create("ds_bpermute_b32");
+    auto dOpr = builder.newOperand("=v");
+    auto addrOpr = builder.newOperand(permuteAddr, "v");
+    auto aOpr = builder.newOperand(val, "v");
+    (*shfl)(dOpr, addrOpr, aOpr);
+  }
+  auto swait = builder.create("s_waitcnt lgkmcnt(0)");
+  (*swait)();
+  return builder.launch(rewriter, loc, val.getType(), true);
+
+#else
+
   Type type = val.getType();
   if (type != i32_ty) {
     val = bitcast(val, int_ty(bits));
@@ -301,6 +374,8 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     result = bitcast(result, type);
   }
   return result;
+
+#endif
 }
 
 Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,

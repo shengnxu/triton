@@ -109,13 +109,17 @@ swizzleIndexes(ConversionPatternRewriter &rewriter, Location loc, Value row,
  * elemsPerInstr[1].
  *
  * Total offset of element is a sum of following values:
- * 1. Offset of wave block in tensor
- * 2. Offset of wave inside one wave block
+ * 1. Offset of wave-block in tensor
+ * 2. Offset of wave inside one wave-block
  * 3. Offset of tile in one wave
  * 4. Offset of one lane data in a tile
  * 5. Offset of particular element of tensor processed by one lane
  *
  * This function computes these offsets for axies independently
+ * Note that this function returns the offsets of elements in the first
+ * wave-block. The offsets of elements in later wave-blocks can be computed
+ * by adding a constant stride to the xor-ed offsets of elements in the
+ * first wave-block.
  *
  * @param rewriter
  * @param loc
@@ -311,8 +315,6 @@ std::optional<int> findConstValue(Value val) {
 bool fastPathAvailable(const SharedMemoryObject &smemObj,
                        const SharedEncodingAttr &srcEncoding,
                        const MfmaEncodingAttr &dstEncoding) {
-  if (dstEncoding.getNonKDim() != 32)
-    return false;
   if (srcEncoding.getMaxPhase() > 1)
     return false;
   auto stride0 = findConstValue(smemObj.strides[0]);
@@ -338,6 +340,8 @@ bool fastPathAvailable(const SharedMemoryObject &smemObj,
 // @param numOfElems number of elements accessed by thread per repetition
 // @param reps number of instructions repretition to fully cover dot operand
 // @param cSwizzleOffset
+// TODO (zhanglx): We should never call this function because we always have
+// swizzling enabled for k-major matrices.
 llvm::SmallVector<Value>
 fastPathComputeOffsetsTy1(ConversionPatternRewriter &rewriter, Location loc,
                           const ArrayRef<int64_t> &elemsPerInstr, Value waveId,
@@ -396,10 +400,9 @@ fastPathComputeOffsetsTy2(ConversionPatternRewriter &rewriter, Location loc,
   SmallVector<Value> offsets(numK * numN * numOfElems);
 
   int lineSize = warpsPerGroup * elemsPerInstr[1] * numN;
-  Value _0 = i32_val(0);
-  Value _32 = i32_val(32);
+  Value _nonKDim = i32_val(elemsPerInstr[1]);
   Value waveOffset = mul(waveId, i32_val(elemsPerInstr[1]));
-  Value colOffset = urem(laneId, _32);
+  Value colOffset = urem(laneId, _nonKDim);
 
   for (int block = 0; block < numN; ++block) {
     Value blockOffset = i32_val(block * elemsPerInstr[1] * warpsPerGroup);
@@ -407,7 +410,7 @@ fastPathComputeOffsetsTy2(ConversionPatternRewriter &rewriter, Location loc,
       Value tileOffset = i32_val(tile * elemsPerInstr[0] * lineSize);
       for (int elem = 0; elem < numOfElems; ++elem) {
         Value halfOffset =
-            select(icmp_uge(laneId, _32), i32_val(numOfElems * lineSize), _0);
+            mul(udiv(laneId, _nonKDim), i32_val(numOfElems * lineSize));
         Value rowOffset = add(i32_val(elem * lineSize), halfOffset);
         Value elemOffset = add(rowOffset, colOffset);
         Value offset =
@@ -419,7 +422,7 @@ fastPathComputeOffsetsTy2(ConversionPatternRewriter &rewriter, Location loc,
   return offsets;
 }
 
-bool isTransposed(::llvm::ArrayRef<unsigned> order) {
+bool isColMajor(::llvm::ArrayRef<unsigned> order) {
   assert(order.size() == 2 && (order[0] & ~1ul) == 0 &&
          order[0] + order[1] == 1);
   return order[0] == 0;
@@ -474,21 +477,29 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
   Value smemBase;
   bool isFastPath = fastPathAvailable(smemObj, sharedLayout, mfmaLayout);
   if (isFastPath) {
+    // fast path handles tensors that are not k-major, in which case swizzling
+    // is disabled and offsets computation can be simplified
+    // TODO (zhanglx): later when we enable vector access to LDS for non k-major
+    // tensors, we'll refactor the scope of fast and normal path
     Value cSwizzleOffset = smemObj.getCSwizzleOffset(order[0]);
     if (opIdx == 0) {
-      if (isTransposed(order)) { // HERE
+      if (isColMajor(order)) {
         SmallVector<int64_t> elemsPerInstr{mfmaInstrK, mfmaInstrNonK};
         SmallVector<int64_t> reps{numReps[1], numReps[0]};
         offsets = fastPathComputeOffsetsTy2(
             rewriter, loc, elemsPerInstr, spatialWaveId, lane,
             warpsPerGroupNonK, numOfElems, reps, cSwizzleOffset);
       } else {
+        llvm_unreachable(
+            "row major operand A should be handled in the normal path");
         offsets = fastPathComputeOffsetsTy1(
             rewriter, loc, elemsPerInstr, spatialWaveId, lane,
             warpsPerGroupNonK, numOfElems, numReps, cSwizzleOffset);
       }
     } else {
-      if (isTransposed(order)) {
+      if (isColMajor(order)) {
+        llvm_unreachable(
+            "col major operand B should be handled in the normal path");
         SmallVector<int64_t> elemsPerInstr{mfmaInstrNonK, mfmaInstrK};
         SmallVector<int64_t> reps{numReps[1], numReps[0]};
         offsets = fastPathComputeOffsetsTy1(
@@ -502,6 +513,8 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
     }
     smemBase = smemObj.getBaseBeforeSlice(order[0], loc, rewriter);
   } else { // normal path
+    // Normal path handles tensor that k-major, in which case swizzling
+    // is enabled and it requires a 2-step method to compute the offsets.
     if (opIdx == 0) {
       offsets = computeOffsetsAType(rewriter, loc, elemsPerInstr, spatialWaveId,
                                     lane, warpsPerGroupNonK, numOfElems,
@@ -535,6 +548,9 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
           loadOffset = offsets[nonK * loadsPerThread * numRepK +
                                k * loadsPerThread + loadId];
         else
+          // In the normal path, we only computed the offsets of elements
+          // in the first wave-block. Therefore, we update the offsets
+          // of elements in later wave-blocks by adding a constant stride
           loadOffset = add(offAdjust, offsets[k * loadsPerThread + loadId]);
         Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
                                     getShemPtrTy(loadVecTy));

@@ -116,13 +116,13 @@ public:
 } // namespace
 
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h.inc"
 
-class TritonGPUOptimizeEpiloguePass
-    : public TritonGPUOptimizeEpilogueBase<TritonGPUOptimizeEpiloguePass> {
+class TritonAMDGPUOptimizeEpiloguePass
+    : public TritonAMDGPUOptimizeEpilogueBase<TritonAMDGPUOptimizeEpiloguePass> {
 
 public:
-  TritonGPUOptimizeEpiloguePass() = default;
+  TritonAMDGPUOptimizeEpiloguePass() = default;
 
   void runOnOperation() override {
     MLIRContext *context = &getContext();
@@ -139,5 +139,5 @@ public:
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPUOptimizeEpiloguePass() {
-  return std::make_unique<TritonGPUOptimizeEpiloguePass>();
+  return std::make_unique<TritonAMDGPUOptimizeEpiloguePass>();
 }

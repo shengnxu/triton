@@ -22,11 +22,11 @@
 
 using namespace mlir;
 
-class TritonGPUDecomposeConversionsPass
+class TritonAMDGPUDecomposeConversionsPass
     : public TritonAMDGPUDecomposeConversionsBase<
-          TritonGPUDecomposeConversionsPass> {
+          TritonAMDGPUDecomposeConversionsPass> {
 public:
-  TritonGPUDecomposeConversionsPass() = default;
+  TritonAMDGPUDecomposeConversionsPass() = default;
 
   void runOnOperation() override {
     ModuleOp mod = getOperation();
@@ -77,5 +77,5 @@ public:
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPUDecomposeConversionsPass() {
-  return std::make_unique<TritonGPUDecomposeConversionsPass>();
+  return std::make_unique<TritonAMDGPUDecomposeConversionsPass>();
 }

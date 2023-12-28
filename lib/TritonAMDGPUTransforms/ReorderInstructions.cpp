@@ -36,11 +36,11 @@ willIncreaseRegisterPressure(triton::gpu::ConvertLayoutOp op) {
   return false;
 }
 
-class TritonGPUReorderInstructionsPass
+class TritonAMDGPUReorderInstructionsPass
     : public TritonAMDGPUReorderInstructionsBase<
-          TritonGPUReorderInstructionsPass> {
+          TritonAMDGPUReorderInstructionsPass> {
 public:
-  TritonGPUReorderInstructionsPass() = default;
+  TritonAMDGPUReorderInstructionsPass() = default;
 
   void runOnOperation() override {
     ModuleOp m = getOperation();
@@ -136,5 +136,5 @@ public:
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPUReorderInstructionsPass() {
-  return std::make_unique<TritonGPUReorderInstructionsPass>();
+  return std::make_unique<TritonAMDGPUReorderInstructionsPass>();
 }

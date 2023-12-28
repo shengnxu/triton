@@ -1000,13 +1000,13 @@ static void hoistConvert(ModuleOp module) {
 }
 
 #define GEN_PASS_CLASSES
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
+#include "TritonAMDGPUTransforms/Passes.h.inc"
 
-class TritonGPURemoveLayoutConversionsPass
-    : public TritonGPURemoveLayoutConversionsBase<
-          TritonGPURemoveLayoutConversionsPass> {
+class TritonAMDGPURemoveLayoutConversionsPass
+    : public TritonAMDGPURemoveLayoutConversionsBase<
+          TritonAMDGPURemoveLayoutConversionsPass> {
 public:
-  TritonGPURemoveLayoutConversionsPass() = default;
+  TritonAMDGPURemoveLayoutConversionsPass() = default;
 
   void runOnOperation() override {
     MLIRContext *context = &getContext();
@@ -1056,5 +1056,5 @@ public:
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPURemoveLayoutConversionsPass() {
-  return std::make_unique<TritonGPURemoveLayoutConversionsPass>();
+  return std::make_unique<TritonAMDGPURemoveLayoutConversionsPass>();
 }

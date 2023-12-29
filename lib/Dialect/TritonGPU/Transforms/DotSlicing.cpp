@@ -413,6 +413,319 @@ struct TritonAMDGPUDotSlicingPass
     return getLoadInst(dotOp, operandIdx);
   }
 
+  DotSlicingPass(int sliceKTile) { this->sliceKTile = sliceKTile; }
+
+  // Find user of the currOp that affects dotOperand calculation.
+  // We assume here that there is only one such user.
+  Operation *getUserThatAffectsDotOperand(Operation *currOp,
+                                          Operation *dotOperand) {
+    SetVector<Operation *> forwardSlices;
+    SmallVector<Operation *> usersThatAffectDot;
+    for (auto *user : currOp->getUsers()) {
+      forwardSlices.clear();
+      getForwardSlice(user, &forwardSlices);
+
+      if (user == dotOperand) {
+        usersThatAffectDot.push_back(user);
+        continue;
+      }
+      if (std::find(forwardSlices.begin(), forwardSlices.end(), dotOperand) !=
+          forwardSlices.end()) {
+        usersThatAffectDot.push_back(user);
+      }
+    }
+    assert(usersThatAffectDot.size() == 1);
+    return usersThatAffectDot[0];
+  }
+
+  Value getSlicedDotOperand(tt::LoadOp loadOp, tt::DotOp dotOp, int operandIdx,
+                            int loopIter, int sliceSizeK, OpBuilder builder,
+                            SmallVector<Operation *> &eraseOps) {
+    auto ptrTensor = loadOp->getOperand(0);
+    auto ptrTensorType = ptrTensor.getType().cast<RankedTensorType>();
+    auto dotOperand = dotOp.getOperand(operandIdx);
+    auto dotOperandTy = dotOp.getType().cast<RankedTensorType>();
+
+    SmallVector<int64_t> sliceSizes;
+    SmallVector<int64_t> sliceOffsets;
+    SmallVector<int64_t> sliceStrides{1, 1};
+    if (operandIdx == 0) {
+      sliceSizes.push_back(dotOperandTy.getShape()[0]);
+      sliceSizes.push_back(sliceSizeK);
+      sliceOffsets.push_back(0);
+      sliceOffsets.push_back(loopIter * sliceSizeK);
+    } else {
+      assert(operandIdx == 1);
+      sliceSizes.push_back(sliceSizeK);
+      sliceSizes.push_back(dotOperandTy.getShape()[1]);
+      sliceOffsets.push_back(loopIter * sliceSizeK);
+      sliceOffsets.push_back(0);
+    }
+
+    auto viewPtr = builder.create<ttg::ViewSliceOp>(
+        dotOp.getLoc(),
+        RankedTensorType::get(sliceSizes, ptrTensorType.getElementType(),
+                              ptrTensorType.getEncoding()),
+        ptrTensor, ValueRange({}), ValueRange({}), ValueRange({}), sliceOffsets,
+        sliceSizes, sliceStrides);
+
+    // Begin with the load instruction and proceed to slice the operations
+    // along the execution path of the dotOperand.
+    IRMapping mapping;
+    mapping.map(ptrTensor, viewPtr);
+
+    Operation *currOp = loadOp;
+    Operation *slicedOp = nullptr;
+    while (true) {
+      if (loopIter == 0) {
+        eraseOps.push_back(currOp);
+      }
+      slicedOp = builder.clone(*currOp, mapping);
+
+      // The 'load', 'convert_layout', and 'elementwise' operations each have
+      // one result. This limitation can be removed if necessary.
+      assert(currOp->getNumResults() == 1);
+      // Convert the operation's results to sliced types.
+      for (auto [currRes, slicedRes] :
+           llvm::zip(currOp->getResults(), slicedOp->getResults())) {
+        auto slicedType = RankedTensorType::get(
+            viewPtr.getType().cast<RankedTensorType>().getShape(),
+            currRes.getType().cast<RankedTensorType>().getElementType(),
+            currRes.getType().cast<RankedTensorType>().getEncoding());
+        slicedRes.setType(slicedType);
+      }
+
+      mapping.map(currOp, slicedOp);
+      if (currOp == dotOperand.getDefiningOp()) {
+        break;
+      }
+      assert(llvm::isa<tt::LoadOp>(currOp) ||
+             llvm::isa<ttg::ConvertLayoutOp>(currOp) ||
+             isElementwiseOp(currOp));
+
+      // If currOp has more then one user, proceed with the one that is "on a
+      // path" of dot operand calculation. We expect there is only one such
+      // user.
+      auto currOpUser =
+          getUserThatAffectsDotOperand(currOp, dotOperand.getDefiningOp());
+
+      // The currOpUser operation can have multiple operands, such as in any
+      // binary elementwise op. In such cases, we slice all of the operands
+      // using the same sliceOffsets, sliceSizes, and sliceStrides. This
+      // approach is valid only under the assumption that currOpUser is an
+      // elementwise operation. For non-elementwise operations with multiple
+      // operands, slicing should potentially be handled differently.
+      for (auto operandVal : currOpUser->getOperands()) {
+        auto nonSlicedOperand = operandVal.getDefiningOp();
+        if (nonSlicedOperand == currOp) {
+          continue;
+        }
+        auto nonSlicedOperandTy = nonSlicedOperand->getResults()[0]
+                                      .getType()
+                                      .cast<RankedTensorType>();
+
+        auto slicedTy = RankedTensorType::get(
+            sliceSizes, nonSlicedOperandTy.getElementType(),
+            nonSlicedOperandTy.getEncoding());
+
+        auto slicedOperand = builder.create<ttg::ViewSliceOp>(
+            nonSlicedOperand->getLoc(), slicedTy,
+            nonSlicedOperand->getResults()[0], ValueRange({}), ValueRange({}),
+            ValueRange({}), sliceOffsets, sliceSizes, sliceStrides);
+        mapping.map(nonSlicedOperand->getResults()[0], slicedOperand);
+      }
+
+      currOp = currOpUser;
+    }
+
+    assert(llvm::isa<ttg::ConvertLayoutOp>(slicedOp));
+    return slicedOp->getResults()[0];
+  }
+
+  static Type getNewType(Type type, Attribute encoding) {
+    RankedTensorType tensorType = type.cast<RankedTensorType>();
+    return RankedTensorType::get(tensorType.getShape(),
+                                 tensorType.getElementType(), encoding);
+  }
+
+  // Same as coalesceOp function in Coalesce.cpp.
+  void convertLayout(Attribute encoding, Operation *op) {
+    OpBuilder builder(op);
+    // Convert operands
+    // For load/store with tensor pointers, we don't have to change the
+    // operands' type, we do this by changing the outputs' type of
+    // `make_tensor_ptr`
+    SmallVector<Value, 4> newArgs;
+    for (auto operand : op->getOperands()) {
+      auto tensorType = operand.getType().dyn_cast<RankedTensorType>();
+      if (tensorType &&
+          !tensorType.getEncoding().isa<ttg::SharedEncodingAttr>()) {
+        Type newType = getNewType(tensorType, encoding);
+        newArgs.push_back(builder.create<ttg::ConvertLayoutOp>(
+            op->getLoc(), newType, operand));
+      } else {
+        newArgs.push_back(operand);
+      }
+    }
+
+    // Convert output types
+    SmallVector<Type, 4> newTypes;
+    for (auto t : op->getResultTypes()) {
+      bool isAsync = isa<ttg::InsertSliceAsyncOp>(op);
+      newTypes.push_back(isAsync ? t : getNewType(t, encoding));
+    }
+
+    // Construct new op with the new encoding
+    Operation *newOp =
+        builder.create(op->getLoc(), op->getName().getIdentifier(), newArgs,
+                       newTypes, op->getAttrs());
+
+    // Cast the results back to the original layout
+    for (size_t i = 0; i < op->getNumResults(); i++) {
+      Value newResult = newOp->getResult(i);
+      if (newTypes[i] != op->getResultTypes()[i]) {
+        newResult = builder.create<ttg::ConvertLayoutOp>(
+            op->getLoc(), op->getResult(i).getType(), newResult);
+      }
+      op->getResult(i).replaceAllUsesWith(newResult);
+    }
+    op->erase();
+  }
+
+  void setLayoutForSlicing(tt::LoadOp loadOp, int operandIdx) {
+    auto loadTy = loadOp.getType().cast<RankedTensorType>();
+
+    auto blockedEncoding =
+        loadTy.getEncoding().dyn_cast<ttg::BlockedEncodingAttr>();
+    assert(blockedEncoding);
+
+    auto srcShape = loadTy.getShape();
+    auto shapePerCTA = getShapePerCTATile(blockedEncoding, srcShape);
+    auto sizePerThread = blockedEncoding.getSizePerThread();
+    auto threadsPerWarp = blockedEncoding.getThreadsPerWarp();
+    auto warpsPerCTA = blockedEncoding.getWarpsPerCTA();
+    ModuleOp mod = getOperation();
+
+    // clang-format off
+    //
+    // Current layout can be used for slicing as is.
+    // Example: sliceKTile = 32, slicing along dim 1 (A operand)
+    // Layout: #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [16, 4], warpsPerCTA = [4, 1], order = [1, 0]>
+    //
+    // clang-format on
+    if (this->sliceKTile % shapePerCTA[1 - operandIdx] == 0) {
+      return;
+      // clang-format off
+      //
+      // Current layout can be used for slicing only by setting warpsPerCTA to 1
+      // along slicing dim.
+      // Example: sliceKTile = 32, slicing along y dim (A operand)
+      // Layout: #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [16, 4], warpsPerCTA = [2, 2], order = [1, 0]>
+      // NewLayout: #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [16, 4], warpsPerCTA = [4, 1], order = [1, 0]>
+      //
+      // clang-format on
+    } else if (this->sliceKTile % (shapePerCTA[1 - operandIdx] /
+                                   warpsPerCTA[1 - operandIdx]) ==
+               0) {
+      SmallVector<unsigned> newWarpsPerCTA(2, warpsPerCTA[0] * warpsPerCTA[1]);
+      newWarpsPerCTA[1 - operandIdx] = 1;
+      auto newBlockedEncoding = ttg::BlockedEncodingAttr::get(
+          mod.getContext(), sizePerThread, threadsPerWarp, newWarpsPerCTA,
+          blockedEncoding.getOrder(), blockedEncoding.getCTALayout());
+      convertLayout(newBlockedEncoding, loadOp);
+      // clang-format off
+      //
+      // Current layout can be used for slicing by setting warpsPerCTA to 1
+      // along slicing dim and changing ThreadsPerWarp parameter.
+      // Example: sliceKTile = 32, slicing along y dim (A operand)
+      // Layout: #blocked = #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [32, 2], warpsPerCTA = [2, 2], order = [1, 0]>
+      // NewLayout: #triton_gpu.blocked<{sizePerThread = [1, 8], threadsPerWarp = [16, 4], warpsPerCTA = [4, 1], order = [1, 0]>
+      //
+      // clang-format on
+    } else if (this->sliceKTile % sizePerThread[operandIdx] == 0) {
+      SmallVector<unsigned> newWarpsPerCTA(2, warpsPerCTA[0] * warpsPerCTA[1]);
+      newWarpsPerCTA[1 - operandIdx] = 1;
+      SmallVector<unsigned> newThreadsPerWarp(2, 1);
+      newThreadsPerWarp[operandIdx] =
+          (threadsPerWarp[0] * threadsPerWarp[1]) /
+          (this->sliceKTile / sizePerThread[1 - operandIdx]);
+      newThreadsPerWarp[1 - operandIdx] =
+          this->sliceKTile / sizePerThread[1 - operandIdx];
+
+      auto newBlockedEncoding = ttg::BlockedEncodingAttr::get(
+          mod.getContext(), sizePerThread, newThreadsPerWarp, newWarpsPerCTA,
+          blockedEncoding.getOrder(), blockedEncoding.getCTALayout());
+      convertLayout(newBlockedEncoding, loadOp);
+      // In other cases, the sizePerThread parameter would need to be changed,
+      // which can affect coalescing and thus potentially decrease performance.
+    } else {
+      assert(false && "Unexpected layout in DotSlicing pass.");
+    }
+  }
+
+  tt::LoadOp getLoadInst(tt::DotOp dotOp, int operandIdx) {
+    auto dotOperand = dotOp.getOperand(operandIdx);
+    SmallVector<tt::LoadOp> loadOpsVec;
+
+    getOperation()->walk([&](tt::LoadOp loadOp) {
+      SetVector<Operation *> forwardSlices;
+      getForwardSlice((Operation *)loadOp, &forwardSlices);
+      if (std::find(forwardSlices.begin(), forwardSlices.end(),
+                    dotOperand.getDefiningOp()) != forwardSlices.end()) {
+        loadOpsVec.push_back(loadOp);
+      }
+    });
+
+    // Currently, we expect the dot operand to depend only on one tensor
+    // from global memory (applicable for dot ops that don't depend on other dot
+    // ops). This condition can be lifted if necessary.
+    assert(loadOpsVec.size() == 1);
+    return loadOpsVec[0];
+  }
+
+  bool shouldSliceDot(tt::DotOp dotOp) {
+    auto dotOperand = dotOp.getOperand(0);
+    auto dotATy = dotOperand.getType().cast<RankedTensorType>();
+    auto kDim = dotATy.getShape()[1];
+
+    if (this->sliceKTile == 0 || this->sliceKTile == kDim) {
+      return false;
+    }
+
+    // Don't slice dot ops that depend on other dot ops.
+    // These will be handled as a special case.
+    // TODO: Enable support for these dots.
+    SetVector<Operation *> bwdSlices;
+    SmallVector<Operation *> filteredSlices;
+    // Seems like getBackwardSlice(dotOp, bwdSlices, filter) doesn't work
+    // properly. Do it manually.
+    getBackwardSlice((Operation *)dotOp, &bwdSlices);
+    std::copy_if(bwdSlices.begin(), bwdSlices.end(),
+                 std::back_inserter(filteredSlices),
+                 [](Operation *op) { return isa<tt::DotOp>(op); });
+
+    if (filteredSlices.empty()) {
+      return true;
+    }
+    return false;
+  }
+
+  void dotSlicingDCE(ArrayRef<Operation *> eraseOps) {
+    for (Operation *opToErase : llvm::reverse(eraseOps)) {
+      assert(opToErase);
+      bool hasUses = false;
+      for (auto result : opToErase->getResults()) {
+        if (!result.use_empty()) {
+          hasUses = true;
+        }
+      }
+      if (hasUses) {
+        continue;
+      }
+      opToErase->erase();
+    }
+  }
+
   void runOnOperation() override {
     getOperation()->walk([&](tt::DotOp dotOp) {
       if (!shouldSliceDot(dotOp)) {
@@ -457,6 +770,9 @@ struct TritonAMDGPUDotSlicingPass
       dotSlicingDCE(eraseOps);
     });
   }
+
+private:
+  int sliceKTile;
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPUDotSlicingPass(int sliceKTile) {

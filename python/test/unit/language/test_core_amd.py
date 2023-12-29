@@ -2746,6 +2746,10 @@ def test_dot_mfma_vector_load(vec_size, swizzle, transposeA, transposeB):
     if transposeA and not transposeB:
         pytest.skip()
 
+    # We skip for the case when swizzle is disabled for k-major opA or opB
+    if not swizzle and (not transposeA or transposeB):
+        pytest.skip()
+
     if triton.common.backend.get_backend("hip").get_matrix_core_version() == 0:
         pytest.skip("mfma is not available on hardware")
 

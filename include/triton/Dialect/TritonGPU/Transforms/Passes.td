@@ -50,16 +50,16 @@ def TritonGPUStreamPipeline : Pass<"tritongpu-stream-pipeline", "mlir::ModuleOp"
 }
 
 def TritonGPUDotSlicing: Pass<"tritongpu-dot-slicing", "mlir::ModuleOp"> {
-  let summary = "dot slicing";
+  let summary = "'DotOp' instruction slicing";
 
   let description = [{
-    TBD
+    Slice 'DotOp' instruction into multiple smaller 'DotOp' instructions
+    in order to improve scheduling and latency hiding.
   }];
 
   let constructor = "mlir::createTritonGPUDotSlicingPass()";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
-                           "mlir::scf::SCFDialect",
                            "mlir::arith::ArithDialect"];
 }
 

@@ -499,7 +499,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
           Value loadOffset =
               offsets[m * loadsPerThread * numRepK + k * loadsPerThread + loadId];
-          Value loadAddress = gep(smemPtrTy, loadVecTy, smemBase, loadOffset);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
           Value vectorValue = load(loadVecTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
@@ -541,7 +541,7 @@ Value loadA(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(aElemTy, elemsPerLoad);
           Value loadOffset = offsets[m * loadsPerThread * numRepK +
                                      k * loadsPerThread + loadId];
-          Value loadAddress = gep(smemPtrTy, loadVecTy, smemBase, loadOffset);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
           Value vectorValue = load(loadVecTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
@@ -648,7 +648,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(bElemTy, elemsPerLoad);
           Value loadOffset =
               offsets[n * loadsPerThread * numRepK + k * loadsPerThread + loadId];
-          Value loadAddress = gep(smemPtrTy, loadVecTy, smemBase, loadOffset);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
           Value vectorValue = load(loadVecTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
@@ -688,7 +688,7 @@ Value loadB(ConversionPatternRewriter &rewriter, Location loc, Value thread,
           auto loadVecTy = vec_ty(bElemTy, elemsPerLoad);
           Value loadOffset = offsets[n * loadsPerThread * numRepK +
                                      k * loadsPerThread + loadId];
-          Value loadAddress = gep(smemPtrTy, loadVecTy, smemBase, loadOffset);
+          Value loadAddress = gep(smemPtrTy, smemElemTy, smemBase, loadOffset);
           Value vectorValue = load(loadVecTy, loadAddress);
           if (numOfElems > 1) {
             for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {

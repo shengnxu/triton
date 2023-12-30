@@ -336,6 +336,7 @@ static Value commonShflSync(Location loc, ConversionPatternRewriter &rewriter,
     return rewriter.create<ROCDL::DsBpermuteOp>(loc, valType, permuteAddr, val);
   };
 
+
   switch (mode) {
   case NVVM::ShflKind::bfly:
     if (strideInt > 16) {

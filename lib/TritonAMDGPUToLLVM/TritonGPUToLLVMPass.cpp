@@ -728,6 +728,7 @@ private:
           srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
       auto dstDotOp =
           dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+      // llvm::outs() << isMfmaToDotShortcut(srcType, dstType) << "\n";
       if (srcMfma && dstDotOp && !isMfmaToDotShortcut(srcType, dstType)) {
         auto tmpType = RankedTensorType::get(
             dstType.getShape(), dstType.getElementType(),

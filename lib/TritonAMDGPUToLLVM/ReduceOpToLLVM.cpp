@@ -300,7 +300,6 @@ private:
         shuffleIdx = warpSize / N / 2;
       }
 #endif
-      llvm::outs() << inMfma << " " << (inMfma && inMfma.getIsTransposed()) << " " << N << " " << interleave << "\n";
       for (unsigned i = 0; i < acc.size(); ++i) {
         shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx * interleave);
       }

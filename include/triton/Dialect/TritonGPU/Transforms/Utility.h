@@ -176,7 +176,7 @@ struct MfmaInsnAttr {
   unsigned k;
   // k_base refers to the number of elements per thread
   unsigned k_base;
-  llvm::SmallString<16> insn;
+  llvm::StringRef insn;
 };
 
 template <typename T>
@@ -209,21 +209,18 @@ struct MfmaInsnGroupSelectKeyInfo
 
 class MfmaInsn {
 private:
-  mlir::Type elementTypeA;
-  mlir::Type elementTypeB;
+  Type elementTypeA;
+  Type elementTypeB;
   MfmaInsnAttr attr;
 
 public:
-  static mlir::FailureOr<MfmaInsn> selectMfma(unsigned nonKDim,
-                                              mlir::Type elementTypeA,
-                                              mlir::Type elementTypeB,
-                                              int mfmaVersion);
-  MfmaInsn(mlir::Type elementTypeA, mlir::Type elementTypeB,
-           const MfmaInsnAttr &attr);
+  static FailureOr<MfmaInsn> selectMfma(unsigned nonKDim, Type elementTypeA,
+                                        Type elementTypeB, int mfmaVersion);
+  MfmaInsn(Type elementTypeA, Type elementTypeB, const MfmaInsnAttr &attr);
   unsigned getKDim();
   unsigned getMDim();
   unsigned getNDim();
-  llvm::SmallString<16> getInsnName();
+  StringRef getInsnName();
 };
 } // namespace mlir
 

@@ -849,6 +849,7 @@ struct ExtractSliceOpConversion
   }
 };
 
+// clang-format off
 /***
    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
    # WO   #  W1 #                                     |                                #
@@ -884,6 +885,7 @@ struct ExtractSliceOpConversion
    #                                                                                   #
    # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 ***/
+// clang-format on
 struct ViewSliceOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::gpu::ViewSliceOp> {
   using OpAdaptor = typename triton::gpu::ViewSliceOp::Adaptor;

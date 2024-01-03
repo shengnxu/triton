@@ -726,11 +726,11 @@ bool sameBlockedEncodings(BlockedEncodingAttr blockedA,
 }
 
 bool sameMfmaEncodings(MfmaEncodingAttr mfmaA, MfmaEncodingAttr mfmaB) {
-  auto nonKDimA = mfmaA.getNonKDim();
+  auto nonKDimA = mfmaA.getInstrShape()[0];
   auto warpsPerCTAA = mfmaA.getWarpsPerCTA();
   auto isTransposedA = mfmaA.getIsTransposed();
 
-  auto nonKDimB = mfmaB.getNonKDim();
+  auto nonKDimB = mfmaB.getInstrShape()[0];
   auto warpsPerCTAB = mfmaB.getWarpsPerCTA();
   auto isTransposedB = mfmaB.getIsTransposed();
 

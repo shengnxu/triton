@@ -2948,8 +2948,8 @@ view_layouts = [
     BlockedLayout([2, 2], [16, 4], [2, 2], [0, 1], [1, 1], [1, 1], [0, 1]),
     BlockedLayout([1, 8], [16, 4], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
     BlockedLayout([1, 8], [16, 4], [4, 1], [0, 1], [1, 1], [1, 1], [0, 1]),
-    MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=True),
-    MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=False),
+    MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=True),
+    MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=False),
 ]
 blocked_layouts = [
     BlockedLayout([1, 8], [16, 4], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),

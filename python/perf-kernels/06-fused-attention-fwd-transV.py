@@ -19,6 +19,16 @@ import triton
 import triton.language as tl
 
 
+torch_dtype:tl.constexpr = torch.float16
+TORCH_HAS_FP8 = False
+TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2')
+TORCH_HAS_FP8E5FNUZ = hasattr(torch, 'float8_e5m2fnuz')
+if TORCH_HAS_FP8E5:
+    torch_dtype:tl.constexpr = torch.float8_e5m2
+    TORCH_HAS_FP8 = True
+if TORCH_HAS_FP8E5FNUZ:
+    torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+    TORCH_HAS_FP8 = True
 @triton.jit
 def max_fn(x, y):
     return tl.math.max(x, y)
@@ -80,7 +90,7 @@ def _attn_fwd(
     # it's even better to multiply the qk_scale and convert to f16
     # than doing it inside the loop
     # So conversion is quite cheap
-    q = (q * qk_scale).to(tl.float16)
+    q = (q * qk_scale).to(q.dtype)
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
@@ -211,6 +221,9 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
+    if TORCH_HAS_FP8:
+        q = q.to(torch_dtype)
+        k = k.to(torch_dtype)
     sm_scale = 0.5
     dout = torch.randn_like(q)
     # reference implementation
@@ -277,6 +290,9 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=dtype, device="cuda", requires_grad=True)
+        if TORCH_HAS_FP8:
+            q = q.to(torch_dtype)
+            k = k.to(torch_dtype)
         sm_scale = 1.3
         fn = lambda: attention(q, k, v, sm_scale)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)

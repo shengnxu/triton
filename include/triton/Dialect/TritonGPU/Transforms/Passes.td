@@ -61,6 +61,12 @@ def TritonGPUDotSlicing: Pass<"tritongpu-dot-slicing", "mlir::ModuleOp"> {
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::arith::ArithDialect"];
+
+  let options = [
+    Option<"sliceKTile", "slice-k-tile",
+    "int32_t", /*default*/"0",
+    "slice size in k dimension">
+  ];
 }
 
 def TritonGPUPrefetch : Pass<"tritongpu-prefetch", "mlir::ModuleOp"> {

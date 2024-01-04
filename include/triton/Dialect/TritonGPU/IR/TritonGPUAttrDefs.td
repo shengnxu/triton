@@ -156,7 +156,8 @@ compared to 1*64 when the hasLeadingOffset is false.
             //
             // maxPhase is set to SIMDWidth / perPhase
             int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
-            vecSize = 8;
+            if (typeWidthInBit == 8)
+               vecSize = 8;
             int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);
 
             return get(context, vecSize, perPhase, maxPhase, order, CTALayout);

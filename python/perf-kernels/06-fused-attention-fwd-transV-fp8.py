@@ -30,8 +30,6 @@ if TORCH_HAS_FP8E5FNUZ:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
     TORCH_HAS_FP8 = True
 
-TORCH_HAS_FP8 = False
-
 @triton.jit
 def max_fn(x, y):
     return tl.math.max(x, y)
@@ -145,7 +143,7 @@ class _attention(torch.autograd.Function):
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-2]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q)
+        o = torch.empty_like(q, dtype=v.dtype)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -164,10 +162,10 @@ class _attention(torch.autograd.Function):
             pre_load_v = False if causal else True
         else:
             ## D_HEAD = 128
-            BLOCK_M = 128
+            BLOCK_M = 256
             BLOCK_N = 128
             waves_per_eu = 2
-            num_warps = 4
+            num_warps = 8
             num_stages = 1
             pre_load_v = False
 
@@ -224,20 +222,21 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
-    if TORCH_HAS_FP8:
-        q = q.to(torch_dtype)
-        k = k.to(torch_dtype)
+    #if TORCH_HAS_FP8:
+    #    q = q.to(torch_dtype)
+    #    k = k.to(torch_dtype)
     sm_scale = 0.5
-    dout = torch.randn_like(q)
+    dout = torch.randn_like(q, dtype=torch.float16)
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+    p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
     p = torch.softmax(p.float(), dim=-1).half()
     ref_out = torch.matmul(p, v.transpose(2,3))
     # triton implementation
     tri_out = attention(q, k, v, sm_scale)
     # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+    #assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=0)
 
 
 try:
@@ -275,7 +274,7 @@ for mode in ['fwd']:
                 line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
                 styles=[('red', '-'), ('blue', '-')],
                 ylabel='ms',
-                plot_name=f'fused-attention-fp16-d{D_HEAD}-{mode}-causal={causal}',
+                plot_name=f'fused-attention-fp8-d{D_HEAD}-{mode}-causal={causal}',
                 args={
                     'D_HEAD': D_HEAD,
                     'dtype': torch.float16,

@@ -155,8 +155,12 @@ class _softmax(torch.autograd.Function):
             scale = scale.item()
         M = a.shape[0]
         grid = [spdims[0], spdims[1] * block, M]
+        print('grid = ', grid)
         rel_shape = (1, 1, 1, 1) if rel_logits is None else rel_logits.shape
         rel_strides = (1, 1, 1, 1) if rel_logits is None else rel_logits.stride()
+        print('rel_logit.shape = ', rel_logits.shape)
+        print('lut.shape = ', lut.shape)
+        print('maxLut = ', maxlut)
         # enqueue kernel
         out = torch.empty_like(a)
         _blocksparse_softmax_fwd[grid](

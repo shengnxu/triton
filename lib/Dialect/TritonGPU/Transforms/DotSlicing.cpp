@@ -438,10 +438,11 @@ struct TritonAMDGPUDotSlicingPass
     return usersThatAffectDot[0];
   }
 
-  Value getSlicedDotOperand(tt::LoadOp loadOp, tt::DotOp dotOp, int operandIdx,
-                            int loopIter, int sliceSizeK, OpBuilder builder,
+  Value getSlicedDotOperand(Operation *firstOpToSlice, tt::DotOp dotOp,
+                            int operandIdx, int loopIter, int sliceSizeK,
+                            OpBuilder builder,
                             SmallVector<Operation *> &eraseOps) {
-    auto ptrTensor = loadOp->getOperand(0);
+    auto ptrTensor = firstOpToSlice->getOperand(0);
     auto ptrTensorType = ptrTensor.getType().cast<RankedTensorType>();
     auto dotOperand = dotOp.getOperand(operandIdx);
     auto dotOperandTy = dotOp.getType().cast<RankedTensorType>();
@@ -474,7 +475,7 @@ struct TritonAMDGPUDotSlicingPass
     IRMapping mapping;
     mapping.map(ptrTensor, viewPtr);
 
-    Operation *currOp = loadOp;
+    Operation *currOp = firstOpToSlice;
     Operation *slicedOp = nullptr;
     while (true) {
       if (loopIter == 0) {
@@ -592,15 +593,11 @@ struct TritonAMDGPUDotSlicingPass
     op->erase();
   }
 
-  void setLayoutForSlicing(tt::LoadOp loadOp, int operandIdx) {
-    auto loadTy = loadOp.getType().cast<RankedTensorType>();
-
-    auto blockedEncoding =
-        loadTy.getEncoding().dyn_cast<ttg::BlockedEncodingAttr>();
-    assert(blockedEncoding);
-
-    auto srcShape = loadTy.getShape();
-    auto shapePerCTA = getShapePerCTATile(blockedEncoding, srcShape);
+  // Return true if layout was changed, else return false.
+  bool setBlockedLayout(Operation *firstOpToSlice, ArrayRef<long> shape,
+                        ttg::BlockedEncodingAttr blockedEncoding,
+                        int operandIdx) {
+    auto shapePerCTA = ttg::getShapePerCTATile(blockedEncoding, shape);
     auto sizePerThread = blockedEncoding.getSizePerThread();
     auto threadsPerWarp = blockedEncoding.getThreadsPerWarp();
     auto warpsPerCTA = blockedEncoding.getWarpsPerCTA();
@@ -614,7 +611,7 @@ struct TritonAMDGPUDotSlicingPass
     //
     // clang-format on
     if (this->sliceKTile % shapePerCTA[1 - operandIdx] == 0) {
-      return;
+      return false;
       // clang-format off
       //
       // Current layout can be used for slicing only by setting warpsPerCTA to 1
@@ -632,7 +629,7 @@ struct TritonAMDGPUDotSlicingPass
       auto newBlockedEncoding = ttg::BlockedEncodingAttr::get(
           mod.getContext(), sizePerThread, threadsPerWarp, newWarpsPerCTA,
           blockedEncoding.getOrder(), blockedEncoding.getCTALayout());
-      convertLayout(newBlockedEncoding, loadOp);
+      convertLayout(newBlockedEncoding, firstOpToSlice);
       // clang-format off
       //
       // Current layout can be used for slicing by setting warpsPerCTA to 1
@@ -655,12 +652,34 @@ struct TritonAMDGPUDotSlicingPass
       auto newBlockedEncoding = ttg::BlockedEncodingAttr::get(
           mod.getContext(), sizePerThread, newThreadsPerWarp, newWarpsPerCTA,
           blockedEncoding.getOrder(), blockedEncoding.getCTALayout());
-      convertLayout(newBlockedEncoding, loadOp);
+      convertLayout(newBlockedEncoding, firstOpToSlice);
       // In other cases, the sizePerThread parameter would need to be changed,
       // which can affect coalescing and thus potentially decrease performance.
     } else {
       assert(false && "Unexpected layout in DotSlicing pass.");
     }
+    return true;
+  }
+
+  // Return true if layout was changed, else return false.
+  bool setLayoutForSlicing(Operation *firstOpToSlice, int operandIdx) {
+    auto firstOpToSliceTy =
+        firstOpToSlice->getOperand(0).getType().cast<RankedTensorType>();
+    auto srcShape = firstOpToSliceTy.getShape();
+    auto encoding = firstOpToSliceTy.getEncoding();
+
+    if (auto blockedEncoding = dyn_cast<ttg::BlockedEncodingAttr>(encoding)) {
+      return setBlockedLayout(firstOpToSlice, srcShape, blockedEncoding,
+                              operandIdx);
+    } else if (auto mfmaEncoding = dyn_cast<ttg::MfmaEncodingAttr>(encoding)) {
+      auto shapePerCTA = ttg::getShapePerCTATile(mfmaEncoding, srcShape);
+      // TODO: Implement changing of mfma layout in case it is not suitable for
+      // slicing (similar as in setBlockedLayout).
+      assert(this->sliceKTile % shapePerCTA[1] == 0);
+    } else {
+      assert(false && "Unsupported layout in setLayoutForSlicing.");
+    }
+    return false;
   }
 
   tt::LoadOp getLoadInst(tt::DotOp dotOp, int operandIdx) {
@@ -683,6 +702,23 @@ struct TritonAMDGPUDotSlicingPass
     return loadOpsVec[0];
   }
 
+  bool dependsOnPreviousDot(tt::DotOp dotOp, int operandIdx) {
+    SetVector<Operation *> bwdSlices;
+    SmallVector<Operation *> filteredSlices;
+    Operation *operand = dotOp.getOperand(operandIdx).getDefiningOp();
+    // Seems like getBackwardSlice(dotOp, bwdSlices, filter) doesn't work
+    // properly. Do it manually.
+    getBackwardSlice(operand, &bwdSlices);
+    std::copy_if(bwdSlices.begin(), bwdSlices.end(),
+                 std::back_inserter(filteredSlices),
+                 [](Operation *op) { return isa<tt::DotOp>(op); });
+
+    if (filteredSlices.empty()) {
+      return false;
+    }
+    return true;
+  }
+
   bool shouldSliceDot(tt::DotOp dotOp) {
     auto dotOperand = dotOp.getOperand(0);
     auto dotATy = dotOperand.getType().cast<RankedTensorType>();
@@ -691,23 +727,7 @@ struct TritonAMDGPUDotSlicingPass
     if (this->sliceKTile == 0 || this->sliceKTile == kDim) {
       return false;
     }
-
-    // Don't slice dot ops that depend on other dot ops.
-    // These will be handled as a special case.
-    // TODO: Enable support for these dots.
-    SetVector<Operation *> bwdSlices;
-    SmallVector<Operation *> filteredSlices;
-    // Seems like getBackwardSlice(dotOp, bwdSlices, filter) doesn't work
-    // properly. Do it manually.
-    getBackwardSlice((Operation *)dotOp, &bwdSlices);
-    std::copy_if(bwdSlices.begin(), bwdSlices.end(),
-                 std::back_inserter(filteredSlices),
-                 [](Operation *op) { return isa<tt::DotOp>(op); });
-
-    if (filteredSlices.empty()) {
-      return true;
-    }
-    return false;
+    return true;
   }
 
   void dotSlicingDCE(ArrayRef<Operation *> eraseOps) {
@@ -724,6 +744,13 @@ struct TritonAMDGPUDotSlicingPass
       }
       opToErase->erase();
     }
+  }
+
+  Operation *getFirstOpToSlice(tt::DotOp dotOp, int operandIdx) {
+    if (dependsOnPreviousDot(dotOp, operandIdx)) {
+      return dotOp.getOperand(operandIdx).getDefiningOp();
+    }
+    return getLoadInst(dotOp, operandIdx);
   }
 
   void runOnOperation() override {

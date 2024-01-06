@@ -1,8 +1,3 @@
-add_library(rocm_libraries SHARED IMPORTED )
-set(LLVM_OPTIONAL_SOURCES
-    GCNAsmFormat.cpp
-  )
-
 add_mlir_conversion_library(TritonAMDGPUToLLVM
     ConvertLayoutOpToLLVM/SharedToDotOperandFMA.cpp
     ConvertLayoutOpToLLVM/SharedToDotOperandMFMA.cpp
@@ -32,11 +27,4 @@ add_mlir_conversion_library(TritonAMDGPUToLLVM
 
     DEPENDS
     TritonAMDGPUConversionPassIncGen
-)
-
-add_mlir_library(ASMBuilder_AMD
-  GCNAsmFormat.cpp
-
-  DEPENDS
-  TritonTableGen
 )

@@ -1,6 +1,6 @@
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
+add_compile_definitions(USE_ROCM=1)
 add_subdirectory(include)
 add_subdirectory(lib)
-add_library(TritonAMD OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/python/amd.cc)
-target_link_libraries(TritonAMD TritonAMDGPUToLLVM TritonAMDGPUTransforms)
+add_library(triton_amd SHARED ${CMAKE_CURRENT_SOURCE_DIR}/python/triton_amd.cc)

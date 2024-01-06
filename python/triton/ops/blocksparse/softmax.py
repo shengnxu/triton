@@ -19,19 +19,22 @@ def num_warps(n):
 
 @jit
 def _blocksparse_softmax_fwd(Out, A, stride_xz, LUT,  #
-                             R, extent, stride_zr, stride_hr,  # relative attention
+                             R, extent: tl.constexpr, stride_zr, stride_hr,  # relative attention
                              scale, is_causal,  #
                              ROW_SIZE: tl.constexpr,  #
                              BLOCK_SIZE: tl.constexpr,  #
                              IS_DENSE: tl.constexpr  #
                              ):
+    # extent = R.shape[-1] = K = 384
     h = tl.program_id(0)
     m = tl.program_id(1)
     z = tl.program_id(2)
     # create index ranges
     hm = h * tl.num_programs(1) + m
+
     lane_n = tl.arange(0, ROW_SIZE) % BLOCK_SIZE
     block_n = tl.arange(0, ROW_SIZE) // BLOCK_SIZE
+
     # extract information from LUT
     header = LUT + (hm // BLOCK_SIZE) * 2
     size = tl.load(header + 0)
@@ -49,24 +52,28 @@ def _blocksparse_softmax_fwd(Out, A, stride_xz, LUT,  #
         ns = start_n * BLOCK_SIZE + lane_n
     # load X
     mask = block_n < size
-    a = tl.load(A + off_a + lane_n, mask=mask, other=-float("inf"))
+    #a = tl.load(A + off_a + lane_n, mask=mask, other=-float("inf"))
+    a = tl.load(A + off_a + lane_n)
     a = a.to(tl.float32)
     # compute
     out = a
     out *= scale
     # apply relative attention
-    if R is not None:
-        R += z * stride_zr
-        R += h * stride_hr
-        off_lo = (extent - m - 1) + ns
-        mask_lo = (off_lo >= 0) & (off_lo < extent)
-        rel_logits = tl.load(R + m * extent + off_lo, mask=mask_lo, other=0.0)
-        out += rel_logits
+    #if R is not None:
+    R += z * stride_zr
+    R += h * stride_hr
+    #off_lo = (extent - m - 1) + ns
+    #off_lo = ns
+    #mask_lo = (off_lo >= 0) & (off_lo < extent)
+    #rel_logits = tl.load(R + m * extent + off_lo, mask=mask_lo, other=0.0)
+    rel_logits = tl.load(R + m * extent + extent - m -1 + ns)
+    #rel_logits = tl.load(R + m * extent)
+    out += rel_logits
     out = out.to(tl.float32)
     # apply causal mask
-    out = tl.where((ns > m) & is_causal, -float("inf"), out)
+    #out = tl.where((ns > m) & is_causal, -float("inf"), out)
     # computation
-    out = tl.softmax(out)
+    #out = tl.softmax(out)
     # write-back
     tl.store(Out + off_a + lane_n, out, mask=mask)
 
@@ -161,8 +168,15 @@ class _softmax(torch.autograd.Function):
         print('rel_logit.shape = ', rel_logits.shape)
         print('lut.shape = ', lut.shape)
         print('maxLut = ', maxlut)
+        print('extent = ', rel_shape[-1])
+        print('R.stride(2) = ', rel_strides[2])
+        print('ROW_SIZE = ', next_power_of_2(maxlut))
+        print('num_warps = ', num_warps(maxlut))
+        print('a.shape = ', a.shape)
         # enqueue kernel
         out = torch.empty_like(a)
+        print('out.shape = ', out.shape)
+        print(is_dense)
         _blocksparse_softmax_fwd[grid](
             out, a, a.stride(0), lut,  #
             rel_logits, rel_shape[-1], rel_strides[0], rel_strides[1],  # relative attn#
@@ -171,7 +185,8 @@ class _softmax(torch.autograd.Function):
             BLOCK_SIZE=block,  #
             ROW_SIZE=next_power_of_2(maxlut),  #
             IS_DENSE=is_dense,  #
-            num_warps=num_warps(maxlut)  #
+            #num_warps=num_warps(maxlut)  #
+            num_warps=2  #
         )
         # save to context
         # ctx.mark_dirty(x)

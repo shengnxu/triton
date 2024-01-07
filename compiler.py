@@ -1,5 +1,6 @@
 from triton.third_party.compiler import BaseBackend
-from triton._C.libtriton import ir, passes, llvm, amd
+from triton._C.libtriton import ir, passes, llvm
+import triton._C.libtriton_amd as amd
 from dataclasses import dataclass
 from typing import Any
 import hashlib
@@ -140,7 +141,7 @@ class HIPBackend(BaseBackend):
             passes.llvmir.add_di_scope(pm)
         pm.run(mod)
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)
-        amd.init_llvm()
+        llvm.init_targets()
         context = llvm.context()
         llvm_mod = llvm.to_module(mod, context)
         if options.extern_libs:

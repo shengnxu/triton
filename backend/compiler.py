@@ -1,4 +1,4 @@
-from triton.third_party.compiler import BaseBackend
+from triton.backends.compiler import BaseBackend
 from triton._C.libtriton import ir, passes, llvm
 import triton._C.libtriton_amd as amd
 from dataclasses import dataclass
@@ -32,7 +32,7 @@ class HIPOptions:
     max_num_imprecise_acc_default: int = 0
 
     def __post_init__(self):
-        default_libdir = Path(__file__).parent.parent.parent / 'third_party' / 'hip' / 'lib'
+        default_libdir = Path(__file__).parent / 'lib'
         extern_libs = dict() if self.extern_libs is None else dict(self.extern_libs)
         libs = [
             "cuda2gcn", "opencl", "ocml", "ockl", "oclc_finite_only_off", "oclc_daz_opt_off",

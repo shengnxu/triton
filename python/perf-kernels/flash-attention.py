@@ -30,6 +30,28 @@ TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
+@triton.jit
+def max_fn(x, y):
+    return tl.math.max(x, y)
+
+@triton.jit
+def dropout_offsets(philox_seed, philox_offset, dropout_p, m, n, stride):
+4    ms = tl.arange(0, m)
+    ns = tl.arange(0, n)
+    return philox_offset + ms[:, None] * stride + ns[None, :]
+
+@triton.jit
+def dropout_rng(philox_seed, philox_offset, dropout_p, m, n, stride):
+    rng_offsets = dropout_offsets(philox_seed, philox_offset, dropout_p, m, n, stride).to(tl.uint32)
+    # TODO: use tl.randint for better performance
+    return tl.rand(philox_seed, rng_offsets)
+
+@triton.jit
+def dropout_mask(philox_seed, philox_offset, dropout_p, m, n, stride):
+    rng_output = dropout_rng(philox_seed, philox_offset, dropout_p, m, n, stride)
+    rng_keep = rng_output > dropout_p
+    return rng_keep
+
 def prepare_bias(bias, batch, nheads, seqlen):
     assert bias.is_cuda
     assert bias.dim() == 4
@@ -48,31 +70,41 @@ def _attn_fwd_inner(
     acc, l_i, m_i, q,
     K_block_ptr, V_block_ptr,
     start_m,
+    seqlen_q,
+    seqlen_k,
+    dropout_p,
+    philox_seed,
+    batch_philox_offset,
+    encoded_softmax_block_ptr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     STAGE: tl.constexpr,
     offs_m: tl.constexpr,
     offs_n: tl.constexpr,
-    N_CTX,
     pre_load_v: tl.constexpr,
     padded_block: tl.constexpr,
     total_tokens: tl.constexpr,
-    bias_ptr
+    bias_ptr,
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
     # range of values handled by this stage
-    if STAGE == 1:
-        lo, hi = 0, start_m * BLOCK_M
-    elif STAGE == 2:
-        lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
+    if STAGE == 1: # "Solid" blocks of Causal masks
+        lo, hi = 0, min(seqlen_k, start_m * BLOCK_M)
+    elif STAGE == 2: # "Semi-solid", or "Transition" block of Causal mask
+        # Must use BLOCK_M, because the starting position of semi-solid block
+        # is determined by start_m * BLOCK_M
+        lo, hi = start_m * BLOCK_M, min(seqlen_k, start_m * BLOCK_M + BLOCK_M)
         lo = tl.multiple_of(lo, BLOCK_M)
         K_block_ptr = tl.advance(K_block_ptr, (0, lo))
         V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
-    # N_CTX is the seqlen to the nearest block (round down).
+        if RETURN_ENCODED_SOFTMAX:
+            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, lo))
     # So here, we are computing the elements for that last irregular block.
     # In the loop,  we will mask the elements of BLOCK_N that do not exist.
     elif padded_block:
-        lo, hi = N_CTX, N_CTX + BLOCK_N
+        lo, hi = seqlen_k, seqlen_k + BLOCK_N
         lo = tl.multiple_of(lo, BLOCK_N)
         K_block_ptr = tl.advance(K_block_ptr, (0, lo))
         V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
@@ -83,10 +115,11 @@ def _attn_fwd_inner(
                 bias_ptr += lo
     # causal = False
     else:
-        lo, hi = 0, N_CTX
+        lo, hi = 0, seqlen_k
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
+        if STAGE == 1 or STAGE == 3:
+            start_n = tl.multiple_of(start_n, BLOCK_N)
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         if padded_block:
@@ -103,7 +136,10 @@ def _attn_fwd_inner(
         if STAGE == 2:
             mask = offs_m[:, None] >= (start_n + offs_n[None, :])
             qk = tl.where(mask, qk, float("-inf"))
-        qk += tl.dot(q, k)
+        if BLOCK_M == 1:
+            qk += tl.sum(tl.view(q, [BLOCK_DMODEL]) * tl.view(k, [BLOCK_DMODEL]))
+        else:
+            qk += tl.dot(q, k)
         if bias_ptr is not None:
             if padded_block:
                 if bias_ptr.type.element_ty.is_block():
@@ -127,6 +163,19 @@ def _attn_fwd_inner(
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
+        # CAVEAT: Must update l_ij before applying dropout
+        l_ij = tl.sum(p, 1)
+        # Note about the conflicts of Flash attention algorithm and PyTorch's CUDA implementation
+        # PyTorch needs to return softmax(qk) (dropout mask encoded in sign bits)
+        # While Flash attention paper computer the dropout AFTER exp2(qk- m_ij)
+        if ENABLE_DROPOUT:
+            philox_offset = batch_philox_offset + start_m * BLOCK_M * seqlen_k + start_n
+            keep = dropout_mask(philox_seed, philox_offset, dropout_p, BLOCK_M, BLOCK_N, seqlen_k)
+            if RETURN_ENCODED_SOFTMAX:
+                tl.store(encoded_softmax_block_ptr, tl.where(keep, p, -p).to(encoded_softmax_block_ptr.type.element_ty)) # FIXME: This is correct code
+            p = tl.where(keep, p, 0.0)
+        elif RETURN_ENCODED_SOFTMAX:
+            tl.store(encoded_softmax_block_ptr, p.to(encoded_softmax_block_ptr.type.element_ty)) # FIXME: This is correct code
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
@@ -135,12 +184,14 @@ def _attn_fwd_inner(
                 v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
-        acc += tl.dot(p.to(v.dtype), v)
         # -- update m_i and l_i
-        l_ij = tl.sum(p, 1)
         l_i = l_i * alpha + l_ij
         # update m_i and l_i
         m_i = m_ij
+        if BLOCK_M == 1:
+            acc += tl.view(p.to(V_block_ptr.type.element_ty), [1]) * tl.view(v, [BLOCK_DMODEL])
+        else:
+            acc += tl.dot(p.to(V_block_ptr.type.element_ty), v)
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         if bias_ptr is not None:
@@ -148,6 +199,8 @@ def _attn_fwd_inner(
                 bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
             else:
                 bias_ptr += BLOCK_N
+        if RETURN_ENCODED_SOFTMAX:
+            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
 
 
@@ -160,52 +213,51 @@ def _attn_fwd(
     stride_oz, stride_oh, stride_om, stride_on,
     stride_bz, stride_bh, stride_bm, stride_bn,
     Z, H,
-    N_CTX,
-    BLOCK_DMODEL: tl.constexpr,
+    seqlen_q,
+    seqlen_k,
+    dropout_p,
+    philox_seed,
+    philox_offset_base,
+    encoded_softmax,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     pre_load_v: tl.constexpr,
     need_padding: tl.constexpr,
     extra_tokens_n: tl.constexpr,
-    bias_type: tl.constexpr
+    bias_type: tl.constexpr,
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
     start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
-    qvk_offset = off_hz * stride_qh
-
-    # block pointers
+    of_hz = tl.program_id(1)
+    q_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
-        base=Q + qvk_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        base=Q + q_offset,
+        shape=(seqlen_q, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0),
+        order=(1, 0)
     )
-    V_block_ptr = tl.make_block_ptr(
-        base=V + qvk_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0),
-    )
+    k_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
-        base=K + qvk_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
+        base=K + k_offset,
+        shape=(BLOCK_DMODEL, seqlen_k),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
-        order=(0, 1),
+        order=(0, 1)
     )
-    O_block_ptr = tl.make_block_ptr(
-        base=Out + qvk_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_om, stride_on),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0),
+    v_offset = off_hz * stride_vh
+    V_block_ptr = tl.make_block_ptr(
+        base=V + v_offset,
+        shape=(seqlen_k, BLOCK_DMODEL),
+        strides=(stride_vk, stride_vn),
+        offsets=(0, 0),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        order=(1, 0)
     )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -216,7 +268,7 @@ def _attn_fwd(
         elif bias_type == "matrix":
             bias_ptr = tl.make_block_ptr(
                 base=bias + ((off_hz % H) * stride_bh),
-                shape=(N_CTX, N_CTX),
+                shape=(seqlen_q, seqlen_k), #verify this
                 strides=(stride_bm, stride_bn),
                 offsets=(start_m * BLOCK_M, 0),
                 block_shape=(BLOCK_M, BLOCK_N),
@@ -234,37 +286,57 @@ def _attn_fwd(
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
     q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
-    q = (q * qk_scale).to(q.dtype)
+    q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
+    if ENABLE_DROPOUT:
+        batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
+    else:
+        batch_philox_offset = 0
+    if RETURN_ENCODED_SOFTMAX:
+        encoded_softmax_block_ptr = tl.make_block_ptr(
+                base=encoded_softmax + off_hz * seqlen_q * seqlen_k,
+                shape=(seqlen_q, seqlen_k),
+                strides=(seqlen_k, 1),
+                offsets=(start_m * BLOCK_M, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0)
+                )
+    else:
+        encoded_softmax_block_ptr = 0
     if STAGE & 1:
         # We don't currently support causal masking and padding.
         tl.static_assert((STAGE != 3) or not need_padding)
         # equal to N_CTX if N_CTX is already a multiple of block_M
-        seqlen_aligned = N_CTX - extra_tokens_n
-        if N_CTX >= BLOCK_N:
+        seqlen_aligned = seqlen_k - extra_tokens_n
+        if seqlen_k >= BLOCK_N:
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m,
+                start_m, seqlen_q, seqlen_aligned,
+                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
-                seqlen_aligned, pre_load_v,
+                pre_load_v,
                 False, seqlen_aligned,
-                bias_ptr
+                bias_ptr,
+                ENABLE_DROPOUT,
+                RETURN_ENCODED_SOFTMAX
             )
         tl.debug_barrier()
         if need_padding:
-            if N_CTX < BLOCK_N:
+            if seqlen_k < BLOCK_N:
                 seqlen_aligned = 0
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m,
+                start_m, seqlen_q, seqlen_aligned,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
-                seqlen_aligned, pre_load_v,
-                True, N_CTX,
-                bias_ptr
+                pre_load_v,
+                True, seqlen_k,
+                bias_ptr,
+                ENABLE_DROPOUT,
+                RETURN_ENCODED_SOFTMAX
             )
     # stage 2: on-band
     if STAGE & 2:
@@ -273,17 +345,21 @@ def _attn_fwd(
         tl.debug_barrier()
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m,
+            start_m, seqlen_q, seqlen_k,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
             2, offs_m, offs_n,
-            N_CTX, pre_load_v,
+            pre_load_v,
+            ENABLE_DROPOUT,
+            RETURN_ENCODED_SOFTMAX
         )
     # epilogue
     # write back m
     acc = acc / l_i[:, None]
-    m_ptrs = M + off_hz * N_CTX + offs_m
+    if ENABLE_DROPOUT:
+        acc = acc / (1 - dropout_p)
+    m_ptrs = M + off_hz * seqlen_q + offs_m
     # Check for last block_M
-    overflow_size = (start_m * BLOCK_M) - N_CTX
+    overflow_size = (start_m * BLOCK_M) - seqlen_q
     if overflow_size > 0:
         boundary = tl.full((BLOCK_M,), overflow_size, dtype=tl.float32)
         # This is a > check because mask being 0 blocks the store.
@@ -291,6 +367,16 @@ def _attn_fwd(
         tl.store(m_ptrs, m_i + tl.math.log2(l_i), mask=m_ptrs_mask)
     else:
         tl.store(m_ptrs, m_i + tl.math.log2(l_i))
+    # write back O
+    o_offset = off_hz * stride_oh
+    O_block_ptr = tl.make_block_ptr(
+        base=Out + o_offset,
+        shape=(seqlen_q, BLOCK_DMODEL),
+        strides=(stride_om, stride_on),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
     tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
 
 
@@ -543,7 +629,7 @@ class _attention(torch.autograd.Function):
         num_warps = 8 if Lq == 128 else 4
         pre_load_v = False if Lq == 128 else True
         grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
-        
+
         stage = 3 if causal else 1
         seqlen_k = k.shape[-2]
         if seqlen_k < BLOCK_N:
@@ -566,7 +652,7 @@ class _attention(torch.autograd.Function):
         if bias is not None:
             bias, bias_type = prepare_bias(bias, batch, nheads, seqlen)
             bias_strides = (bias.stride(0), bias.stride(1), bias.stride(2), bias.stride(3))
-        else: 
+        else:
             bias, bias_type, bias_strides = None, None, (0,0,0,0)
 
         _attn_fwd[grid](
@@ -616,7 +702,7 @@ class _attention(torch.autograd.Function):
         # Figure out what BLOCK size fwd used and adjust num_blocks accordingly.
         # If the two are the same, we don't need this but the bwd pass block size
         # is smaller than the fwd so we need this scaling to ensure we loop over all
-        # values and don't skip some blocks. 
+        # values and don't skip some blocks.
         # Alternatively we could compute a new grid but this keeps it consistent
         # with fwd and easier to reason about.
         block_scale = (q.shape[2] // ctx.grid[0]) // BLOCK
@@ -841,7 +927,7 @@ def bench_flash_attention(
             raise RuntimeError(
                 f"Got unsupported bias type: {bias_type}. Supported types are vector and matrix."
             )
-            
+
     else: bias = None
     # Bwd pass only supports causal=True right now
     if mode == 'bwd':
@@ -882,4 +968,3 @@ def bench_flash_attention(
 
 # only works on post-Ampere GPUs right now
 bench_flash_attention.run(save_path=".", print_data=True)
-

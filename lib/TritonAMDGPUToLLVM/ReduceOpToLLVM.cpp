@@ -9,9 +9,9 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::delinearize;
 using ::mlir::LLVM::linearize;
-using ::mlir::LLVM::loadShared;
-using ::mlir::LLVM::shflSync;
-using ::mlir::LLVM::storeShared;
+using ::mlir::LLVM::AMD::loadShared;
+using ::mlir::LLVM::AMD::shflSync;
+using ::mlir::LLVM::AMD::storeShared;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::AMD::TritonGPUToLLVMTypeConverter;

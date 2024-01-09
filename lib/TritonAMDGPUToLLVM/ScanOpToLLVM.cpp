@@ -7,9 +7,9 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::delinearize;
 using ::mlir::LLVM::linearize;
-using ::mlir::LLVM::shflIdxSync;
-using ::mlir::LLVM::shflUpSync;
-using ::mlir::LLVM::storeShared;
+using ::mlir::LLVM::AMD::shflIdxSync;
+using ::mlir::LLVM::AMD::shflUpSync;
+using ::mlir::LLVM::AMD::storeShared;
 using ::AMD::TritonGPUToLLVMTypeConverter;
 
 // apply combine region to a and b and return the result. If a or b is null,

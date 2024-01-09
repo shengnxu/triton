@@ -36,6 +36,7 @@ using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::mlir::LLVM::AMD::shflSync;
 
 enum class MatrixCoreType : uint8_t {
   // D = AB + C
@@ -315,7 +316,7 @@ struct DotOpMFMAConversionHelper {
       while (subBlockSize < waveSize) {
         for (int i = 0; i < numScalars; ++i) {
           Value other_acc =
-              mlir::LLVM::shflSync(loc, rewriter, accScalar[i], subBlockSize);
+              shflSync(loc, rewriter, accScalar[i], subBlockSize);
           if (elemType.isInteger(32))
             accScalar[i] = add(accScalar[i], other_acc);
           else

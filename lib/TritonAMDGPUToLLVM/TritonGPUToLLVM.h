@@ -6,15 +6,13 @@
 using namespace mlir;
 using namespace mlir::triton;
 
-namespace mlir::triton {
-
+namespace AMD {
 void populateTritonGPUToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
     ModuleAllocation &allocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit);
-
-} // namespace mlir::triton
+} // namespace AMD
 
 #endif

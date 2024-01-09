@@ -30,6 +30,7 @@ using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 namespace {
 

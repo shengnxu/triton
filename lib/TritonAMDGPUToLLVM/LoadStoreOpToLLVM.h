@@ -6,6 +6,7 @@
 using namespace mlir;
 using namespace mlir::triton;
 
+namespace AMD{
 void populateLoadStoreOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -13,5 +14,6 @@ void populateLoadStoreOpToLLVMPatterns(
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     mlir::triton::gpu::TMAMetadataTy *tmaMetadata,
     const TensorPtrMapT *tensorPtrMap, PatternBenefit benefit);
+}
 
 #endif

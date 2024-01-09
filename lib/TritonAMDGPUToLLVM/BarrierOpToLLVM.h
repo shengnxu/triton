@@ -29,9 +29,11 @@
 using namespace mlir;
 using namespace mlir::triton;
 
+namespace AMD{
 void populateBarrierOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
     ModuleAllocation &allocation, PatternBenefit benefit);
+}
 
 #endif

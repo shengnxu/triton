@@ -14,6 +14,7 @@ using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 
+namespace AMD{
 TritonGPUToLLVMTypeConverter::TritonGPUToLLVMTypeConverter(
     MLIRContext *ctx, LowerToLLVMOptions &option,
     const DataLayoutAnalysis *analysis)
@@ -172,4 +173,5 @@ Type TritonGPUToLLVMTypeConverter::convertTritonTensorType(
   unsigned numElementsPerThread = getTotalElemsPerThread(type);
   SmallVector<Type, 4> types(numElementsPerThread, eltType);
   return LLVM::LLVMStructType::getLiteral(ctx, types);
+}
 }

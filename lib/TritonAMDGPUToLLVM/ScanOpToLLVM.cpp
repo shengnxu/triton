@@ -10,6 +10,7 @@ using ::mlir::LLVM::linearize;
 using ::mlir::LLVM::shflIdxSync;
 using ::mlir::LLVM::shflUpSync;
 using ::mlir::LLVM::storeShared;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 // apply combine region to a and b and return the result. If a or b is null,
 // return the other operand.
@@ -445,6 +446,7 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
 }
 } // namespace
 
+namespace AMD{
 void populateScanOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -453,4 +455,5 @@ void populateScanOpToLLVMPatterns(
     PatternBenefit benefit) {
   patterns.add<ScanOpConversion>(typeConverter, allocation, indexCacheInfo,
                                  benefit);
+}
 }

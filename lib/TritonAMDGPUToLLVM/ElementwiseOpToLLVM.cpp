@@ -3,6 +3,7 @@
 using namespace mlir;
 using namespace mlir::triton;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 typedef std::function<SmallVector<Value>(Location, ConversionPatternRewriter &,
                                          const SmallVector<Value> &)>
@@ -2460,6 +2461,7 @@ struct SelectOpConversion
   }
 };
 
+namespace AMD{
 void populateElementwiseOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -2545,4 +2547,5 @@ void populateElementwiseOpToLLVMPatterns(
   // ElementwiseOpConversion<math::ExpOp, math::ExpOp> defined below will call
   // __nv_expf for higher-precision calculation
   patterns.add<ExpOpConversionApprox>(typeConverter, axisInfoAnalysis, benefit);
+}
 }

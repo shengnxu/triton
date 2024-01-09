@@ -1,4 +1,4 @@
-add_mlir_conversion_library(TritonAMDGPUToLLVM
+add_triton_library(TritonAMDGPUToLLVM
     ConvertLayoutOpToLLVM/SharedToDotOperandFMA.cpp
     ConvertLayoutOpToLLVM/SharedToDotOperandMFMA.cpp
     ConvertLayoutOpToLLVM.cpp
@@ -10,20 +10,15 @@ add_mlir_conversion_library(TritonAMDGPUToLLVM
     BarrierOpToLLVM.cpp
     TritonGPUToLLVM.cpp
     GCNAsmFormat.cpp
-    PTXAsmFormat.cpp
     TritonGPUToLLVMPass.cpp
     ReduceOpToLLVM.cpp
     ScanOpToLLVM.cpp
     TypeConverter.cpp
     Utility.cpp
     ViewOpToLLVM.cpp
-    TensorPtrOpsToLLVM.cpp
-    ClusterOpsToLLVM.cpp
-    RegReallocOpToLLVM.cpp
-
-    ADDITIONAL_HEADER_DIRS
-    ${PROJECT_SOURCE_DIR}/include/triton/Conversion/TritonAMDGPUToLLVM
-    ${PROJECT_BINARY_DIR}/include/triton/Conversion/TritonAMDGPUToLLVM
+    # TensorPtrOpsToLLVM.cpp
+    # ClusterOpsToLLVM.cpp
+    # RegReallocOpToLLVM.cpp
 
     DEPENDS
     TritonAMDGPUConversionPassIncGen

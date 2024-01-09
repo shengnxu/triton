@@ -11,6 +11,7 @@ using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::LLVM::getSRegValue;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 Value llGetPid(int axis, Location loc, ModuleOp moduleOp,
                ConversionPatternRewriter &rewriter) {

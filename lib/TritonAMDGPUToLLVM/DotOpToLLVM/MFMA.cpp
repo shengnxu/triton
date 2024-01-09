@@ -35,6 +35,7 @@ namespace {
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 enum class MatrixCoreType : uint8_t {
   // D = AB + C
@@ -457,6 +458,7 @@ struct DotOpMFMAConversionHelper {
 
 } // namespace
 
+namespace AMD{
 LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                           TritonGPUToLLVMTypeConverter *typeConverter,
                           ConversionPatternRewriter &rewriter) {
@@ -487,6 +489,7 @@ LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
   DotOpMFMAConversionHelper helper(mfmaLayout, rewriter, typeConverter, loc);
 
   return helper.convertDot(op, adaptor);
+}
 }
 
 #endif // ifdef USE_ROCM

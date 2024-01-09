@@ -5,6 +5,7 @@ using namespace mlir::triton;
 
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 struct SplatOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::SplatOp> {

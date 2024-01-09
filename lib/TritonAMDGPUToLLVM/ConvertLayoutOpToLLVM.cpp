@@ -20,6 +20,8 @@ using ::mlir::triton::gpu::getSizePerThread;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::isaDistributedLayout;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
+
 
 // Forward declarations
 
@@ -1174,6 +1176,7 @@ private:
   // }
 };
 
+namespace AMD{
 void populateConvertLayoutOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -1182,4 +1185,5 @@ void populateConvertLayoutOpToLLVMPatterns(
     PatternBenefit benefit) {
   patterns.add<ConvertLayoutOpConversion>(typeConverter, allocation,
                                           indexCacheInfo, benefit);
+}
 }

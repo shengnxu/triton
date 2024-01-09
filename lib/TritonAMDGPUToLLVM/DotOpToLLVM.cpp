@@ -8,7 +8,9 @@ using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::DotOperandEncodingAttr;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
+namespace AMD{
 LogicalResult convertFMADot(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                             TritonGPUToLLVMTypeConverter *typeConverter,
                             ConversionPatternRewriter &rewriter);
@@ -40,6 +42,7 @@ LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                           TritonGPUToLLVMTypeConverter *typeConverter,
                           ConversionPatternRewriter &rewriter);
 #endif
+}
 
 struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
   using ConvertTritonGPUOpToLLVMPattern<
@@ -84,7 +87,7 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
                                       .getEncoding()
                                       .dyn_cast<MfmaEncodingAttr>();
     if (!isOuter && mfmaLayout && supportMFMA(op)) {
-      return convertMFMA(op, adaptor, getTypeConverter(), rewriter);
+      return AMD::convertMFMA(op, adaptor, getTypeConverter(), rewriter);
     }
 #endif
 
@@ -92,7 +95,7 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
             .cast<RankedTensorType>()
             .getEncoding()
             .isa<BlockedEncodingAttr>())
-      return convertFMADot(op, adaptor, getTypeConverter(), rewriter);
+      return AMD::convertFMADot(op, adaptor, getTypeConverter(), rewriter);
 
     llvm::report_fatal_error(
         "Unsupported DotOp found when converting TritonGPU to LLVM.");
@@ -200,6 +203,7 @@ struct DotWaitOpConversion
   }
 };
 
+namespace AMD{
 void populateDotOpToLLVMPatterns(TritonGPUToLLVMTypeConverter &typeConverter,
                                  RewritePatternSet &patterns, int numWarps,
                                  ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -208,4 +212,5 @@ void populateDotOpToLLVMPatterns(TritonGPUToLLVMTypeConverter &typeConverter,
   patterns.add<DotOpConversion>(typeConverter, allocation, benefit);
   patterns.add<DotAsyncOpConversion>(typeConverter, allocation, benefit);
   patterns.add<DotWaitOpConversion>(typeConverter, allocation, benefit);
+}
 }

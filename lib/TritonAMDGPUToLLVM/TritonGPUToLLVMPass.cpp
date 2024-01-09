@@ -28,15 +28,15 @@
 #include "triton/Tools/Sys/GetPlatform.hpp"
 
 #include "BarrierOpToLLVM.h"
-#include "ClusterOpsToLLVM.h"
+// #include "ClusterOpsToLLVM.h"
 #include "ConvertLayoutOpToLLVM.h"
 #include "DotOpToLLVM.h"
 #include "ElementwiseOpToLLVM.h"
 #include "LoadStoreOpToLLVM.h"
 #include "ReduceOpToLLVM.h"
-#include "RegReallocOpToLLVM.h"
+// #include "RegReallocOpToLLVM.h"
 #include "ScanOpToLLVM.h"
-#include "TensorPtrOpsToLLVM.h"
+// #include "TensorPtrOpsToLLVM.h"
 #include "TritonGPUToLLVM.h"
 #include "TritonGPUToLLVMBase.h"
 #include "TypeConverter.h"
@@ -54,6 +54,7 @@ namespace triton {
 using namespace mlir;
 using namespace mlir::triton;
 namespace ttng = mlir::triton::nvidia_gpu;
+using ::AMD::TritonGPUToLLVMTypeConverter;
 
 namespace {
 
@@ -570,18 +571,18 @@ struct ConvertTritonGPUToLLVM
                    /*benefit*/ 10);
     };
 
-    populatePatterns1(populateTritonGPUToLLVMPatterns);
-    populatePatterns1(populateConvertLayoutOpToLLVMPatterns);
-    populatePatterns2(populateDotOpToLLVMPatterns);
-    populatePatterns4(populateElementwiseOpToLLVMPatterns);
-    populatePatterns3(populateLoadStoreOpToLLVMPatterns);
-    populatePatterns4(populateReduceOpToLLVMPatterns);
-    populatePatterns1(populateScanOpToLLVMPatterns);
-    populatePatterns2(populateViewOpToLLVMPatterns);
-    populatePatterns2(populateBarrierOpToLLVMPatterns);
-    populatePatterns2(populateTensorPtrOpsToLLVMPatterns);
-    populatePatterns2(populateClusterOpsToLLVMPatterns);
-    populatePatterns2(populateRegReallocOpToLLVMPatterns);
+    populatePatterns1(AMD::populateTritonGPUToLLVMPatterns);
+    populatePatterns1(AMD::populateConvertLayoutOpToLLVMPatterns);
+    populatePatterns2(AMD::populateDotOpToLLVMPatterns);
+    populatePatterns4(AMD::populateElementwiseOpToLLVMPatterns);
+    populatePatterns3(AMD::populateLoadStoreOpToLLVMPatterns);
+    populatePatterns4(AMD::populateReduceOpToLLVMPatterns);
+    populatePatterns1(AMD::populateScanOpToLLVMPatterns);
+    populatePatterns2(AMD::populateViewOpToLLVMPatterns);
+    populatePatterns2(AMD::populateBarrierOpToLLVMPatterns);
+    // populatePatterns2(AMD::populateTensorPtrOpsToLLVMPatterns);
+    // populatePatterns2(AMD::populateClusterOpsToLLVMPatterns);
+    // populatePatterns2(AMD::populateRegReallocOpToLLVMPatterns);
 
     // TODO(thomas): this should probably be done in a separate step to not
     // interfere with our own lowering of arith ops. Add arith/math's patterns

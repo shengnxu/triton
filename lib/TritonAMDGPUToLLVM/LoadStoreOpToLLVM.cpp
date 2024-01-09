@@ -20,6 +20,9 @@ using ::mlir::triton::gpu::getCTALayout;
 using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
+using ::AMD::TritonGPUToLLVMTypeConverter;
+
+
 
 static CUtensorMapDataType getCUtensorMapDataType(Type ty) {
   if (ty.isF16()) {
@@ -2100,6 +2103,7 @@ private:
   const TensorPtrMapT *tensorPtrMap;
 };
 
+namespace AMD{
 void populateLoadStoreOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -2121,4 +2125,5 @@ void populateLoadStoreOpToLLVMPatterns(
                                            tmaMetadata, tensorPtrMap, benefit);
   patterns.add<StoreAsyncOpConversion>(typeConverter, allocation, tmaMetadata,
                                        tensorPtrMap, benefit);
+}
 }

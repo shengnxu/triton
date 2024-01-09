@@ -11,6 +11,8 @@ using ::mlir::LLVM::AMD::shflIdxSync;
 using ::mlir::LLVM::AMD::shflUpSync;
 using ::mlir::LLVM::AMD::storeShared;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 // apply combine region to a and b and return the result. If a or b is null,
 // return the other operand.

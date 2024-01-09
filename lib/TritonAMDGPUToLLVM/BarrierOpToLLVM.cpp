@@ -27,7 +27,10 @@
 using namespace mlir;
 using namespace mlir::triton;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
+namespace {
 struct BarrierOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<mlir::gpu::BarrierOp> {
   using ConvertTritonGPUOpToLLVMPattern<
@@ -229,6 +232,7 @@ struct FenceAsyncSharedOpConversion
     return success();
   }
 };
+}
 
 namespace AMD{
 void populateBarrierOpToLLVMPatterns(

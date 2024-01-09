@@ -12,6 +12,8 @@ using ::mlir::LLVM::getSRegValue;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 Value llGetPid(int axis, Location loc, ModuleOp moduleOp,
                ConversionPatternRewriter &rewriter) {
@@ -899,8 +901,8 @@ struct AsyncBulkCommitGroupOpConversion
 
 } // namespace
 
-namespace mlir::triton {
 
+namespace AMD{
 void populateTritonGPUToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,

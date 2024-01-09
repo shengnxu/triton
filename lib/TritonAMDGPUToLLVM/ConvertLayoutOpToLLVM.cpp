@@ -21,7 +21,8 @@ using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::isaDistributedLayout;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::AMD::TritonGPUToLLVMTypeConverter;
-
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 // Forward declarations
 
@@ -61,13 +62,17 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
 } // namespace SharedToDotOperandMFMA
 #endif
 
+namespace AMD{
 namespace SharedToDotOperandFMA {
 Value convertLayout(int opIdx, Value B, Value llB, BlockedEncodingAttr dLayout,
                     Value thread, Location loc,
                     TritonGPUToLLVMTypeConverter *typeConverter,
                     ConversionPatternRewriter &rewriter);
 }
+}
 
+
+namespace {
 struct ConvertLayoutOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::gpu::ConvertLayoutOp> {
 public:
@@ -927,7 +932,7 @@ private:
       auto dotOpLayout =
           dstTensorTy.getEncoding().cast<DotOperandEncodingAttr>();
       auto thread = getThreadId(rewriter, loc);
-      res = SharedToDotOperandFMA::convertLayout(
+      res = AMD::SharedToDotOperandFMA::convertLayout(
           dotOpLayout.getOpIdx(), src, adaptor.getSrc(), blockedLayout, thread,
           loc, getTypeConverter(), rewriter);
     } else {
@@ -1175,6 +1180,7 @@ private:
   //   return res;
   // }
 };
+}
 
 namespace AMD{
 void populateConvertLayoutOpToLLVMPatterns(

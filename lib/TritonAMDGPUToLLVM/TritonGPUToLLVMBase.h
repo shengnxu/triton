@@ -34,7 +34,6 @@ using ::mlir::triton::gpu::NvidiaMmaEncodingAttr;
 using ::mlir::triton::gpu::MfmaEncodingAttr;
 using ::mlir::triton::gpu::SliceEncodingAttr;
 using ::mlir::triton::gpu::TMAMetadataTy;
-using ::AMD::TritonGPUToLLVMTypeConverter;
 namespace ttng = ::mlir::triton::nvidia_gpu;
 
 typedef DenseMap<Operation *, triton::MakeTensorPtrOp> TensorPtrMapT;
@@ -44,7 +43,6 @@ typedef DenseMap<Operation *, triton::MakeTensorPtrOp> TensorPtrMapT;
 // since it is not exposed on header files in mlir v14
 // TODO(Superjomn): remove the code when MLIR v15.0 is included.
 // All the rights are reserved by the LLVM community.
-
 struct FuncOpConversionBase : public ConvertOpToLLVMPattern<triton::FuncOp> {
 protected:
   /// Only retain those attributes that are not constructed by
@@ -175,6 +173,7 @@ struct CacheKeyDenseMapInfo {
   }
 };
 
+namespace AMD{
 class ConvertTritonGPUOpToLLVMPatternBase {
 public:
   // Two levels of value cache in emitting indices calculation:
@@ -1338,5 +1337,6 @@ protected:
     return (TritonGPUToLLVMTypeConverter *)ret;
   }
 };
+}
 
 #endif

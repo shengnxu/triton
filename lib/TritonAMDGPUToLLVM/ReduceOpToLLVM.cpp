@@ -15,7 +15,10 @@ using ::mlir::LLVM::AMD::storeShared;
 using ::mlir::triton::gpu::getOrder;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
+namespace {
 struct ReduceOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::ReduceOp> {
 public:
@@ -543,6 +546,7 @@ private:
     rewriter.replaceOp(op, results);
   }
 };
+}
 
 namespace AMD{
 void populateReduceOpToLLVMPatterns(

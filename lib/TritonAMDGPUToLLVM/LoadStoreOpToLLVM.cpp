@@ -21,9 +21,11 @@ using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 
-
+namespace {
 static CUtensorMapDataType getCUtensorMapDataType(Type ty) {
   if (ty.isF16()) {
     return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_FLOAT16;
@@ -2102,6 +2104,7 @@ private:
 
   const TensorPtrMapT *tensorPtrMap;
 };
+}
 
 namespace AMD{
 void populateLoadStoreOpToLLVMPatterns(

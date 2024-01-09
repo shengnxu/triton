@@ -6,7 +6,10 @@ using namespace mlir::triton;
 using ::mlir::LLVM::getSharedMemoryObjectFromStruct;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
+namespace {
 struct SplatOpConversion
     : public ConvertTritonGPUOpToLLVMPattern<triton::SplatOp> {
   using ConvertTritonGPUOpToLLVMPattern<
@@ -290,7 +293,9 @@ struct TransOpConversion
     return success();
   }
 };
+}
 
+namespace AMD{
 void populateViewOpToLLVMPatterns(TritonGPUToLLVMTypeConverter &typeConverter,
                                   RewritePatternSet &patterns, int numWarps,
                                   ModuleAxisInfoAnalysis &axisInfoAnalysis,
@@ -303,4 +308,5 @@ void populateViewOpToLLVMPatterns(TritonGPUToLLVMTypeConverter &typeConverter,
   patterns.add<CatOpConversion>(typeConverter, benefit);
   patterns.add<InterleaveOpConversion>(typeConverter, benefit);
   patterns.add<TransOpConversion>(typeConverter, benefit);
+}
 }

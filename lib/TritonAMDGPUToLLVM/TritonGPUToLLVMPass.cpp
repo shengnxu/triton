@@ -55,6 +55,8 @@ using namespace mlir;
 using namespace mlir::triton;
 namespace ttng = mlir::triton::nvidia_gpu;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 namespace {
 

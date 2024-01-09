@@ -4,11 +4,14 @@ using namespace mlir;
 using namespace mlir::triton;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::AMD::TritonGPUToLLVMTypeConverter;
+using ::AMD::ConvertTritonGPUOpToLLVMPatternBase;
+using ::AMD::ConvertTritonGPUOpToLLVMPattern;
 
 typedef std::function<SmallVector<Value>(Location, ConversionPatternRewriter &,
                                          const SmallVector<Value> &)>
     ConverterT;
 
+namespace {
 /* ----- FP8E5M2 ------ */
 /* ----- FP8E5M2 ------ */
 // This data-type is the standard FP8E5M2 format
@@ -2460,6 +2463,7 @@ struct SelectOpConversion
         adaptor.getAttributes().getValue())};
   }
 };
+}
 
 namespace AMD{
 void populateElementwiseOpToLLVMPatterns(

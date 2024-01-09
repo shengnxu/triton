@@ -27,6 +27,7 @@ static ValueTableFMA getValueTableFromStructFMA(
   return res;
 }
 
+namespace AMD{
 LogicalResult convertFMADot(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                             TritonGPUToLLVMTypeConverter *typeConverter,
                             ConversionPatternRewriter &rewriter) {
@@ -100,4 +101,5 @@ LogicalResult convertFMADot(triton::DotOp op, triton::DotOp::Adaptor adaptor,
   rewriter.replaceOp(op, res);
 
   return success();
+}
 }

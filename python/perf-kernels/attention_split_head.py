@@ -12,17 +12,6 @@ def _strides(x: torch.Tensor, *stride_names: str):
     return {f"stride_{s}": x.stride(i) for i, s in enumerate(stride_names)}
 
 
-# @triton.autotune(
-#    configs=[
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64, 'waves_per_eu': 2}, num_stages=1, num_warps=2),
-#     #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128, 'waves_per_eu': 2}, num_stages=1, num_warps=4),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 32}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 64}, num_stages=1, num_warps=2),
-#        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 128}, num_stages=1, num_warps=4),
-#    ],
-#    key=['Z', 'H', 'G', 'N_CTX_Q', 'N_CTX_K', 'BLOCK_DMODEL'],        
-# )
 @triton.jit
 def _fwd_kernel_splitK(
     Q,
@@ -162,37 +151,10 @@ def _fwd_kernel_splitK(
 
 class _attention(torch.autograd.Function):
 
-    OPERATOR = _fwd_kernel_splitK
-    SUPPORTED_DEVICES = {"cuda"}
-    CUDA_MINIMUM_COMPUTE_CAPABILITY = (8, 0)
-    SUPPORTED_DTYPES = {
-        torch.half,
-        torch.bfloat16,
-    }  # Those are dtypes of Q. In the quantized case K/V has dtype int32
-    SUPPORTED_MAX_K = 128
-    # SUPPORTED_ATTN_BIAS_TYPES: Set[Any] = {
-    #     type(None),
-    #     BlockDiagonalCausalWithOffsetPaddedKeysMask,
-    # }
-    SUPPORTS_DROPOUT = False
-    SUPPORTS_CUSTOM_SCALE = True
-    SUPPORTS_BMGHK = True
-    NAME = "triton_splitKF"
-
     @staticmethod
     def forward(cls, q, k, v, scale_float):
 
-        cls.SPLIT_K: Optional[int] = None
-        cls.BLOCK_M = 16
-        cls.BLOCK_N = 64
-
         # Transpose in the case of MQA/GQA
-        #print(f"q shape = {q.shape}")
-        #print(f"k shape = {k.shape}")
-        #print(f"v shape = {v.shape}")
-        #print(f"q stride = {q.stride()}")
-        #print(f"k stride = {k.stride()}")
-        #print(f"v stride = {v.stride()}")
         mqa_swap_seqlen_head = False
         if k.shape[3] > 1 and k.stride(3) == 0 and v.stride(3) == 0:
             mqa_swap_seqlen_head = True
@@ -206,8 +168,8 @@ class _attention(torch.autograd.Function):
         Lk = k.shape[-1]
         assert Lk == Kq, f"Keys have head dim {Lk} but queries have head dim {Kq}"
 
-        BLOCK_M = cls.BLOCK_M
-        BLOCK_N = cls.BLOCK_N
+        BLOCK_M = 16
+        BLOCK_N = 64
 
         M_ceil = (M + BLOCK_M - 1) // BLOCK_M * BLOCK_M
         o = torch.empty_like(q)
@@ -215,12 +177,6 @@ class _attention(torch.autograd.Function):
         grid = (triton.cdiv(M, BLOCK_M), B * G * H)
 
         num_warps = 1
-        #print(f"q shape after = {q.shape}")
-        #print(f"k shape after = {k.shape}")
-        #print(f"v shape after = {v.shape}")
-        #print(f"q stride after = {q.stride()}")
-        #print(f"k stride after = {k.stride()}")
-        #print(f"v stride after = {v.stride()}")
 
         _fwd_kernel_splitK[grid](
             Q=q,
@@ -252,10 +208,11 @@ class _attention(torch.autograd.Function):
 
 attention = _attention.apply
 
+# Batch, Mq, Mkv, Hq, Hkv, K
 def get_input_shapes():
     cases = [
         # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=1, K=128)
-        (1, 1, 2**i, 2048, 1, 128)
+        (1, 1, 2**i, 1, 1, 128)
         for i in [11] # Mkv = 2048 and 8192
     ]# + [
     #    # dict(B=max(1, 2 ** (16 - i)), Mq=1, Mkv=2**i, Hq=16, Hkv=2, K=128)
@@ -303,75 +260,40 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-3, rtol=0)
 
-
-try:
-    from flash_attn.flash_attn_interface import \
-        flash_attn_qkvpacked_func as flash_attn_func
-    FLASH_VER = 2
-except BaseException:
-    try:
-        from flash_attn.flash_attn_interface import flash_attn_func
-        FLASH_VER = 1
-    except BaseException:
-        FLASH_VER = None
-HAS_FLASH = FLASH_VER is not None
-
 # vary seq length for fixed head and batch=4
-configs = []
-for mode in ['fwd']:
-    # for D_HEAD in [128]:
-    for causal in [False]:
-        configs.append(triton.testing.Benchmark(
+configs = triton.testing.Benchmark(
             x_names=['B', 'Mq','Mkv', 'Hq', 'Hkv', 'K'],
             x_vals=get_input_shapes(),
             line_arg='provider',
-            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+            line_vals=['triton'],
+            line_names=['Triton'],
             styles=[('red', '-'), ('blue', '-')],
             ylabel='ms',
-            plot_name=f'fused-attention-d{128}-{mode}-causal={causal}',
+            plot_name=f'fused-attention',
             args={
-                # 'D_HEAD': D_HEAD,
                 'dtype': torch.float16,
-                'mode': mode,
-                'causal': causal})
+                }
         )
-
 
 @triton.testing.perf_report(configs)
-def bench_flash_attention(B, Mq, Mkv, Hq, Hkv, K, causal, mode, provider, dtype=torch.float16, device="cuda"):
-    assert mode in ['fwd', 'bwd']
-    warmup = 100
-    rep = 400
+def bench_flash_attention(B, Mq, Mkv, Hq, Hkv, K, provider, dtype=torch.float16, device="cuda"):
+    warmup = 25
+    rep = 100
     ms = 0
-    if provider == "triton":
-        q = torch.randn(
-            [B, Mq, Hkv, Hq // Hkv, K], device="cuda", dtype=dtype, requires_grad=False
-        )
-        k = torch.randn(
-            [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
-        ).expand(-1, -1, -1, Hq // Hkv, -1)
-        v = torch.randn(
-            [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
-        ).expand(-1, -1, -1, Hq // Hkv, -1)
+    q = torch.randn(
+        [B, Mq, Hkv, Hq // Hkv, K], device="cuda", dtype=dtype, requires_grad=False
+    )
+    k = torch.randn(
+        [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
+    ).expand(-1, -1, -1, Hq // Hkv, -1)
+    v = torch.randn(
+        [B, Mkv, Hkv, 1, K], device="cuda", dtype=dtype, requires_grad=False
+    ).expand(-1, -1, -1, Hq // Hkv, -1)
 
-        sm_scale = 1.3
-        fn = lambda: attention(q, k, v, sm_scale)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+    sm_scale = K**-0.5
+    fn = lambda: attention(q, k, v, sm_scale)
+    ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
-    # if provider == "flash":
-    #     qkv = torch.randn((BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True)
-    #     if FLASH_VER == 1:
-    #         lengths = torch.full((BATCH,), fill_value=N_CTX, device=device)
-    #         cu_seqlens = torch.zeros((BATCH + 1,), device=device, dtype=torch.int32)
-    #         cu_seqlens[1:] = lengths.cumsum(0)
-    #         qkv = qkv.reshape(BATCH * N_CTX, 3, H, D_HEAD)
-    #         fn = lambda: flash_attn_func(qkv, cu_seqlens, 0., N_CTX, causal=causal)
-    #     elif FLASH_VER == 2:
-    #         fn = lambda: flash_attn_func(qkv, causal=causal)
-    #     else:
-    #         raise ValueError(f'unknown {FLASH_VER = }')
-    #     ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     flops_per_matmul =  2 * B * Hq * (Mq * K * Mkv + Mq * Mkv * K)
     total_flops = 2 * flops_per_matmul
     totalBytes = ((B * Mkv * Hkv * K * 2) + (B * Mq * Hq * K) + (B * Mq * Hq * K)) * 2

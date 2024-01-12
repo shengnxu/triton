@@ -159,11 +159,6 @@ import argparse
 import pytest
 import re
 
-# input_type = torch.float8_e4m3fnuz
-# input_type = torch.float8_e5m2fnuz
-# input_type = torch.float8_e5m2
-# d_type = torch.float8_e4m3fn
-
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
 #   - A list of `triton.Config` objects that define different configurations of
@@ -191,6 +186,7 @@ import re
     ] if torch.version.hip is None else [
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4, 'waves_per_eu': 2}, num_warps=8, num_stages=0),
+        triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 16, 'waves_per_eu': 0}, num_warps=8, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2}, num_warps=8, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'waves_per_eu': 3}, num_warps=4, num_stages=0),
         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 8}, num_warps=4, num_stages=0),
@@ -448,7 +444,7 @@ def get_type(provider):
     return res[0][1:-1]
 
 def get_x_vals():
-    x_vals = [(512 * v, 512 * v, 512 * v) for v in range (2, 17)]
+    x_vals = [(1024 * v, 1024 * v, 1024 * v) for v in range (1, 9)]
 
     x_vals += [(4864, 4096, 8192), (9728, 8192, 65536)]
 
@@ -471,7 +467,7 @@ inout_dtype = {
         # Possible values for `line_arg`
         line_vals=['rocblas', 'triton(fp16)', 'triton(bf16)', 'triton(int8)', 'triton(fp8e4)', 'triton(fp8e5)'],
         # Label name for the lines
-        line_names=["rocBLAS.Fp16", "Triton.Bf16", "Triton.Fp16", "Triton.Int8", "Triton.Fp8E4", "Triton.Fp8E5"],
+        line_names=["rocBLAS.Fp16", "Triton.Fp16", "Triton.Bf16", "Triton.Int8", "Triton.Fp8E4", "Triton.Fp8E5"],
         # Line styles
         styles=[('green', '-'), ('purple', '-'), ('blue', '-'), ('red', 'dashed'), ('yellow', 'solid'), ('black', 'dotted')],
         ylabel="TFLOPS",  # Label name for the y-axis

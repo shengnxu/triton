@@ -378,6 +378,13 @@ bool isColMajor(::llvm::ArrayRef<unsigned> order) {
   return order[0] == 0;
 }
 
+bool isKMajor(::llvm::ArrayRef<unsigned> order, int opIdx) {
+  if (order[0] + opIdx == 1)
+    return true;
+  else
+    return false;
+}
+
 Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
                     Location loc, Value tensor, DotOperandEncodingAttr encoding,
                     const SharedMemoryObject &smemObj,
@@ -426,7 +433,7 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
   SmallVector<Value> offsets;
   Value smemBase;
   bool isFastPath = fastPathAvailable(smemObj, sharedLayout, mfmaLayout);
-  if (isFastPath) {
+  if (!isKMajor(order, opIdx) && isFastPath) {
     // fast path handles tensors that are not k-major, in which case swizzling
     // is disabled and offsets computation can be simplified
     // TODO (zhanglx): later when we enable vector access to LDS for non k-major

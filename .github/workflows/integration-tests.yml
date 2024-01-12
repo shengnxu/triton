@@ -2,8 +2,9 @@ name: Integration Tests
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
+  # NOTE: this repo is a backend so upstream tests don't work.
+  # pull_request:
+  #   branches: [main]
   merge_group:
     branches: [main]
     types: [checks_requested]

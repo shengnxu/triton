@@ -95,7 +95,6 @@ jobs:
           source ./venv_triton_upstream/bin/activate
           set -x
           ROOT_DIR=`realpath "."`
-          SCRIPT_PATH=$ROOT_DIR/scripts/amd
 
           # get current branch
           BRANCH_NAME=${{ env.BRANCH_NAME }}

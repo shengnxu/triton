@@ -503,8 +503,8 @@ CTALayoutAttr getCTALayout(Attribute layout) {
                               getCTAOrder(sliceLayout));
   else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>())
     return mmaLayout.getCTALayout();
-  // else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
-  //   return mfmaLayout.getCTALayout();
+  else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
+    return mfmaLayout.getCTALayout();
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(dotLayout),
                               getCTASplitNum(dotLayout),

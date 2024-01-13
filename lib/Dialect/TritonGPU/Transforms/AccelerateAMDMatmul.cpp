@@ -64,24 +64,35 @@ warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
   mlir::BackwardSliceOptions bwdOpt;
   bwdOpt.omitBlockArguments = true;
   bwdOpt.filter = filter;
+  llvm::outs() << "loc1\n";
   auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
   for (Operation *op : slices)
-    if (isa<tt::DotOp>(op) && (op != dotOp))
-      return {(unsigned)numWarps, 1};
+    if (isa<tt::DotOp>(op) && (op != dotOp)) {
+      if (shape[0] >= shape[1]) {
+        return {(unsigned)numWarps, 1};
+      } else {
+        return {1, (unsigned)numWarps};
+      }
+    }
 
   SmallVector<int64_t, 2> tensorShape = {shape[0], shape[1]};
   SmallVector<unsigned, 2> ret = {1, 1};
+  llvm::outs() << "loc3\n";
 
   do {
     if (ret[0] * ret[1] >= numWarps)
       break;
+  llvm::outs() << "loc4\n";
     if (tensorShape[0] / (shapePerWarp[0] * 2) / ret[0] >=
         tensorShape[1] / shapePerWarp[1] / ret[1]) {
+  llvm::outs() << "loc5\n";
+
       if (ret[0] < tensorShape[0] / shapePerWarp[0])
         ret[0] *= 2;
       else
         ret[1] *= 2;
     } else {
+  llvm::outs() << "loc6\n";
       ret[1] *= 2;
     }
   } while (true);

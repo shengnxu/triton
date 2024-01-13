@@ -494,6 +494,7 @@ SmallVector<unsigned> getOrder(Attribute layout) {
 };
 
 CTALayoutAttr getCTALayout(Attribute layout) {
+  llvm::outs() << "layout = " << layout << "\n";
   if (auto blockedLayout = layout.dyn_cast<BlockedEncodingAttr>())
     return blockedLayout.getCTALayout();
   else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>())
@@ -502,6 +503,8 @@ CTALayoutAttr getCTALayout(Attribute layout) {
                               getCTAOrder(sliceLayout));
   else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>())
     return mmaLayout.getCTALayout();
+  // else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
+  //   return mfmaLayout.getCTALayout();
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(dotLayout),
                               getCTASplitNum(dotLayout),
@@ -509,7 +512,9 @@ CTALayoutAttr getCTALayout(Attribute layout) {
   else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>())
     return sharedLayout.getCTALayout();
   else
-    llvm::report_fatal_error("Unimplemented usage of getCTALayout");
+
+    llvm::errs() << "layout = " << layout << "\n";
+    llvm::report_fatal_error("Unimplemented usage of getCTALayoutaaaaaaaa");
   return {};
 }
 

@@ -113,6 +113,13 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
+def run_bash_command_wrapper(commandstring, capture=True):
+    try:
+        run_bash_command(commandstring, capture)
+    except subprocess.CalledProcessError as e:
+        if not capture:
+            print(f"running {commandstring} one more time")
+        run_bash_command(commandstring, capture)
 
 def run_bash_command(commandstring, capture=True):
     if capture:
@@ -120,7 +127,6 @@ def run_bash_command(commandstring, capture=True):
         return proc.stdout.splitlines()
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash')
     return None
-
 
 def read_config(config):
     block_m = config.get('BLOCK_SIZE_M')
@@ -334,7 +340,7 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
     while jobId < jobs:
         if verbose:
             print(f"profiling {generated_kernel_name(M, N, K, jobId)} on GPU {gpuid}")
-        run_bash_command(f"rocprof --stats -o results-{jobId}.csv python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
+        run_bash_command_wrapper(f"rocprof --stats -o results-{jobId}.csv python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
         jobId += ngpus
 
 

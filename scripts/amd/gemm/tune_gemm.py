@@ -100,6 +100,8 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         if large_gemm:
             if BLOCK_SIZE_M < (128/elemBytes_a) or BLOCK_SIZE_N < (128/elemBytes_a):
                 continue
+            if BLOCK_SIZE_K < 64:
+                continue
             if num_warps < 4:
                 continue
 
@@ -473,11 +475,11 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, config, v
     # print(f"triton_output={triton_output}")
     # print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
-    col_a_str = 'T' if col_a else 'N'
-    col_b_str = 'T' if col_b else 'N'
+    row_a_str = 'N' if col_a else 'T'
+    row_b_str = 'N' if col_b else 'T'
     size_str = ''
     if verbose:
-        size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {col_a_str}{col_b_str}'
+        size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {row_a_str}{row_b_str}'
     if torch.allclose(triton_output.to(torch.float16), torch_output, atol=1e-1, rtol=rtol):
         print(f'{size_str} Correct✅')
     else:
@@ -563,13 +565,13 @@ def process_item(item):
     M = item['M']
     N = item['N']
     K = item['K']
-    col_a = True if item['transA'] == 'T' else False
-    col_b = True if item['transB'] == 'T' else False
+    col_a = False if item['rowMajorA'] == 'T' else True
+    col_b = False if item['rowMajorB'] == 'T' else True
     del item['M']
     del item['N']
     del item['K']
-    del item['transA']
-    del item['transB']
+    del item['rowMajorA']
+    del item['rowMajorB']
     return M, N, K, col_a, col_b, item
 
 def type_name_to_bytes(ty_name):
@@ -586,6 +588,8 @@ def type_name_to_bytes(ty_name):
 def format_output(unformatted):
     if unformatted < 0.0001:
         formatted = "{:.3e}".format(unformatted)
+    elif unformatted > 1000:
+        formatted = "{:.1f}".format(unformatted)
     else:
         formatted = "{:.2f}".format(unformatted)
     return formatted
@@ -613,6 +617,7 @@ def main():
 
     if run_bench:
         gpus = [gpus[0]]
+        jobs = 1
 
     # Get element type
     dtype_a = args.dtype_a
@@ -623,9 +628,6 @@ def main():
         print("Supported types: ", list(name_to_tl_types.keys()))
         sys.exit(1)
 
-    # Get transpose settings
-    col_a = args.col_a
-    col_b = args.col_b
 
     mnks = []
     # TODO: make it more robust to get user input
@@ -654,7 +656,7 @@ def main():
     start_time = datetime.now()
     if run_bench:
         print(f"Benchmarking gemm with {dtype_a} inputs (peak tflops: {ty_to_peak_perf[dtype_a]})")
-        print("trans    M     N     K    TFLOPS  Efficiency")
+        print("trans     M      N      K    TFLOPS    Efficiency")
     else:
         print(f"Tuning starts at: {start_time}", flush=True)
         f_results = open(tuning_output_file, 'w')
@@ -665,9 +667,9 @@ def main():
         # If running benchmark, use the provided config
         pruned_configs = [myConfig] if run_bench else prune_configs(M, N, K, configs_full, type_name_to_bytes(dtype_a), type_name_to_bytes(dtype_b))
 
-        col_a_str = 'T' if col_a else 'N'
-        col_b_str = 'T' if col_b else 'N'
-        size_str = f'SIZE: {M} {N} {K} {col_a_str}{col_b_str}'
+        row_a_str = 'N' if col_a else 'T'
+        row_b_str = 'N' if col_b else 'T'
+        size_str = f'SIZE: {M} {N} {K} {row_a_str}{row_b_str}'
         if not run_bench:
             print(f"{size_str} nConfigs: {len(pruned_configs)}", end=" ", flush=True)
 
@@ -693,11 +695,10 @@ def main():
 
         # write best config to tuning_results.yaml
         if run_bench:
-            #print("trans  M     N     K    TFLOPS  Efficiency")
             eff = tri_tflops / ty_to_peak_perf[dtype_a] * 100
-            print(f"{col_a_str}{col_b_str}    {M:4d}  {N:4d}  {K:4d}    {formatted_tflops}         {eff:.0f}%")
+            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    {formatted_tflops}         {eff:.0f}%")
 
-        sizeDict = {'M': M, 'N': N, 'K': K, 'transA': col_a_str, 'transB': col_b_str}
+        sizeDict = {'M': M, 'N': N, 'K': K, 'rowMajorA': row_a_str, 'rowMajorB': row_b_str}
         sizeDict.update(bestConfig)
         if not run_bench:
             f_results.write("- " + str(sizeDict) + " ")

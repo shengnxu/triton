@@ -71,7 +71,9 @@ Here is the list of changes to the API.
 The provided types must be one of ['fp32', 'fp16', 'bf16', 'fp8', 'bf8', 'int8'].
 - Row/col major-ness of operand a and b can be provided as `-col_a` and `-col_b`.
 If set, it means the corresponding operand is column major.
-The major-ness is considered as problem input. So they should be included in the input yaml file.
+The major-ness is considered as problem input. 
+So they should be included in the input yaml file. However, in the yaml file, user should
+set `rowMajowA` and `rowMajorB` as shown in the example below.
 - `--benchmark` is used to control if the perf config in the input yaml file is used as the tuning space.
 
 Some implementation changes
@@ -84,8 +86,8 @@ Some implementation changes
 
 Let's say we have an input yaml file, named `gemm_input.yaml`, that contains the following configs
 ```yaml
-- {'M': 4864, 'N': 4096, 'K': 8192, 'transA': 'N', 'transB': 'T'}
-- {'M': 8192, 'N': 8192, 'K': 8192, 'transA': 'N', 'transB': 'T'}
+- {'M': 4864, 'N': 4096, 'K': 8192, 'rowMajorA': 'T', 'rowMajorB': 'N'}
+- {'M': 8192, 'N': 8192, 'K': 8192, 'rowMajorA': 'T', 'rowMajorB': 'N'}
 ```
 1. Tuning with bf8 input types with gpu 4,5,6,7, and save output to `output.yaml`
 ```bash

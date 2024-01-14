@@ -27,7 +27,7 @@ def get_full_tuning_space():
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
-    num_stage_range = [1, 0]
+    num_stage_range = [0]
     waves_per_eu_range = [0]
 
     for block_m in block_mn_range:
@@ -198,11 +198,10 @@ def generated_kernel_name(M, N, K, gpu_id):
 # 4. test_gemm to invoke
 # 4.1 run try_config in parallel
 # 4.2 matmul in a loop of 10 iterations
-def generate_kernel(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, gpus, run_bench):
+def generate_kernel(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, jobs, run_bench):
     filenames = []
-    ngpus = len(gpus)
-    for gpu_id in gpus:
-        filenames.append(generated_kernel_name(M, N, K, gpu_id))
+    for i in range(jobs):
+        filenames.append(generated_kernel_name(M, N, K, i))
     f_kernel = [open(path, 'w') for path in filenames]
 
     # write imports
@@ -214,7 +213,7 @@ import sys
 import multiprocessing
 from tune_gemm import gen_input
 """
-    for fi in range(ngpus):
+    for fi in range(jobs):
         f_kernel[fi].write(import_str + "\n")
 
     # write definitions of matmul_kernel_xxx
@@ -223,7 +222,7 @@ from tune_gemm import gen_input
         matmul_kernel_code = file.read()
     idx = 0
     for config in configs:
-        file_idx = idx % ngpus
+        file_idx = idx % jobs
         configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, config)
         # Copy the matmul_kernel with name replaced
         matmul_kernel_config = matmul_kernel_code.replace("matmul_kernel", f"matmul_kernel_{configStr}")
@@ -249,7 +248,7 @@ from tune_gemm import gen_input
         results = []
         config_names = []
 """
-    for fi in range(ngpus):
+    for fi in range(jobs):
         f_kernel[fi].write(test_gemm_pre_str + "\n")
 
     # warm up call of all matmul functions in parallel
@@ -258,10 +257,10 @@ from tune_gemm import gen_input
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
         task_str = f"        results += [thread_pool.apply_async(try_config_{configStr}, args=task_args)]\n" + \
                    f"        config_names += ['{configStr}']\n"
-        f_kernel[idx % ngpus].write(task_str)
+        f_kernel[idx % jobs].write(task_str)
         idx += 1
 
-    for fi in range(ngpus):
+    for fi in range(jobs):
         threadpool_str = """
         failed_configs = []
         for i in range(len(results)):
@@ -291,10 +290,10 @@ from tune_gemm import gen_input
         if '{configStr}' not in failed_configs:
             for i in range({runs}):
                 d = matmul_{configStr}(a, b, c, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
-        f_kernel[idx % ngpus].write(matmul_call_str + "\n")
+        f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
-    for fi in range(ngpus):
+    for fi in range(jobs):
         f_kernel[fi].write("        return d\n")
 
     # def main and call test_gemm
@@ -308,7 +307,7 @@ def main():
     numThreads = args.n
     """
     test_gemm_call_str = f'test_gemm({M}, {N}, {K}, numThreads)'
-    for fi in range(ngpus):
+    for fi in range(jobs):
         f_kernel[fi].write(def_main_str)
         f_kernel[fi].write(test_gemm_call_str + "\n\n")
         f_kernel[fi].write("""if __name__ == '__main__':
@@ -323,29 +322,38 @@ def extract_kernel_time(M, N, K, config, df):
     return config, meanTime
 
 
-def profile_batch_kernels(M, N, K, gpuid, verbose):
+def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
+    ngpus = len(gpus)
+    gpuIdx = gpus.index(gpuid)
+    if gpuIdx + 1 > jobs:
+        return
     os.environ['ROCR_VISIBLE_DEVICES'] = str(gpuid)
-    run_bash_command(f"rocprof --stats -o results-{gpuid}.csv python {generated_kernel_name(M, N, K, gpuid)}", capture=(verbose < 2))
+    jobId = gpuIdx
+    while jobId < jobs:
+        if verbose:
+            print(f"profiling {generated_kernel_name(M, N, K, jobId)} on GPU {gpuid}")
+        run_bash_command(f"rocprof --stats -o results-{jobId}.csv python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
+        jobId += ngpus
 
 
-def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, run_bench, verbose=0, num_threads=16, gpus=[0]):
+def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, run_bench, jobs, verbose=0, num_threads=16, gpus=[0]):
     # Generate kernel out of all configs
-    generate_kernel(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, gpus, run_bench)
+    generate_kernel(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, jobs, run_bench)
 
     # remove any compiled kernel in the cache
     run_bash_command("rm -rf ~/.triton/cache")
 
     # precompile the kernels in parallel
     start_time = datetime.now()
-    for gpu_id in gpus:
-        run_bash_command(f"python {generated_kernel_name(M, N, K, gpu_id)} -n {num_threads}", capture=(verbose < 2))
+    for i in range(jobs):
+        run_bash_command(f"python {generated_kernel_name(M, N, K, i)} -n {num_threads}", capture=(verbose < 2))
     compile_end = datetime.now()
     compile_time = compile_end - start_time
     if verbose:
         print(f"compile time: {compile_time}", flush=True)
 
     # profile generated kernels
-    running = [multiprocessing.Process(target=profile_batch_kernels, args=(M, N, K, gpu_id, verbose)) for gpu_id in gpus]
+    running = [multiprocessing.Process(target=profile_batch_kernels, args=(M, N, K, gpu_id, gpus, jobs, verbose)) for gpu_id in gpus]
     for p in running:
         p.start()
     for p in running:
@@ -362,10 +370,9 @@ def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, configs, 
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [pd.read_csv(f"results-{gpuid}.csv") for gpuid in gpus]
+    df_prof = [pd.read_csv(f"results-{i}.csv") for i in range(jobs)]
     for config in configs:
-        file_idx = idx % len(gpus)
-        gpu_id = gpus[file_idx]
+        file_idx = idx % jobs
         tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx]))]
         idx += 1
     thread_pool.close()
@@ -513,6 +520,7 @@ def parse_args():
     parser.add_argument("--time_breakdown", action='store_true', default=False, help="Show detailed time breakdown of each step during the tuning")
     parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
+    parser.add_argument("--jobs", type=int, default=16, help="number of generated files")
     args = parser.parse_args()
 
     return args
@@ -588,6 +596,7 @@ def main():
     tuning_output_file = args.o
     keepTmp = args.keep
     run_bench = args.benchmark
+    jobs = args.jobs
 
     # Get GPU ids
     ngpus = args.ngpus
@@ -668,7 +677,7 @@ def main():
             verbose_level = 1
         if args.verbose:
             verbose_level = 2
-        minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, pruned_configs, run_bench, num_threads=args.num_threads, gpus=gpus, verbose=verbose_level)
+        minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, pruned_configs, run_bench, jobs, num_threads=args.num_threads, gpus=gpus, verbose=verbose_level)
 
         # post processing the numbers
         perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us * 1e-6)
@@ -696,11 +705,11 @@ def main():
 
         # remove generated files if asked to
         if not keepTmp:
-            for gpu_id in gpus:
-                generated_script = generated_kernel_name(M, N, K, gpu_id)
+            for i in range(jobs):
+                generated_script = generated_kernel_name(M, N, K, i)
                 os.remove(generated_script)
                 os.remove(generated_script + ".failed_configs")
-                for f in glob.glob(f"results-{gpu_id}.*"):
+                for f in glob.glob(f"results-{i}.*"):
                     os.remove(f)
 
         # Check correctness if asked to

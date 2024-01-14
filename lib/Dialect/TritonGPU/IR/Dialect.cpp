@@ -548,7 +548,7 @@ SmallVector<unsigned> getCTAsPerCGA(Attribute layout) {
     ref = mmaLayout.getCTALayout().getCTAsPerCGA();
 #ifdef USE_ROCM
   else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
-    ref = mfmaLayout.getCTALayout().getCTAsPerCGA();
+    return {1, 1};
 #endif
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return getCTAsPerCGA(dotLayout.getParent());
@@ -573,8 +573,8 @@ SmallVector<unsigned> getCTASplitNum(Attribute layout) {
                mmaLayout.getCTALayout().getCTASplitNum().end());
 #ifdef USE_ROCM
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    res.assign(mfmaLayout.getCTALayout().getCTASplitNum().begin(),
-               mfmaLayout.getCTALayout().getCTASplitNum().end());
+    res.resize(2);
+    res[0] = res[1] = 1;
 #endif
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     res = getCTASplitNum(dotLayout.getParent());
@@ -603,7 +603,7 @@ SmallVector<unsigned> getCTAOrder(Attribute layout) {
     ref = mmaLayout.getCTALayout().getCTAOrder();
 #ifdef USE_ROCM
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    ref = mfmaLayout.getCTALayout().getCTAOrder();
+    return {0, 1};
 #endif
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return getCTAOrder(dotLayout.getParent());
@@ -678,8 +678,9 @@ unsigned getNumCTAs(Attribute layout) {
   else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>())
     CTAsPerCGA = mmaLayout.getCTALayout().getCTAsPerCGA();
 #ifdef USE_ROCM
-  else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
-    CTAsPerCGA = mfmaLayout.getCTALayout().getCTAsPerCGA();
+  else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
+    return 1;
+  }
 #endif
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return getNumCTAs(dotLayout.getParent());
@@ -1374,9 +1375,6 @@ Attribute MfmaEncodingAttr::parse(AsmParser &parser, Type type) {
   unsigned nonKDim = 0;
   SmallVector<unsigned> warpsPerCTA;
   bool isTransposed;
-  SmallVector<unsigned> CTAsPerCGA;
-  SmallVector<unsigned> CTASplitNum;
-  SmallVector<unsigned> CTAOrder;
 
   for (const NamedAttribute &attr : dict) {
     if (attr.getName() == "nonKDim") {
@@ -1390,35 +1388,17 @@ Attribute MfmaEncodingAttr::parse(AsmParser &parser, Type type) {
       if (parseBool(parser, attr, isTransposed, "isTransposed").failed())
         return {};
     }
-    if (attr.getName() == "CTAsPerCGA") {
-      if (parseIntArrayAttr(parser, attr, CTAsPerCGA, "CTAsPerCGA").failed())
-        return {};
-    }
-    if (attr.getName() == "CTASplitNum") {
-      if (parseIntArrayAttr(parser, attr, CTASplitNum, "CTASplitNum").failed())
-        return {};
-    }
-    if (attr.getName() == "CTAOrder") {
-      if (parseIntArrayAttr(parser, attr, CTAOrder, "CTAOrder").failed())
-        return {};
-    }
   }
 
-  auto CTALayout = CTALayoutAttr::get(parser.getContext(), CTAsPerCGA,
-                                      CTASplitNum, CTAOrder);
-
-  return parser.getChecked<MfmaEncodingAttr>(
-      parser.getContext(), nonKDim, warpsPerCTA, isTransposed, CTALayout);
+  return parser.getChecked<MfmaEncodingAttr>(parser.getContext(), nonKDim,
+                                             warpsPerCTA, isTransposed);
 }
 
 void MfmaEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
           << "nonKDim = " << getNonKDim() << ", "
           << "warpsPerCTA = [" << getWarpsPerCTA() << "], "
-          << "isTransposed = " << getIsTransposed() << ", "
-          << "CTAsPerCGA = [" << getCTALayout().getCTAsPerCGA() << "], "
-          << "CTASplitNum = [" << getCTALayout().getCTASplitNum() << "], "
-          << "CTAOrder = [" << getCTALayout().getCTAOrder() << "]}>";
+          << "isTransposed = " << getIsTransposed() << "}>";
 }
 
 //===----------------------------------------------------------------------===//

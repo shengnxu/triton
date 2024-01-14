@@ -65,8 +65,8 @@ Workflow of the tuning process
 
 # GEMM Tuning Script v3
 
-The major change in v3 is the support for all input data types, especially fp8 and bf8.
-Here is the list of changes to the API.
+### API changes
+
 - Input and output data types can be provided as `-dtype_a`, `-dtype_b`, and `-dtype_c`.
 The provided types must be one of ['fp32', 'fp16', 'bf16', 'fp8', 'bf8', 'int8'].
 - Row/col major-ness of operand a and b can be provided as `-col_a` and `-col_b`.
@@ -75,12 +75,19 @@ The major-ness is considered as problem input.
 So they should be included in the input yaml file. However, in the yaml file, user should
 set `rowMajowA` and `rowMajorB` as shown in the example below.
 - `--benchmark` is used to control if the perf config in the input yaml file is used as the tuning space.
+- `--jobs` is used to control the number of .py files for generated kernels.
+Note that this can be different from `ngpus`. This usually means multiple kernel files
+will be profiled on each GPU.
+This is necessary to keep each file "small" in terms of execution time.
 
-Some implementation changes
+### Implementation changes
 - `gen_input` is used to generate matmul inputs.
-- In benchmark mode, the kernel is executed 1000 times.
-- In tuning mode, each kernel is executed 200 times. We cannot afford to larger runs since rocprof hangs if the session takes too long.
-- In both tuning and benchmark mode, kernel time is measured as the average execution time of the last 100 instances.
+- Time measurement
+    - In benchmark mode, the kernel is executed 1000 times.
+    - In tuning mode, each kernel is executed 200 times. We cannot afford to larger runs since rocprof hangs if the session takes too long.
+    - In both tuning and benchmark mode, kernel time is measured as the average execution time of the last 100 instances.
+- Added error recovery. This helps when rocprof crashes in multi-processing mode. 
+
 
 ### Example Usage
 

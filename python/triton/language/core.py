@@ -547,6 +547,18 @@ class constexpr:
         return self.value(*args, **kwds)
 
 
+    def to(self, dtype):
+        if dtype in [int1, int8, int16, int32, int64, uint8, uint16, uint32, uint64]:
+            ret_ty = int
+        elif dtype.is_bool():
+            ret_ty = bool
+        elif dtype in [float8e5, float8e5b16, float8e4nv, float8e4b8, float8e4b15, float8e4b15x4, float32, float64]:
+            ret_ty = float
+
+        # Convert the value
+        return constexpr(ret_ty(self.value))
+##
+
 class tensor:
 
     def __init__(self, handle, type: dtype):

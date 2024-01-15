@@ -204,7 +204,7 @@ def gen_input(M, N, ty_name, seed, device='cuda'):
 # Unit Test
 # ---------
 #
-# We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
+# We can test our custom matrix multiplication operation against a native torch implementation (i.e., rocBLAS).
 @pytest.mark.parametrize("M, N, K, in_dtype, out_dtype",
 [ (*shape, in_dtype, out_dtype)
     for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
@@ -245,7 +245,7 @@ def test_correctness(M, N, K, in_dtype, out_dtype):
 # Square Matrix Performance
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
-# We can now compare the performance of our kernel against that of cuBLAS. Here we focus on square matrices,
+# We can now compare the performance of our kernel against that of rocBLAS. Here we focus on square matrices,
 # but feel free to arrange this script as you wish to benchmark any other matrix shape.
 
 def get_type(provider):

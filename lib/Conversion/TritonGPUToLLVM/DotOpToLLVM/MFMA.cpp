@@ -278,7 +278,7 @@ struct DotOpMFMAConversionHelper {
     if (aElemTy.isF32())
       return MatrixCoreType::FP32_FP32_FP32_FP32;
     if (aElemTy.isBF16()) {
-      auto nonKDim = mfmaEncoding.getNonKDim();
+      auto nonKDim = mfmaEncoding.getInstrShape()[0];
       auto kWidth = dotOpEncoding.getKWidth();
       if ((nonKDim == 32 || nonKDim == 16 || nonKDim == 4) && kWidth == 4) {
         return MatrixCoreType::FP32_BF16_BF16_FP32_1K;
@@ -289,7 +289,7 @@ struct DotOpMFMAConversionHelper {
       }
     }
     if (aElemTy.isInteger(8)) {
-      auto nonKDim = mfmaEncoding.getNonKDim();
+      auto nonKDim = mfmaEncoding.getInstrShape()[0];
       auto kWidth = dotOpEncoding.getKWidth();
       if ((nonKDim == 32 || nonKDim == 16 || nonKDim == 4) && kWidth == 8) {
         return MatrixCoreType::INT32_INT8_INT8_INT32_CDNA3;
@@ -308,7 +308,7 @@ struct DotOpMFMAConversionHelper {
     auto tensorTy = op.getD().getType().cast<RankedTensorType>();
     auto encoding = tensorTy.getEncoding().cast<MfmaEncodingAttr>();
     descr.coreType = getMatrixCoreTypeFromDot(op);
-    descr.size = encoding.getNonKDim();
+    descr.size = encoding.getInstrShape()[0];
     return descr;
   }
 
@@ -385,7 +385,7 @@ struct DotOpMFMAConversionHelper {
   // Conduct the Dot conversion.
   LogicalResult convertDot(DotOp op, DotOpAdaptor adaptor) const {
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-    auto nonKDim = mfmaLayout.getNonKDim();
+    auto nonKDim = mfmaLayout.getInstrShape()[0];
     assert(nonKDim == 32 || nonKDim == 16 || nonKDim == 4);
     auto mfmaInstrDescr = getMatrixInstrDescr(op);
 

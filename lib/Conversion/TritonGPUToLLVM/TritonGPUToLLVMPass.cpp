@@ -771,7 +771,8 @@ private:
     auto srcMfma =
         srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
     auto newMfmaEnc = triton::gpu::MfmaEncodingAttr::get(
-        mod.getContext(), srcMfma.getNonKDim(), {warpsPerCtaX, warpsPerCtaY},
+        mod.getContext(), srcMfma.getVersionMajor(), srcMfma.getVersionMinor(),
+        {warpsPerCtaX, warpsPerCtaY}, srcMfma.getInstrShape(),
         srcMfma.getIsTransposed());
 
     auto newDstType = RankedTensorType::get(

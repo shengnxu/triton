@@ -133,9 +133,9 @@ public:
   /// @brief Choose MFMA instruction parameters
   /// @param dot target dot operation
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
-  std::pair<int64_t, int64_t> chooseMfmaDimensions(tt::DotOp dot) const {
+  std::pair<unsigned, unsigned> chooseMfmaDimensions(tt::DotOp dot) const {
     // number of matrix elements along k dim per one MFMA intruction
-    int64_t kDim = -1;
+    unsigned kDim = 0;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
 
     auto dataTypeA = opType.getElementType();
@@ -145,11 +145,11 @@ public:
     auto resType = dot.getD().getType().cast<RankedTensorType>();
     auto resShape = resType.getShape();
 
-    int64_t nonKDim = -1;
+    unsigned nonKDim = 0;
     if (enforcedNonKDim != 0) {
       nonKDim = enforcedNonKDim;
     } else {
-      nonKDim = -1;
+      nonKDim = 0;
       int minSize = std::min(resShape[0], resShape[1]);
       if (minSize >= 32)
         nonKDim = 32;
@@ -157,7 +157,7 @@ public:
         nonKDim = 16;
       if (minSize < 16)
         nonKDim = 4;
-      assert(nonKDim != -1);
+      assert(nonKDim != 0);
     }
 
     auto maybeMfmaInsn =
@@ -211,8 +211,10 @@ public:
         warpsPerTileMFMA(dotOp, retShape, numWarps, {nonKDim, nonKDim});
 
     bool isTransposed = isChainDot(dotOp);
-    mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,
-                                         warpsPerTile, isTransposed);
+    mfmaEnc = ttg::MfmaEncodingAttr::get(
+        oldRetType.getContext(),
+        /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
+        /*instrShape*/ {nonKDim, nonKDim}, isTransposed);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);

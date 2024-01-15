@@ -513,7 +513,7 @@ CTALayoutAttr getCTALayout(Attribute layout) {
   else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>())
     return sharedLayout.getCTALayout();
   else
-    llvm::report_fatal_error("Unimplemented usage of getCTALayoutaaaaaaaa");
+    llvm::report_fatal_error("Unimplemented usage of getCTALay");
   return {};
 }
 

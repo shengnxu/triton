@@ -139,7 +139,6 @@ static SmallVector<Value> convert_val_Fp16_to_Fp8(
   Location loc, ConversionPatternRewriter &rewriter, 
   Value v0, Value v1, const std::string& fp8_format) {
   assert(fp8_format == "fp8" or fp8_format == "bf8");
-  std::string ins_str = "v_cvt_pk_" + fp8_format + "_f32";
 
   // Convert fp16 to fp32
   auto f32_0 = cvtFp16ToFp32(loc, rewriter, v0);
@@ -287,6 +286,55 @@ static const std::string Fp8E5M2_to_Fp16(bool hasNativeFP) {
   return ret;
 }
 #endif
+
+static Value convertBf16ToFp32(Location loc,
+                                ConversionPatternRewriter &rewriter,
+                                const Value &v) {
+#ifdef USE_ROCM
+  auto as_int16 = bitcast(v, i16_ty);
+  auto as_int32 = zext(i32_ty, as_int16);
+  auto shifted = shl(i32_ty, as_int32, i32_val(16));
+  return(bitcast(shifted, f32_ty));
+#else
+  PTXBuilder builder;
+  auto &cvt = *builder.create("cvt.f32.bf16");
+  auto res = builder.newOperand("=r");
+  auto operand = builder.newOperand(v, "h");
+  cvt(res, operand);
+  return builder.launch(rewriter, loc, f32_ty, false);
+#endif
+}
+
+static Value convertFp32ToBf16(Location loc,
+                                ConversionPatternRewriter &rewriter,
+                                const Value &v) {
+#ifdef USE_ROCM
+  auto as_uint32 = bitcast(v, i32_ty);
+  auto check_exponent = and_(i32_ty, xor_(i32_ty, as_uint32, i32_val(0xffffffff)), i32_val(0x7f800000));
+  auto exponent_not_all1s = icmp_ne(check_exponent, i32_val(0)); 
+  auto exponent_all1s = icmp_eq(check_exponent, i32_val(0)); 
+  auto rounded = add(i32_ty, i32_val(0x7fff),  and_(i32_ty, lshr(i32_ty, as_uint32, i32_val(16)), i32_val(1)) );
+  rounded = add(i32_ty, rounded, as_uint32);
+  auto res = select(exponent_not_all1s, rounded, as_uint32); 
+
+  auto preserve_nan = and_( i1_ty, exponent_all1s, icmp_ne(and_(i32_ty, as_uint32, i32_val(0xffff)), i32_val(0)) );
+  auto nan = or_(i32_ty, as_uint32, i32_val(0x10000));
+  res = select(preserve_nan, nan, res); 
+
+  auto shifted = lshr(i32_ty, res, i32_val(16));
+  auto truncated = trunc(i16_ty, shifted);
+  return truncated;
+#else
+  PTXBuilder builder;
+  auto &cvt = *builder.create("cvt.rn.bf16.f32");
+  auto res = builder.newOperand("=h");
+  auto operand = builder.newOperand(v, "r");
+  cvt(res, operand);
+  // TODO: This is a hack to get the right type. We should be able to invoke
+  // the type converter
+  return builder.launch(rewriter, loc, i16_ty, false);
+#endif
+}
 
 #ifdef USE_ROCM
 static Value Fp8E5M2FNUZ_to_Fp16_oneValue(
@@ -566,30 +614,14 @@ static const std::string Bf16_to_Fp8E5M2(bool hasNativeFP) {
 // ROCM type conversion between fp8 and bf16
 #ifdef USE_ROCM
 
-static Value cvtBf16ToFp32(Location loc, 
-  ConversionPatternRewriter &rewriter, Value v) {
-  auto bf16x2VecTy = vec_ty(i16_ty, 2);
-  Value a0 = undef(bf16x2VecTy);
-  a0 = insert_element(bf16x2VecTy, a0, int_val(16,0), i32_val(0));
-  a0 = insert_element(bf16x2VecTy, a0, v, i32_val(1));
-  return bitcast(a0, i32_ty);
-}
-
-static Value cvtFp32ToBf16(Location loc, 
-  ConversionPatternRewriter &rewriter, Value v) {
-  auto bf16x2VecTy = vec_ty(i16_ty, 2);
-  Value a = bitcast(v, bf16x2VecTy);
-  return extract_element(i16_ty, a, i32_val(1));
-}
-
 // fp8e4m3fnuz to bf16
 static SmallVector<Value>
 Fp8E4M3FNUZ_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
   assert(v.size() == 2);
   auto ret = cvtFp8ToFp32(loc, rewriter, v[0], v[1], "fp8");
-  ret[0] = cvtFp32ToBf16(loc, rewriter, ret[0]);
-  ret[1] = cvtFp32ToBf16(loc, rewriter, ret[1]);
+  ret[0] = convertFp32ToBf16(loc, rewriter, ret[0]);
+  ret[1] = convertFp32ToBf16(loc, rewriter, ret[1]);
   return ret;
 }
 
@@ -598,8 +630,8 @@ static SmallVector<Value>
 Bf16_to_Fp8E4M3FNUZ(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
   assert(v.size() == 2);
-  auto v0 = cvtBf16ToFp32(loc, rewriter, v[0]);
-  auto v1 = cvtBf16ToFp32(loc, rewriter, v[1]);
+  auto v0 = convertBf16ToFp32(loc, rewriter, v[0]);
+  auto v1 = convertBf16ToFp32(loc, rewriter, v[1]);
   return cvtFp32ToFp8(loc, rewriter, v0, v1, "fp8");
 }
 
@@ -609,8 +641,8 @@ Fp8E5M2FNUZ_to_Bf16(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
   assert(v.size() == 2);
   auto ret = cvtFp8ToFp32(loc, rewriter, v[0], v[1], "bf8");
-  ret[0] = cvtFp32ToBf16(loc, rewriter, ret[0]);
-  ret[1] = cvtFp32ToBf16(loc, rewriter, ret[1]);
+  ret[0] = convertFp32ToBf16(loc, rewriter, ret[0]);
+  ret[1] = convertFp32ToBf16(loc, rewriter, ret[1]);
   return ret;
 }
 
@@ -619,8 +651,8 @@ static SmallVector<Value>
 Bf16_to_Fp8E5M2FNUZ(Location loc, ConversionPatternRewriter &rewriter,
                    const SmallVector<Value> &v) {
   assert(v.size() == 2);
-  auto v0 = cvtBf16ToFp32(loc, rewriter, v[0]);
-  auto v1 = cvtBf16ToFp32(loc, rewriter, v[1]);
+  auto v0 = convertBf16ToFp32(loc, rewriter, v[0]);
+  auto v1 = convertBf16ToFp32(loc, rewriter, v[1]);
   return cvtFp32ToFp8(loc, rewriter, v0, v1, "bf8");
 }
 #endif
@@ -1643,24 +1675,6 @@ struct FpToFpOpConversion
       : ElementwiseOpConversionBase(typeConverter, axisAnalysisPass, benefit),
         computeCapability(computeCapability) {}
 
-  static Value convertBf16ToFp32(Location loc,
-                                 ConversionPatternRewriter &rewriter,
-                                 const Value &v) {
-#ifdef USE_ROCM
-    auto as_int16 = bitcast(v, i16_ty);
-    auto as_int32 = zext(i32_ty, as_int16);
-    auto shifted = shl(i32_ty, as_int32, i32_val(16));
-    return(bitcast(shifted, f32_ty));
-#else
-    PTXBuilder builder;
-    auto &cvt = *builder.create("cvt.f32.bf16");
-    auto res = builder.newOperand("=r");
-    auto operand = builder.newOperand(v, "h");
-    cvt(res, operand);
-    return builder.launch(rewriter, loc, f32_ty, false);
-#endif
-  }
-
   static Value convertFp16ToFp32(Location loc,
                                  ConversionPatternRewriter &rewriter,
                                  const Value &v) {
@@ -1673,37 +1687,6 @@ struct FpToFpOpConversion
     auto operand = builder.newOperand(v, "h");
     cvt(res, operand);
     return builder.launch(rewriter, loc, f32_ty, false);
-#endif
-  }
-
-  static Value convertFp32ToBf16(Location loc,
-                                 ConversionPatternRewriter &rewriter,
-                                 const Value &v) {
-#ifdef USE_ROCM
-    auto as_uint32 = bitcast(v, i32_ty);
-    auto check_exponent = and_(i32_ty, xor_(i32_ty, as_uint32, i32_val(0xffffffff)), i32_val(0x7f800000));
-    auto exponent_not_all1s = icmp_ne(check_exponent, i32_val(0)); 
-    auto exponent_all1s = icmp_eq(check_exponent, i32_val(0)); 
-    auto rounded = add(i32_ty, i32_val(0x7fff),  and_(i32_ty, lshr(i32_ty, as_uint32, i32_val(16)), i32_val(1)) );
-    rounded = add(i32_ty, rounded, as_uint32);
-    auto res = select(exponent_not_all1s, rounded, as_uint32); 
-
-    auto preserve_nan = and_( i1_ty, exponent_all1s, icmp_ne(and_(i32_ty, as_uint32, i32_val(0xffff)), i32_val(0)) );
-    auto nan = or_(i32_ty, as_uint32, i32_val(0x10000));
-    res = select(preserve_nan, nan, res); 
-
-    auto shifted = lshr(i32_ty, res, i32_val(16));
-    auto truncated = trunc(i16_ty, shifted);
-    return truncated;
-#else
-    PTXBuilder builder;
-    auto &cvt = *builder.create("cvt.rn.bf16.f32");
-    auto res = builder.newOperand("=h");
-    auto operand = builder.newOperand(v, "r");
-    cvt(res, operand);
-    // TODO: This is a hack to get the right type. We should be able to invoke
-    // the type converter
-    return builder.launch(rewriter, loc, i16_ty, false);
 #endif
   }
 
@@ -1905,10 +1888,10 @@ template <typename OP>
 Value EmitDualBF16ElementwiseOp(Location loc,
                                 ConversionPatternRewriter &rewriter,
                                 MultipleOperandsRange operands) {
-  auto v0 = FpToFpOpConversion::convertBf16ToFp32(loc, rewriter, operands[0][0]);
-  auto v1 = FpToFpOpConversion::convertBf16ToFp32(loc, rewriter, operands[0][1]);
+  auto v0 = convertBf16ToFp32(loc, rewriter, operands[0][0]);
+  auto v1 = convertBf16ToFp32(loc, rewriter, operands[0][1]);
   auto result = rewriter.create<OP>(loc, f32_ty, v0, v1);
-  return FpToFpOpConversion::convertFp32ToBf16(loc, rewriter, result);
+  return convertFp32ToBf16(loc, rewriter, result);
 }
 
 struct CmpIOpConversion
@@ -2329,7 +2312,7 @@ struct SIToFPOpConversion
       return outVals;
     } else if (outElemTy.isBF16()) {
       auto value = rewriter.create<LLVM::SIToFPOp>(loc, f32_ty, operands[0][0]);
-      return {FpToFpOpConversion::convertFp32ToBf16(loc, rewriter, value)};
+      return {convertFp32ToBf16(loc, rewriter, value)};
     } else {
       return {rewriter.create<LLVM::SIToFPOp>(loc, elemTy, operands[0][0])};
     }
@@ -2350,7 +2333,7 @@ struct FPToSIOpConversion
     auto inElemTy = getElementType(op.getIn());
     if (inElemTy.isBF16()) {
       auto value =
-          FpToFpOpConversion::convertBf16ToFp32(loc, rewriter, operands[0][0]);
+          convertBf16ToFp32(loc, rewriter, operands[0][0]);
       return {rewriter.create<LLVM::FPToSIOp>(loc, elemTy, value)};
     } else {
       return {rewriter.create<LLVM::FPToSIOp>(loc, elemTy, operands[0][0])};
@@ -2373,8 +2356,7 @@ struct ExtFOpConversion
     if (inElemTy.isBF16()) {
       auto outElemTy = getElementType(op.getOut());
       assert(outElemTy.isF32() && "unsupported conversion");
-      return {
-          FpToFpOpConversion::convertBf16ToFp32(loc, rewriter, operands[0][0])};
+      return {convertBf16ToFp32(loc, rewriter, operands[0][0])};
     } else {
       return {rewriter.create<LLVM::FPExtOp>(loc, elemTy, operands[0][0])};
     }
@@ -2396,8 +2378,7 @@ struct TruncFOpConversion
     if (outElemTy.isBF16()) {
       auto inElemTy = getElementType(op.getIn());
       assert(inElemTy.isF32() && "unsupported conversion");
-      return {
-          FpToFpOpConversion::convertFp32ToBf16(loc, rewriter, operands[0][0])};
+      return {convertFp32ToBf16(loc, rewriter, operands[0][0])};
     } else {
       return {rewriter.create<LLVM::FPTruncOp>(loc, elemTy, operands[0][0])};
     }

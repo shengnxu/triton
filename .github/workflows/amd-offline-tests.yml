@@ -111,6 +111,7 @@ jobs:
           cd $UPSTREAM_REPO_DIR/third_party
           rm -rf amd
           git clone --branch $BRANCH_NAME https://github.com/ROCmSoftwarePlatform/triton amd
+          git add .
           git log -1 --pretty=format:"%H, %an, %ad, %s"
           
           # build upstream with this branch as a backend

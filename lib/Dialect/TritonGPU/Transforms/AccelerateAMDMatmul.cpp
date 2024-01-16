@@ -214,7 +214,7 @@ public:
     mfmaEnc = ttg::MfmaEncodingAttr::get(
         oldRetType.getContext(),
         /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
-        /*instrShape*/ {nonKDim, nonKDim}, isTransposed);
+        /*instrShape*/ nonKDim, nonKDim, isTransposed);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);

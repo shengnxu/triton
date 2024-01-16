@@ -162,7 +162,7 @@ struct DotOpMFMAConversionHelper {
   // Conduct the Dot conversion.
   LogicalResult convertDot(DotOp op, DotOpAdaptor adaptor) const {
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-    auto nonKDim = mfmaLayout.getInstrShape()[0];
+    auto nonKDim = mfmaLayout.getMDim();
     auto mfmaVersion = mfmaLayout.getVersionMajor();
     assert(nonKDim == 32 || nonKDim == 16 || nonKDim == 4);
 

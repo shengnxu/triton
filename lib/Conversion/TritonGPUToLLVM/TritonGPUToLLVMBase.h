@@ -772,8 +772,7 @@ public:
   void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
                             SmallVector<SmallVector<unsigned>> &offsets,
                             unsigned ctaOffsetX, unsigned ctaOffsetY) const {
-    auto mfmaInstrShape = mfmaLayout.getInstrShape();
-    int mfmaMDim = mfmaInstrShape[0];
+    int mfmaMDim = mfmaLayout.getMDim();
     // MFMA output tile consists of repeated "dot operand B" layout groups along
     // row axis. This variable defines number of these groups.
     DenseMap<int, int> groups{{4, 1}, {16, 1}, {32, 4}};
@@ -1192,8 +1191,7 @@ private:
     assert(_warpsPerCTA.size() == 2);
     SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
                                       i32_val(_warpsPerCTA[1])};
-    auto mfmaInstrShape = mfmaLayout.getInstrShape();
-    int mfmaMDim = mfmaInstrShape[0];
+    int mfmaMDim = mfmaLayout.getMDim();
 
     Value threadId = getThreadId(rewriter, loc);
     Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
@@ -1238,8 +1236,7 @@ private:
     for (unsigned d = 0; d < 2; ++d) {
       unsigned inPerCTA = std::min<unsigned>(tensorShape[d], shapePerCTA[d]);
       unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
-      numWarpsPerDim[d] =
-          ceil<unsigned>(inPerWarp, mfmaLayout.getInstrShape()[d]);
+      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getMDim());
     }
 
     for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {

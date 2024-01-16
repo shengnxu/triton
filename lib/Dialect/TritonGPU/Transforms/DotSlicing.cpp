@@ -67,11 +67,13 @@ bool isElementwiseOp(Operation *op) {
     return true;
   return false;
 }
+} // anonymous namespace
 
-struct DotSlicingPass : public TritonGPUDotSlicingBase<DotSlicingPass> {
-  DotSlicingPass() = default;
+struct TritonAMDGPUDotSlicingPass
+    : public TritonAMDGPUDotSlicingBase<TritonAMDGPUDotSlicingPass> {
+  TritonAMDGPUDotSlicingPass() = default;
 
-  DotSlicingPass(int sliceKTile) { this->sliceKTile = sliceKTile; }
+  TritonAMDGPUDotSlicingPass(int sliceKTile) { this->sliceKTile = sliceKTile; }
 
   // Find user of the currOp that affects dotOperand calculation.
   // We assume here that there is only one such user.
@@ -455,12 +457,8 @@ struct DotSlicingPass : public TritonGPUDotSlicingBase<DotSlicingPass> {
       dotSlicingDCE(eraseOps);
     });
   }
-
-private:
-  int sliceKTile;
 };
-} // anonymous namespace
 
-std::unique_ptr<Pass> mlir::createTritonGPUDotSlicingPass(int sliceKTile) {
-  return std::make_unique<DotSlicingPass>(sliceKTile);
+std::unique_ptr<Pass> mlir::createTritonAMDGPUDotSlicingPass(int sliceKTile) {
+  return std::make_unique<TritonAMDGPUDotSlicingPass>(sliceKTile);
 }

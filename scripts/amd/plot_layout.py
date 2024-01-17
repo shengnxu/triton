@@ -308,7 +308,7 @@ def main():
             )
 
     with open("myplot.tex", 'w') as f_plot:
-        with open("tikzplot.tex") as file:
+        with open("/triton/scripts/amd/tikzplot.tex") as file:
             tikz_code = file.read()
 
         preamble_str = draw_preamble_cmd()

@@ -1393,7 +1393,7 @@ struct AtomicRMWOpConversion
         }
       } else {
         Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
-        atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
+        atomPtr = bitcast(atomPtr, ptr_ty(getContext(), 3));
         store(retVal, atomPtr);
         Value ret = load(valueElemTy, atomPtr);
         rewriter.replaceOp(op, {ret});

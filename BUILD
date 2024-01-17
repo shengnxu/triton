@@ -718,7 +718,7 @@ cc_library(
         "lib/Conversion/TritonGPUToLLVM/**/*.cpp",
     ]) + [
         "include/triton/Conversion/MLIRTypes.h",
-        "lib/Dialect/TritonGPU/Transforms/Utility.cpp",  # Avoid circular dependency.
+        "lib/Dialect/TritonNvidiaGPU/Transforms/Utility.cpp",  # Avoid circular dependency.
     ],
     hdrs = glob([
         "include/triton/Tools/Sys/*.hpp",

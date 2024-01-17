@@ -156,7 +156,7 @@ compared to 1*64 when the hasLeadingOffset is false.
             //
             // maxPhase is set to SIMDWidth / perPhase
             int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
-            // On MI300, fp8 nd int8 mfma is assigned to VGPRs for the operands
+            // On MI300, fp8 and int8 mfma is assigned to VGPRs for the operands
             if (3 == mfmaEnc.getVersionMajor() && 8 == typeWidthInBit)
               vecSize = 8;
             int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);

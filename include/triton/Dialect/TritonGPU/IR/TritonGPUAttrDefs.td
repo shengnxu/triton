@@ -46,7 +46,7 @@ Right now, Triton implements two classes of layouts: shared, and distributed.
 //===----------------------------------------------------------------------===//
 
 def CTALayoutAttr : TritonGPU_Attr<"CTALayout"> {
-  let attrName = "triton.gpu.cta_layout"
+  let attrName = "triton.gpu.cta_layout";
   let parameters = (
     ins
     ArrayRefParameter<"unsigned">:$CTAsPerCGA,

@@ -161,11 +161,12 @@ struct LoadOpConversion
         size_t elemOffset = vecStart + wordIdx * wordNElems;
         Value ptr =
             addrspacecast(ptrElems[elemOffset],
-                          ptr_ty(IntegerType::get(getContext(), width)));
+                          ptr_ty(getContext(), width));
         auto loaded = rewriter.create<scf::IfOp>(
             loc, pred,
             [&](OpBuilder &builder, Location loc) {
-              auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
+              Value w = int_val(width, width);
+              auto loadVal = builder.create<LLVM::LoadOp>(loc, valueElemTy, ptr);
               builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
             },
             [&](OpBuilder &builder, Location loc) {
@@ -1094,7 +1095,7 @@ struct AtomicCASOpConversion
         // Fill entry block with global memory barrier and conditional branch.
         rewriter.setInsertionPointToEnd(curBlock);
         Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
-        atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
+        atomPtr = bitcast(atomPtr, ptr_ty(ctx, 3));
         auto tid = tid_val();
         Value pred = icmp_eq(tid, i32_val(i));
         rewriter.create<LLVM::CondBrOp>(loc, pred, atomicBlock, endBlock);
@@ -1122,7 +1123,12 @@ struct AtomicCASOpConversion
         BuilderMemfenceLDS.create<>("s_waitcnt lgkmcnt(0)")->operator()();
         BuilderMemfenceLDS.launch(rewriter, loc, void_ty(ctx));
         barrier();
-        Value ret = load(atomPtr);
+        auto valueTy = op.getResult().getType();
+        auto TensorTy = valueTy.dyn_cast<RankedTensorType>();
+        Type valueElemTy =
+        TensorTy ? getTypeConverter()->convertType(TensorTy.getElementType())
+                 : valueTy;
+        Value ret = load(valueElemTy, atomPtr);
         rewriter.replaceOp(op, {ret});
       }
     }
@@ -1389,7 +1395,7 @@ struct AtomicRMWOpConversion
         Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
         atomPtr = bitcast(atomPtr, ptr_ty(valueElemTy, 3));
         store(retVal, atomPtr);
-        Value ret = load(atomPtr);
+        Value ret = load(valueElemTy, atomPtr);
         rewriter.replaceOp(op, {ret});
       }
     }

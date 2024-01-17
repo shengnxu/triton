@@ -35,10 +35,11 @@ namespace {
 Type getShemPtrTy(Type elemTy) {
   if (elemTy.isBF16()) {
     auto ctx = elemTy.getContext();
-    return ptr_ty(type::i16Ty(ctx), 3);
+    auto t = type::i16Ty(ctx);
+    return ptr_ty(t.getContext(), 3);
   }
 
-  return ptr_ty(elemTy, 3);
+  return ptr_ty(elemTy.getContext(), 3);
 }
 
 // Get waveId inside block of waves.
@@ -267,7 +268,7 @@ Value computeBasePtr(ConversionPatternRewriter &rewriter, Location loc,
   Type type = base.getType();
   for (int i = 0; i < smemObj.strides.size(); ++i) {
     Value offset = sub(i32_val(0), mul(smemObj.offsets[i], smemObj.strides[i]));
-    base = gep(type, base, offset);
+    base = gep(type, type, base, offset);
   }
   return base;
 }
@@ -537,9 +538,9 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
         auto loadVecTy = vec_ty(elemTy, elemsPerLoad);
         Value loadOffset = offsets[nonK * loadsPerThread * numRepK +
                                    k * loadsPerThread + loadId];
-        Value loadAddress = bitcast(gep(smemPtrTy, smemBase, loadOffset),
+        Value loadAddress = bitcast(gep(smemPtrTy, resElemTy, smemBase, loadOffset),
                                     getShemPtrTy(loadVecTy));
-        Value loadedValue = load(loadAddress);
+        Value loadedValue = load(elemTy, loadAddress);
         if (loadsPerThread > 1) {
           for (int elemId = 0; elemId < elemsPerLoad; ++elemId) {
             Value elemVal =

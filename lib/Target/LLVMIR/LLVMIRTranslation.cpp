@@ -284,7 +284,11 @@ static std::map<std::string, std::string> getExternLibs(mlir::ModuleOp module) {
     // Then native code is in `triton/_C/libtriton.so` and libdevice in
     // `triton/third_party/cuda/lib/libdevice.10.bc`
     static const auto runtime_path =
+#ifdef USE_ROCM
+        fs::path("") / "libdevice.10.bc";
+#else
         fs::path(PathToLibdevice()) / "libdevice.10.bc";
+#endif
     if (fs::exists(runtime_path)) {
       externLibs.try_emplace(libdevice, runtime_path.string());
     } else {

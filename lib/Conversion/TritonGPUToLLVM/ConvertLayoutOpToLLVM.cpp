@@ -1070,8 +1070,12 @@ private:
     Value src = op.getSrc();
     Value dst = op.getResult();
 
+    auto llvmElemTy = getTypeConverter()->convertType(
+                        src.getType().cast<RankedTensorType>()
+                        .getElementType());
+
     auto smemObj =
-        getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(), rewriter);
+        getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(), llvmElemTy, rewriter);
     Value res;
 
     if (!isOuter) {

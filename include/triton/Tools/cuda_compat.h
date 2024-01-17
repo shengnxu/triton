@@ -4,9 +4,11 @@
 #ifndef CU_TENSOR_MAP_NUM_QWORDS
 #define CU_TENSOR_MAP_NUM_QWORDS 16
 
+#ifndef USE_ROCM
 typedef struct CUtensorMap_st {
     cuuint64_t opaque[CU_TENSOR_MAP_NUM_QWORDS];
 } CUtensorMap;
+#endif
 
 typedef enum CUtensorMapDataType_enum {
     CU_TENSOR_MAP_DATA_TYPE_UINT8 = 0,

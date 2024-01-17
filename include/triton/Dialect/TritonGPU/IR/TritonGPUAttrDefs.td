@@ -163,6 +163,7 @@ compared to 1*64 when the hasLeadingOffset is false.
             // TODO (zhanglx): figure out better parameters for mfma4
             if (4 == mfmaEnc.getMDim())
               maxPhase = 4;
+            assert(maxPhase > 0);
 
             return get(context, vecSize, perPhase, maxPhase, order, CTALayout);
           } else {

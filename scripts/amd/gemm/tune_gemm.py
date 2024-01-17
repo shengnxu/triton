@@ -558,15 +558,6 @@ name_to_tl_types = {
     'bf8': tl.float8e5b16,
 }
 
-ty_to_peak_perf = {
-    'fp8': 1298,
-    'bf8': 1298,
-    'int8': 1298,
-    'bf16': 649,
-    'fp16': 649,
-    'fp32': 81,
-}
-
 def process_item(item):
     M = item['M']
     N = item['N']
@@ -661,8 +652,8 @@ def main():
 
     start_time = datetime.now()
     if run_bench:
-        print(f"Benchmarking gemm with {dtype_a} inputs (peak tflops: {ty_to_peak_perf[dtype_a]})")
-        print("trans     M      N      K    TFLOPS    Efficiency")
+        print(f"Benchmarking gemm with {dtype_a} inputs")
+        print("trans     M      N      K    TFLOPS")
     else:
         print(f"Tuning starts at: {start_time}", flush=True)
         f_results = open(tuning_output_file, 'w')
@@ -701,8 +692,7 @@ def main():
 
         # write best config to tuning_results.yaml
         if run_bench:
-            eff = tri_tflops / ty_to_peak_perf[dtype_a] * 100
-            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    {formatted_tflops}         {eff:.0f}%")
+            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    {formatted_tflops}")
 
         sizeDict = {'M': M, 'N': N, 'K': K, 'rowMajorA': row_a_str, 'rowMajorB': row_b_str}
         sizeDict.update(bestConfig)

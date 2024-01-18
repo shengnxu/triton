@@ -30,7 +30,7 @@ import triton.language as tl
 torch_dtype:tl.constexpr = torch.float16
 
 TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if False:# TORCH_HAS_FP8E5:
+if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
 @triton.jit

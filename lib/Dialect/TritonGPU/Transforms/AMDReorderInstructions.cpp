@@ -259,7 +259,7 @@ public:
         int dotIdx = i > 0 ? i - 1 : 0;
         Operation *moveBeforeOp =
             i < 4 ? chain[dotIdx] : chain[i];
-        while (!isa<ttg::ViewSliceOp>(currOp)) {
+        while (currOp && !isa<ttg::ViewSliceOp>(currOp)) {
           moveBefore(currOp, moveBeforeOp);
           moveBeforeOp = currOp;
           currOp = currOp->getOperand(0).getDefiningOp();
@@ -267,7 +267,7 @@ public:
         // if(i == 0){
         //   currLoad = *currOp->getUsers().begin();
         // }
-        if(i > 0 && i != 2){
+        if(currOp && i > 0 && i != 2){
           auto currUser = *currOp->getUsers().begin();
           moveAfter(currOp, currLoad);
           moveAfter(currUser, currOp);
@@ -281,6 +281,7 @@ public:
     SmallVector<Operation *> movedOperations;
     ModuleOp m = getOperation();
 
+    m.dump();
     // scheduleViewSlice(m);
     m.walk([&](Operation *op) {
       moveImmediatelyAfterOperands(op, movedOperations);

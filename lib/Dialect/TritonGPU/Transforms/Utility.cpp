@@ -795,7 +795,7 @@ FailureOr<MfmaInsn> MfmaInsn::selectMfma(unsigned nonKDim, Type elementTypeA,
                                          Type elementTypeB, int mfmaVersion) {
   auto mfmaInsnAttrMap = getMfmaInsnGroupAttrMap();
   MfmaInsnGroupSelectKey key = {
-      nonKDim, convertTypesToId(elementTypeA, elementTypeB), mfmaVersion};
+      nonKDim, convertTypesToId(elementTypeA, elementTypeB), 2};
   auto it = mfmaInsnAttrMap.find(key);
   if (it == mfmaInsnAttrMap.end())
     return failure();

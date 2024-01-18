@@ -146,8 +146,17 @@ def read_config(config):
     return block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfma_instr_size
 
 
-def gen_kernel_and_configStr_from_config(M, N, K, config):
+def gen_kernel_and_configStr_from_config(M, N, K, config, dtype_a, dtype_b, dtype_c):
     block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfmaInstrSize = read_config(config)
+    torch_dtype_a = 'fp16'
+    torch_dtype_b = 'fp16'
+    torch_dtype_c = 'fp16'
+    if dtype_a:
+        torch_dtype_a = tl_to_torch_types[name_to_tl_types[dtype_a]]
+    if dtype_b:
+        torch_dtype_b = tl_to_torch_types[name_to_tl_types[dtype_b]]
+    if dtype_c:
+        torch_dtype_c = tl_to_torch_types[name_to_tl_types[dtype_c]]
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_mfma{mfmaInstrSize}"
 
     matmul_def_str = f"""
@@ -156,7 +165,7 @@ def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
     #print(f'config: matmul_kernel_{configStr}', flush=True)
     if warmup:
         matmul_kernel_{configStr}.warmup(
-            torch.float16, torch.float16, torch.float16,
+            {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c},
             M, N, K,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},
@@ -237,7 +246,7 @@ from tune_gemm import gen_input
     idx = 0
     for config in configs:
         file_idx = idx % jobs
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, config)
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, config, dtype_a, dtype_b, dtype_c)
         # Copy the matmul_kernel with name replaced
         matmul_kernel_config = matmul_kernel_code.replace("matmul_kernel", f"matmul_kernel_{configStr}")
         matmul_kernel_config = matmul_kernel_config.replace("import triton.language as tl", "")
@@ -268,7 +277,7 @@ from tune_gemm import gen_input
     # warm up call of all matmul functions in parallel
     idx = 0
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None)
         task_str = f"        results += [thread_pool.apply_async(try_config_{configStr}, args=task_args)]\n" + \
                    f"        config_names += ['{configStr}']\n"
         f_kernel[idx % jobs].write(task_str)
@@ -299,7 +308,7 @@ from tune_gemm import gen_input
     idx = 0
     runs = 1000 if run_bench else 200
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None)
         matmul_call_str = f"""
         if '{configStr}' not in failed_configs:
             for i in range({runs}):
@@ -330,7 +339,7 @@ def main():
 
 
 def extract_kernel_time(M, N, K, config, df):
-    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config)
+    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None)
     df = df[df['KernelName'].str.contains(configStr)]
     meanTime = df['DurationNs'].tail(100).mean()
     return config, meanTime
@@ -694,7 +703,7 @@ def main():
         if not run_bench:
             print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ", flush=True)
 
-        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, bestConfig)
+        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, bestConfig, None, None, None)
         if not run_bench:
             print(f'best_config: {bestConfig_compact_str}', end=" ", flush=True)
 

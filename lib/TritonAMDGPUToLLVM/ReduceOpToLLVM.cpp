@@ -398,7 +398,10 @@ private:
     triton::ReduceOp op = helper.getOperation();
     Location loc = op.getLoc();
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(32);
+
+    auto srcLayout = helper.getSrcLayout();
+    unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
+    Value warpSize = i32_val(wavefront_size);
     Value warpId = udiv(threadId, warpSize);
     Value laneId = urem(threadId, warpSize);
     auto srcLayout = helper.getSrcLayout();
@@ -448,9 +451,10 @@ private:
     unsigned elems = product<unsigned>(smemShape);
     unsigned sizeInterWarps = helper.getInterWarpSizeWithUniqueData();
     Location loc = op.getLoc();
-
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(32);
+
+    unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
+    Value warpSize = i32_val(wavefront_size);
     Value laneId = urem(threadId, warpSize);
     Value zero = i32_val(0);
 
@@ -483,7 +487,6 @@ private:
       Value laneIdModSizeInterWarpsIsZero =
           icmp_eq(laneIdModSizeInterWarps, zero);
       Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
-      unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
 
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
 #if USE_ROCM

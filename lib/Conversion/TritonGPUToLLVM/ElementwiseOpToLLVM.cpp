@@ -1744,10 +1744,10 @@ struct FpToFpOpConversion
         !(computeCapability >= 90 &&
           (dstElementType.isFloat8E4M3FNUZ() || dstElementType.isFloat8E5M2()));
 #endif
+    bool isSrcFP32 = srcElementType.isF32();
     bool isDstFP32 = dstElementType.isF32();
     Type srcType = useFP16IntermediateSrc ? f16_ty : srcElementType;
     Type dstType = isDstFP32 ? f16_ty : dstElementType;
-    auto cvtFunc = getConversionFunc(srcType, dstType);
     SmallVector<Value> inVals;
     for (unsigned i = 0; i < std::min(numElements, operands.size()); i++) {
       inVals.push_back(operands[i][0]);

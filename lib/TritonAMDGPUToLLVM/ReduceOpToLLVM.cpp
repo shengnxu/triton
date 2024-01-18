@@ -404,7 +404,6 @@ private:
     Value warpSize = i32_val(wavefront_size);
     Value warpId = udiv(threadId, warpSize);
     Value laneId = urem(threadId, warpSize);
-    auto srcLayout = helper.getSrcLayout();
     auto srcShape = helper.getSrcShape();
     unsigned axis = op.getAxis();
     auto smemShape = helper.getScratchConfig();

@@ -545,7 +545,7 @@ def parse_args():
     parser.add_argument("--time_breakdown", action='store_true', default=False, help="Show detailed time breakdown of each step during the tuning")
     parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
-    parser.add_argument("--jobs", type=int, default=16, help="number of generated files")
+    parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
     args = parser.parse_args()
 
     return args
@@ -651,7 +651,7 @@ def main():
         K = args.k
         col_a = args.col_a
         col_b = args.col_b
-        mnks = [(M, N, K, col_a, col_b)]
+        mnks = [(M, N, K, col_a, col_b, None)]
     else:
         with open(matrix_size_file) as file:
             matrix_sizes = yaml.safe_load(file)

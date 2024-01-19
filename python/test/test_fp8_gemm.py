@@ -216,20 +216,21 @@ def get_x_vals():
 
     return x_vals
 
-@pytest.mark.parametrize("M, N, K, col_a, col_b",
-[ (*shape, col_a, col_b)
+@pytest.mark.parametrize("M, N, K, out_type, col_a, col_b",
+[ (*shape, out_type, col_a, col_b)
     for shape in get_x_vals()
     # Only test k-major tensors because
     # 1. This is the most preformant config and the current focus
     # 2. Other case does not work with num_stages=0 (TODO (zhanglx))
+    for out_type in ['fp16', 'fp32']
     for col_a in [False]
     for col_b in [True]]
 )
-def test_correctness(M, N, K, col_a, col_b):
+def test_correctness(M, N, K, col_a, col_b, out_type):
     a, a_fp16 = gen_input(M, K, "fp8e5", col_a, 1, device='cuda')
     b, b_fp16 = gen_input(K, N, "fp8e5", col_b, 2, device='cuda')
     # Allocates output.
-    tl_out_dtype = name_to_tl_types["fp16"]
+    tl_out_dtype = name_to_tl_types[out_type]
     torch_out_dtype = tl_to_torch_types[tl_out_dtype]
     cfp8 = torch.empty((M, N), device=a.device, dtype=torch_out_dtype)
     cfp16 = torch.empty((M, N), device=a.device, dtype=torch_out_dtype)

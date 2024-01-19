@@ -118,6 +118,7 @@ public:
         mfmaVersion(mfmaVersion), enforcedNonKDim(nonKDim) {}
 
   bool isChainDot(tt::DotOp &dotOp) const {
+    return false;
     auto filter = [&dotOp](Operation *op) {
       return op->getParentRegion() == dotOp->getParentRegion();
     };
@@ -128,8 +129,9 @@ public:
     bwdOpt.filter = filter;
     auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
     for (Operation *op : slices) {
-      if (isa<tt::DotOp>(op) && (op != dotOp))
+      if (isa<tt::DotOp>(op) && (op != dotOp)){
         return true;
+      }
     }
     return false;
   }

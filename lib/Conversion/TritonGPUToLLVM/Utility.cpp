@@ -211,6 +211,11 @@ SmallVector<Value> delinearize(ConversionPatternRewriter &rewriter,
   assert(rank > 0);
   SmallVector<Value> multiDim(rank);
   Value remained = linear;
+  if (shape.size() == 1) {
+    llvm::outs() << "delnearizeShape = [" << shape[0] << "]\n";
+  } else {
+    llvm::outs() << "delnearizeShape = [" << shape[0] << ", " << shape[1] << "]\n";
+  }
   for (auto &&en : llvm::enumerate(shape)) {
     Value dimSize = i32_val(en.value());
     multiDim[en.index()] = urem(remained, dimSize);

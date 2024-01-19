@@ -41,6 +41,7 @@ bool ReduceOpHelper::isReductionOnLayoutFastAxis() {
 SmallVector<unsigned> ReduceOpHelper::getOrderWithAxisAtBeginning() {
   auto srcLayout = getSrcLayout();
   auto order = triton::gpu::getOrder(srcLayout);
+  llvm::outs() << "getOrderWithAxisAtBeginning_order = [" << order[0] << ", " << order[1] << "\n";
   auto it = std::find(order.begin(), order.end(), axis);
   // delete the axis from order
   order.erase(it);

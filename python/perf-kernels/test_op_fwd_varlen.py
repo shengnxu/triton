@@ -1,12 +1,28 @@
+import pytest
+import random
 import torch
 
-def test_op_fwd_varlen(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, dtype=torch.float16):
+import triton
+import triton.language as tl
+
+torch_dtype:tl.constexpr = torch.float16
+TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
+if TORCH_HAS_FP8E5:
+    torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+
+def test_op_fwd_varlen(Z, H, D_HEAD, causal,
+        use_bias, bias_type, dtype=torch.float16):
     torch.manual_seed(20)
     # Random sequence lengths
-    seqlens_q = torch.randint(1, max_seqlen_q + 1, (Z,))
-    seqlens_k = torch.randint(1, max_seqlen_k + 1, (Z,))
+    max_seqlens_q=10
+    seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z,))
+    seqlens_k=seqlens_q
+
     print(seqlens_q)
     print(seqlens_k)
+
+    max_seqlen_q=max(seqlens_q)
+    max_seqlen_k=max(seqlens_k)
 
     # Calculate cumulative sequence lengths
     cu_seqlens_q = torch.cat([torch.tensor([0]), seqlens_q.cumsum(dim=0)])
@@ -16,9 +32,12 @@ def test_op_fwd_varlen(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, dtype=t
     total_q = cu_seqlens_q[-1].item()
     total_k = cu_seqlens_k[-1].item()
 
-    q = torch.randn((total_q, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    q = torch.randn((H, total_q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.randn((H, total_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.randn((H, total_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    print(q.shape)
+    print(k.shape)
+    print(v.shape)
 
     # Initialize bias
     if use_bias:
@@ -34,18 +53,31 @@ def test_op_fwd_varlen(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, dtype=t
         k = k.to(torch_dtype)
     sm_scale = D_HEAD ** -0.5
 
+    p = torch.matmul(q, k.transpose(1, 2)) * sm_scale
+    print(p.shape)
     # Reference implementation with masking for variable lengths
-    M = torch.zeros((max_seqlen_q, max_seqlen_k), device="cuda")
-    for i, (len_q, len_k) in enumerate(zip(cu_seqlens_q[1:], cu_seqlens_k[1:])):
-        M[i, :len_k] = 1
+    M = torch.zeros((Z, max_seqlen_q, max_seqlen_k), device="cuda")
 
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+    # Adjust the mask for each sequence based on their actual lengths
+    for i, (len_q, len_k) in enumerate(zip(seqlens_q, seqlens_k)):
+        M[i, :len_q, :len_k] = 1
+
+    # Now reshape and expand M to match the shape of p
+    # p has shape [total_q, H, max_seqlen_k]
+    # We need to align the sequence dimension of M with the total_q dimension
+    expanded_M = torch.zeros_like(p, dtype=torch.bool)
+    idx = 0
+    for i, len_q in enumerate(seqlens_q):
+        expanded_M[idx:idx+len_q] = M[i, :len_q].unsqueeze(1)
+        idx += len_q
+
 
     if causal:
-        causal_mask = torch.tril(torch.ones((max_seqlen_q, max_seqlen_k), device="cuda"))
-        M *= causal_mask
+       causal_mask = torch.tril(torch.ones((max_seqlen_q, max_seqlen_k), device="cuda"))
+       M *= causal_mask
 
-    p = p.masked_fill(M.unsqueeze(1).unsqueeze(0) == 0, float("-inf"))
+    # Apply the mask
+    p = p.masked_fill(expanded_M == 0, float("-inf"))
 
 #   if use_bias:
 #       # Add bias here as per the original implementation
@@ -59,14 +91,14 @@ def test_op_fwd_varlen(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, dtype=t
 
     # Compare outputs
 #    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
- 
+
 Z = 3  # Number of sequences in the batch
 H = 4  # Number of attention heads
-max_seqlen_q = 10  # Maximum length of any sequence in the query batch
-max_seqlen_k = 10  # Maximum length of any sequence in the key/value batch
+#max_seqlen_q = 10  # Maximum length of any sequence in the query batch
+#max_seqlen_k = 10  # Maximum length of any sequence in the key/value batch
 D_HEAD = 64  # Dimension of each head
 causal = False
 use_bias = False
 bias_type = "vector"
 
-test_op_fwd_varlen(Z, H, max_seqlen_q, max_seqlen_k, D_HEAD, causal, use_bias, bias_type)
+test_op_fwd_varlen(Z, H, D_HEAD, causal, use_bias, bias_type)

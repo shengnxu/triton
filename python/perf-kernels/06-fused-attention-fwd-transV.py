@@ -19,7 +19,13 @@ import triton
 import triton.language as tl
 
 # Pick the fp8 data type
-#float8:tl.constexpr = torch.float8_e5m2fnuz
+
+# AMD E5M2B16
+# float8:tl.constexpr = torch.float8_e5m2fnuz
+
+# AMD E4M3B8
+# Note: When picking this f8 data type, scaling is required when using f8
+# for the second gemm
 float8:tl.constexpr = torch.float8_e4m3fnuz
 
 @triton.jit

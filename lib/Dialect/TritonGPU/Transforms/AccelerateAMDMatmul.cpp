@@ -139,7 +139,7 @@ public:
     // search backward of the operand 0 of the dot 
     auto oper0 = dotOp.getOperand(0).getDefiningOp();
     mlir::getBackwardSlice(dyn_cast<mlir::Operation*>(oper0), &bwdSlices, bwdOpt);
-    i = 0;
+    int i = 0;
     for (Operation *op : bwdSlices) {
       llvm::outs() << "<<<<<bwd_op-" << i++ << " = " << *op << "\n";
       if (isa<tt::DotOp>(op) && (op != dotOp)) {

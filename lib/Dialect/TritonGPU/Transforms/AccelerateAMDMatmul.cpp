@@ -119,14 +119,35 @@ public:
     };
     mlir::ForwardSliceOptions fwdOpt;
     fwdOpt.filter = filter;
+    mlir::SetVector<mlir::Operation*> fwdSlices;
+    mlir::getForwardSlice(static_cast<mlir::Operation*>(dotOp), &fwdSlices, fwdOpt);
+    for (Operation *op : fwdSlices) {
+      // ensure output of the first dot is the operand 0 of the second dot
+      if (isa<tt::DotOp>(op) && (op != dotOp)) {
+        auto dOp = dyn_cast<tt::DotOp>(op);
+        auto oper0 = dOp.getOperand(0).getDefiningOp();
+        if(std::find(fwdSlices.begin(), fwdSlices.end(), oper0) != fwdSlices.end()) {
+          return true;
+        }
+      }
+    }
+
     mlir::BackwardSliceOptions bwdOpt;
     bwdOpt.omitBlockArguments = true;
     bwdOpt.filter = filter;
-    auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
-    for (Operation *op : slices) {
-      if (isa<tt::DotOp>(op) && (op != dotOp))
+    mlir::SetVector<mlir::Operation*> bwdSlices;
+    // search backward of the operand 0 of the dot 
+    auto oper0 = dotOp.getOperand(0).getDefiningOp();
+    mlir::getBackwardSlice(dyn_cast<mlir::Operation*>(oper0), &bwdSlices, bwdOpt);
+    i = 0;
+    for (Operation *op : bwdSlices) {
+      llvm::outs() << "<<<<<bwd_op-" << i++ << " = " << *op << "\n";
+      if (isa<tt::DotOp>(op) && (op != dotOp)) {
+        llvm::outs() << "bwd_found, return\n";
         return true;
+      }
     }
+
     return false;
   }
 

@@ -497,8 +497,6 @@ private:
     Value warpSize = i32_val(wavefront_size);
 
     Value threadId = getThreadId(rewriter, loc);
-    unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
-    Value warpSize = i32_val(wavefront_size);
     Value laneId = urem(threadId, warpSize);
     Value zero = i32_val(0);
 

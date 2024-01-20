@@ -1201,7 +1201,7 @@ private:
 
     Value threadId = getThreadId(rewriter, loc);
     Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
-    llvm::outs() << "warpSize = " << triton::gpu::getWarpSize(mfmaLayout) << ", nonKDim = " << nonKDim << "\n";
+    llvm::outs() << "warpSize = " << triton::gpu::getWarpSize(mfmaLayout) << ", mfmaMDim = " << mfmaMDim << "\n";
     Value effectiveWarpSize = warpSize;
     if (mfmaMDim == 4) {
       const int uniqueValuesPerWarp = 4;

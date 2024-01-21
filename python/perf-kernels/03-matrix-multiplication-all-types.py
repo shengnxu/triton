@@ -187,6 +187,11 @@ def gen_input(M, N, ty_name, needTrans, seed, device='cuda'):
         raw_data = torch.randn((N, M), dtype=torch.float32, device='cuda').T
     else:
         raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda')
+    # avoid type conversion rounding errors of subnormal values
+    raw_data += 0.1
+    if d_type == tl.float8e4b8:
+        raw_data += torch.sign(raw_data)
+
     if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
         (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) or not d_type.is_fp8():
         input = raw_data.to(tl_to_torch_types[d_type])

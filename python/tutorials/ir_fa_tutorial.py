@@ -422,7 +422,7 @@ ir = """
 #shared1 = #triton_gpu.shared<{vec = 4, perPhase = 2, maxPhase = 8, order = [0, 1], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [0, 1], hasLeadingOffset = false}>
 #shared2 = #triton_gpu.shared<{vec = 1, perPhase = 1, maxPhase = 1, order = [1, 0], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [0, 1], hasLeadingOffset = false}>
 module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ctas" = 1 : i32, "triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 64 : i32} {
-  tt.func public @_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de(%arg0: !tt.ptr<f8E5M2, 1> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f8E5M2, 1> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: f32, %arg4: !tt.ptr<f32, 1> {tt.divisibility = 16 : i32}, %arg5: !tt.ptr<f8E5M2, 1> {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg7: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg8: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg9: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg10: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg11: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg12: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg13: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg14: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg15: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg16: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg17: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg18: i32, %arg19: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg20: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}) attributes {noinline = false} {
+  tt.func public @_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de(%arg0: !tt.ptr<f8E5M2, 1> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f8E5M2, 1> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg3: f32, %arg4: !tt.ptr<f32, 1> {tt.divisibility = 16 : i32}, %arg5: !tt.ptr<f16, 1> {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg7: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg8: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg9: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg10: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg11: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg12: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg13: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg14: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg15: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg16: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg17: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg18: i32, %arg19: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}, %arg20: i32 {tt.divisibility = 16 : i32, tt.max_divisibility = 8 : i32}) attributes {noinline = false} {
     %c128_i32 = arith.constant 128 : i32
     %c0_i32 = arith.constant 0 : i32
     %cst = arith.constant dense<1.000000e+00> : tensor<128xf32, #triton_gpu.slice<{dim = 1, parent = #mfma}>>
@@ -448,8 +448,8 @@ module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ct
     %14 = tt.addptr %arg4, %13 : !tt.ptr<f32, 1>, i32
     %15 = tt.splat %14 : (!tt.ptr<f32, 1>) -> tensor<128x!tt.ptr<f32, 1>, #blocked1>
     %16 = arith.muli %12, %arg7 : i32
-    %17 = tt.addptr %arg5, %16 : !tt.ptr<f8E5M2, 1>, i32
-    %18 = tt.splat %17 : (!tt.ptr<f8E5M2, 1>) -> tensor<128x1x!tt.ptr<f8E5M2, 1>, #mfma>
+    %17 = tt.addptr %arg5, %16 : !tt.ptr<f16, 1>, i32
+    %18 = tt.splat %17 : (!tt.ptr<f16, 1>) -> tensor<128x1x!tt.ptr<f16, 1>, #mfma>
     %19 = tt.addptr %arg1, %16 : !tt.ptr<f8E5M2, 1>, i32
     %20 = tt.splat %19 : (!tt.ptr<f8E5M2, 1>) -> tensor<128x1x!tt.ptr<f8E5M2, 1>, #blocked2>
     %21 = tt.addptr %arg2, %16 : !tt.ptr<f16, 1>, i32
@@ -490,7 +490,7 @@ module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ct
     %56 = tt.addptr %24, %55 : tensor<128x1x!tt.ptr<f8E5M2, 1>, #blocked>, tensor<128x1xi64, #blocked>
     %57 = tt.expand_dims %38 {axis = 1 : i32} : (tensor<128xi64, #triton_gpu.slice<{dim = 1, parent = #mfma}>>) -> tensor<128x1xi64, #mfma>
     %58 = arith.muli %57, %32 : tensor<128x1xi64, #mfma>
-    %59 = tt.addptr %18, %58 : tensor<128x1x!tt.ptr<f8E5M2, 1>, #mfma>, tensor<128x1xi64, #mfma>
+    %59 = tt.addptr %18, %58 : tensor<128x1x!tt.ptr<f16, 1>, #mfma>, tensor<128x1xi64, #mfma>
     %60 = tt.broadcast %56 : (tensor<128x1x!tt.ptr<f8E5M2, 1>, #blocked>) -> tensor<128x128x!tt.ptr<f8E5M2, 1>, #blocked>
     %61 = tt.expand_dims %40 {axis = 0 : i32} : (tensor<128xi64, #triton_gpu.slice<{dim = 0, parent = #blocked}>>) -> tensor<1x128xi64, #blocked>
     %62 = tt.expand_dims %42 {axis = 0 : i32} : (tensor<128xi64, #triton_gpu.slice<{dim = 0, parent = #blocked3}>>) -> tensor<1x128xi64, #blocked3>
@@ -633,11 +633,11 @@ module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ct
     %107 = tt.expand_dims %103#1 {axis = 1 : i32} : (tensor<128xf32, #triton_gpu.slice<{dim = 1, parent = #mfma}>>) -> tensor<128x1xf32, #mfma>
     %108 = tt.broadcast %107 : (tensor<128x1xf32, #mfma>) -> tensor<128x128xf32, #mfma>
     %109 = arith.divf %103#0, %108 : tensor<128x128xf32, #mfma>
-    %110 = tt.fp_to_fp %109 : tensor<128x128xf32, #mfma> -> tensor<128x128xf8E5M2, #mfma>
+    %110 = arith.truncf %109 : tensor<128x128xf32, #mfma> to tensor<128x128xf16, #mfma>
     tt.store %53, %106 {cache = 1 : i32, evict = 1 : i32} : tensor<128xf32, #blocked1>
-    %111 = tt.broadcast %59 : (tensor<128x1x!tt.ptr<f8E5M2, 1>, #mfma>) -> tensor<128x128x!tt.ptr<f8E5M2, 1>, #mfma>
-    %112 = tt.addptr %111, %99 : tensor<128x128x!tt.ptr<f8E5M2, 1>, #mfma>, tensor<128x128xi64, #mfma>
-    tt.store %112, %110 {cache = 1 : i32, evict = 1 : i32} : tensor<128x128xf8E5M2, #mfma>
+    %111 = tt.broadcast %59 : (tensor<128x1x!tt.ptr<f16, 1>, #mfma>) -> tensor<128x128x!tt.ptr<f16, 1>, #mfma>
+    %112 = tt.addptr %111, %99 : tensor<128x128x!tt.ptr<f16, 1>, #mfma>, tensor<128x128xi64, #mfma>
+    tt.store %112, %110 {cache = 1 : i32, evict = 1 : i32} : tensor<128x128xf16, #mfma>
     tt.return
   }
 }
@@ -651,12 +651,12 @@ with tempfile.NamedTemporaryFile(mode='w', suffix='.ttgir') as f:
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, sm_scale):
+    def forward(ctx, q, k, v, causal, sm_scale, split_kernel=False):
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
         assert Lk in {16, 32, 64, 128}
-        o = torch.empty_like(q)
+        o = torch.empty_like(q, dtype=v.dtype)
         if torch.version.hip is None:
             BLOCK_M = 128
             BLOCK_N = 64 if Lk <= 64 else 32
@@ -673,6 +673,7 @@ class _attention(torch.autograd.Function):
             q.shape[0] * q.shape[1],
             1
         )
+
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
 
@@ -868,12 +869,14 @@ except BaseException:
 configs = []
 for mode in ['fwd']:
     for D_HEAD in [128]:
+        if mode == 'bwd' and D_HEAD == 128:
+            continue
         for causal in [False]:
             if mode == 'bwd' and causal == False:
                 continue
             configs.append(triton.testing.Benchmark(
-                x_names=['BATCH', 'H', 'N_CTX'],
-                x_vals=[#(4, 16, 1024),
+                x_names=['BATCH', 'H','N_CTX'],
+                x_vals=[#(16, 16, 1024),
                         # (8, 16, 2048),
                         # (4, 16, 4096),
                         # (2, 16, 8192),
@@ -903,10 +906,12 @@ for mode in ['fwd']:
 def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"):
     assert mode in ["fwd", "bwd"]
     warmup = 25
-    rep = 10
+    rep = 100
+    split_kernel = False
     # Bwd pass only supports causal=True right now
     if mode == 'bwd':
         causal = True
+        split_kernel = True
     if provider == "triton":
         q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
@@ -914,8 +919,8 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
         if mode == "fwd" and TORCH_HAS_FP8:
             q = q.to(torch_dtype)
             k = k.to(torch_dtype)
-        sm_scale = D_HEAD ** -0.5
-        fn = lambda: attention(q, k, v, causal, sm_scale)
+        sm_scale = 1.3
+        fn = lambda: attention(q, k, v, causal, sm_scale, split_kernel)
         if mode == 'bwd':
             o = fn()
             do = torch.randn_like(o)
@@ -936,6 +941,7 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     if mode == "bwd":
         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
     return total_flops / ms * 1e-9
+
 
 # only works on post-Ampere GPUs right now
 bench_flash_attention.run(save_path=".", print_data=True)

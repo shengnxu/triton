@@ -250,8 +250,8 @@ def test_correctness(M, N, K, col_a, col_b, in_dtype, out_dtype):
         torch_output = torch.matmul(a_fp16, b_fp16)
     else:
         torch_output = torch.matmul(a, b)
-    # print(f"triton_output={c}")
-    # print(f"torch_output={torch_output}")
+    #print(f"triton_output={c}")
+    #print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
     if in_dtype == 'int8':
         torch.testing.assert_close(c.to(torch.float16), torch_output, atol=1e-3, rtol=rtol)

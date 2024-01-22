@@ -74,7 +74,6 @@ def _attn_fwd_inner(
     acc, l_i, m_i, q,
     K_block_ptr, V_block_ptr,
     start_m,
-    seqlen_q,
     seqlen_k,
     dropout_p,
     philox_seed,
@@ -168,7 +167,7 @@ def _attn_fwd_inner(
         l_ij = tl.sum(p, 1)
         # Note about the conflicts of Flash attention algorithm and PyTorch's CUDA implementation
         # PyTorch needs to return softmax(qk) (dropout mask encoded in sign bits)
-        # While Flash attention paper computer the dropout AFTER exp2(qk- m_ij)
+        # While Flash attention paper compute the dropout AFTER exp2(qk- m_ij)
         if ENABLE_DROPOUT:
             philox_offset = batch_philox_offset + start_m * BLOCK_M * seqlen_k + start_n
             keep = dropout_mask(philox_seed, philox_offset, dropout_p, BLOCK_M, BLOCK_N, seqlen_k)
@@ -266,7 +265,7 @@ def _attn_fwd(
         elif bias_type == "matrix":
             bias_ptr = tl.make_block_ptr(
                 base=bias + ((off_hz % H) * stride_bh),
-                shape=(seqlen_k, seqlen_k),
+                shape=(seqlen_q, seqlen_k),
                 strides=(stride_bm, stride_bn),
                 offsets=(start_m * BLOCK_M, 0),
                 block_shape=(BLOCK_M, BLOCK_N),
@@ -292,6 +291,8 @@ def _attn_fwd(
         batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     else:
         batch_philox_offset = 0
+    # We can ask to return the dropout mask without actually doing any dropout. In
+    # this case, we return an invalid pointer so indicate the mask is not valid.
     if RETURN_ENCODED_SOFTMAX:
         encoded_softmax_block_ptr = tl.make_block_ptr(
                 base=encoded_softmax + off_hz * seqlen_q * seqlen_k,
@@ -311,7 +312,7 @@ def _attn_fwd(
         if seqlen_k >= BLOCK_N:
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m, seqlen_q, seqlen_aligned,
+                start_m, seqlen_aligned,
                 dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
@@ -327,7 +328,7 @@ def _attn_fwd(
                 seqlen_aligned = 0
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m, seqlen_q, seqlen_aligned,
+                start_m, seqlen_aligned,
                 dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
@@ -344,7 +345,7 @@ def _attn_fwd(
         tl.debug_barrier()
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_q, seqlen_k,
+            start_m, seqlen_k,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
             2, offs_m, offs_n,
@@ -664,6 +665,10 @@ class _attention(torch.autograd.Function):
         pre_load_v = False if Lq == 128 else True
         grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
 
+        # encoded_softmax is used to validate dropout behavior vs the PyTorch SDPA math backend reference.  We zero this out
+        # to give a consistent starting point and then populate it with the output of softmax with the sign bit set according
+        # to the dropout mask. The resulting return allows this mask to be fed into the reference implementation for testing
+        # only.  This return holds no useful output aside from debugging.
         if return_encoded_softmax:
             encoded_softmax = torch.zeros((q.shape[0], q.shape[1], q.shape[2], k.shape[2]), device=q.device, dtype=torch.float32)
         else:
@@ -688,6 +693,7 @@ class _attention(torch.autograd.Function):
         o = torch.empty_like(q, dtype=v.dtype)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
+        # Seed the RNG so we get reproducible results for testing.
         philox_seed = 0x1BF52
         philox_offset = 0x1D4B42
 

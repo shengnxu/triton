@@ -443,7 +443,6 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
             return torch.zeros(size, dtype=dtype, device='cuda')
         elif init_type == "randn":
             temp = torch.randn(size, dtype=dtype, device='cuda')
-            print(temp.size())
             return temp
         else:
             raise ValueError("Bad matrix initialization type.")
@@ -560,7 +559,7 @@ def parse_args():
     parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
     parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
-    parser.add_argument("--init_type", type=str, default='', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
+    parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
     args = parser.parse_args()
 
     return args
@@ -596,13 +595,12 @@ def process_item(item):
     K = item['K']
     col_a = False if item['rowMajorA'] == 'T' else True
     col_b = False if item['rowMajorB'] == 'T' else True
-    init_type = item['matrixInitialization']
     del item['M']
     del item['N']
     del item['K']
     del item['rowMajorA']
     del item['rowMajorB']
-    return M, N, K, col_a, col_b, init_type, item
+    return M, N, K, col_a, col_b, item
 
 def type_name_to_bytes(ty_name):
     if '32' in ty_name:
@@ -661,19 +659,19 @@ def main():
 
     mnks = []
     # TODO: make it more robust to get user input
+    init_type = args.init_type
     if matrix_size_file == "" or not os.path.isfile(matrix_size_file):
         M = args.m
         N = args.n
         K = args.k
         col_a = args.col_a
         col_b = args.col_b
-        init_type = args.init_type
         mnks = [(M, N, K, col_a, col_b, init_type, None)]
     else:
         with open(matrix_size_file) as file:
             matrix_sizes = yaml.safe_load(file)
         for item in matrix_sizes:
-            M, N, K, col_a, col_b, init_type, item = process_item(item)
+            M, N, K, col_a, col_b, item = process_item(item)
             mnks.append((M, N, K, col_a, col_b, init_type, item))
 
     # Check correctness from given configs

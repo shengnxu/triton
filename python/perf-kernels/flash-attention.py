@@ -604,7 +604,7 @@ def _bwd_kernel_dq(
     dq = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     # loop over k, v
     lo = 0
-    hi = start_m + BLOCK_M if CAUSAL else seqlen_k
+    hi = (start_m + BLOCK_M, seqlen_k) if CAUSAL else seqlen_k
     batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     for start_n in range(lo, hi, BLOCK_N):
         # -- load k, v --

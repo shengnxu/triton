@@ -591,7 +591,7 @@ class _attention(torch.autograd.Function):
         best_config = _attn_fwd.get_best_config()
         block_m = int(best_config.__str__().split(",")[0].split("BLOCK_M:")[1])
         grid = (triton.cdiv(q.shape[2], block_m), q.shape[0] * q.shape[1], 1)
-
+        print(grid)
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
         ctx.sm_scale = sm_scale

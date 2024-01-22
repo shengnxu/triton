@@ -209,6 +209,7 @@ def _attn_fwd(
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     stride_bz, stride_bh, stride_bm, stride_bn,
+    extra_tokens_n,
     H,
     seqlen_q,
     seqlen_k,
@@ -222,7 +223,6 @@ def _attn_fwd(
     BLOCK_N: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
     NEED_PADDING: tl.constexpr,
-    EXTRA_TOKENS_N: tl.constexpr,
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
@@ -308,7 +308,7 @@ def _attn_fwd(
         # We don't currently support causal masking and padding.
         tl.static_assert((STAGE != 3) or not NEED_PADDING)
         # equal to N_CTX if N_CTX is already a multiple of block_M
-        seqlen_aligned = seqlen_k - EXTRA_TOKENS_N
+        seqlen_aligned = seqlen_k - extra_tokens_n
         if seqlen_k >= BLOCK_N:
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
@@ -604,7 +604,7 @@ def _bwd_kernel_dq(
     dq = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     # loop over k, v
     lo = 0
-    hi = (start_m + BLOCK_M, seqlen_k) if CAUSAL else seqlen_k
+    hi = min(start_m + BLOCK_M, seqlen_k) if CAUSAL else seqlen_k
     batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     for start_n in range(lo, hi, BLOCK_N):
         # -- load k, v --
@@ -710,6 +710,7 @@ class _attention(torch.autograd.Function):
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),
             o.stride(0), o.stride(1), o.stride(2), o.stride(3),
             *bias_strides,
+            extra_tokens_n,
             H=q.shape[1],
             seqlen_q=seqlen_q,
             seqlen_k=seqlen_k,
@@ -720,7 +721,7 @@ class _attention(torch.autograd.Function):
             STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=Lk, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
-            NEED_PADDING=need_padding, EXTRA_TOKENS_N=extra_tokens_n,
+            NEED_PADDING=need_padding,
             BIAS_TYPE=bias_type,
             ENABLE_DROPOUT=dropout_p > 0.0,
             RETURN_ENCODED_SOFTMAX=return_encoded_softmax,

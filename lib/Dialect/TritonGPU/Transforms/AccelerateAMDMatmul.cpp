@@ -94,9 +94,8 @@ warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
 }
 
 SmallVector<unsigned, 2>
-warpsPerTileMFMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
-                 SmallVector<int64_t, 2> shapePerWarp) {
-  return warpsPerTile(dotOp, shape, numWarps, shapePerWarp);
+warpsPerTileMFMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
+  return warpsPerTile(dotOp, shape, numWarps, {32, 32});
 }
 
 SmallVector<unsigned, 2>
@@ -264,8 +263,7 @@ public:
 
     auto [nonKDim, kDim] = chooseMfmaDimensions(dotOp);
 
-    auto warpsPerTile =
-        warpsPerTileMFMA(dotOp, retShape, numWarps, {nonKDim, nonKDim});
+    auto warpsPerTile = warpsPerTileMFMA(dotOp, retShape, numWarps);
 
     bool isTransposed = isChainDot(dotOp);
     mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,

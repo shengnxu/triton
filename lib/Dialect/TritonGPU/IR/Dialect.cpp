@@ -104,8 +104,7 @@ SmallVector<unsigned> getThreadsPerWarp(Attribute layout) {
   }
   if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
     unsigned rows, cols;
-    int mfmaMDim = mfmaLayout.getMDim();
-    if (32 == mfmaMDim) {
+    if (mfmaLayout.getNonKDim() == 32) {
       cols = 2;
       rows = 32;
     } else {
@@ -241,7 +240,7 @@ SmallVector<unsigned> getSizePerThread(Attribute layout) {
     }
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
     unsigned rows, cols;
-    switch (mfmaLayout.getMDim()) {
+    switch (mfmaLayout.getNonKDim()) {
     case 32:
       rows = 16;
       cols = 1;
@@ -350,19 +349,13 @@ SmallVector<unsigned> getThreadsPerCTA(Attribute layout) {
     } else
       llvm::report_fatal_error("Unimplemented usage of MmaEncodingAttr");
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    int mfmaMDim = mfmaLayout.getMDim();
-    SmallVector<unsigned> threadsPerWarp;
-    if (32 == mfmaMDim) {
-      threadsPerWarp = {2, 32};
+    if (mfmaLayout.getNonKDim() == 32) {
+      threads = {32 * mfmaLayout.getWarpsPerCTA()[0],
+                 2 * mfmaLayout.getWarpsPerCTA()[1]};
     } else {
-      threadsPerWarp = {4, 16};
+      threads = {16 * mfmaLayout.getWarpsPerCTA()[0],
+                 4 * mfmaLayout.getWarpsPerCTA()[1]};
     }
-    if (mfmaLayout.getIsTransposed())
-      threads = {threadsPerWarp[1] * mfmaLayout.getWarpsPerCTA()[0],
-                 threadsPerWarp[0] * mfmaLayout.getWarpsPerCTA()[1]};
-    else
-      threads = {threadsPerWarp[0] * mfmaLayout.getWarpsPerCTA()[0],
-                 threadsPerWarp[1] * mfmaLayout.getWarpsPerCTA()[1]};
   } else {
     llvm::report_fatal_error("Unimplemented usage of getThreadsPerCTA");
   }
@@ -400,10 +393,9 @@ SmallVector<unsigned> getShapePerCTATile(Attribute layout,
     }
     llvm::report_fatal_error("Unexpected MMA layout version found");
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    auto mfmaMDim = mfmaLayout.getMDim();
-    auto mfmaNDim = mfmaLayout.getNDim();
-    return {mfmaMDim * mfmaLayout.getWarpsPerCTA()[0],
-            mfmaNDim * mfmaLayout.getWarpsPerCTA()[1]};
+    auto nonKDim = mfmaLayout.getNonKDim();
+    return {nonKDim * mfmaLayout.getWarpsPerCTA()[0],
+            nonKDim * mfmaLayout.getWarpsPerCTA()[1]};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     assert(parentLayout && "DotOperandEncodingAttr must have a parent");
@@ -727,11 +719,11 @@ bool sameBlockedEncodings(BlockedEncodingAttr blockedA,
 }
 
 bool sameMfmaEncodings(MfmaEncodingAttr mfmaA, MfmaEncodingAttr mfmaB) {
-  auto nonKDimA = mfmaA.getMDim();
+  auto nonKDimA = mfmaA.getNonKDim();
   auto warpsPerCTAA = mfmaA.getWarpsPerCTA();
   auto isTransposedA = mfmaA.getIsTransposed();
 
-  auto nonKDimB = mfmaB.getMDim();
+  auto nonKDimB = mfmaB.getNonKDim();
   auto warpsPerCTAB = mfmaB.getWarpsPerCTA();
   auto isTransposedB = mfmaB.getIsTransposed();
 
@@ -921,22 +913,19 @@ MfmaEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   assert(rank == 2 && "Unexpected rank of mfma layout");
 
   SmallVector<unsigned> elemsPerThread(rank);
-  auto mfmaMDim = getMDim();
-  auto mfmaNDim = getNDim();
-  auto elemsPerThreadPerTile = (mfmaMDim == 32 ? 16 : 4);
+  auto nonKDim = getNonKDim();
+  auto elemsPerThreadPerTile = (nonKDim == 16 ? 4 : 16);
   if (getIsTransposed()) {
     unsigned elemsCol =
-        ceil<unsigned>(shape[1], mfmaNDim * getWarpsPerCTA()[1]) *
+        ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]) *
         elemsPerThreadPerTile;
-    unsigned elemsRow =
-        ceil<unsigned>(shape[0], mfmaMDim * getWarpsPerCTA()[0]);
+    unsigned elemsRow = ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]);
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
   } else {
-    unsigned elemsCol =
-        ceil<unsigned>(shape[1], mfmaNDim * getWarpsPerCTA()[1]);
+    unsigned elemsCol = ceil<unsigned>(shape[1], nonKDim * getWarpsPerCTA()[1]);
     unsigned elemsRow =
-        ceil<unsigned>(shape[0], mfmaMDim * getWarpsPerCTA()[0]) *
+        ceil<unsigned>(shape[0], nonKDim * getWarpsPerCTA()[0]) *
         elemsPerThreadPerTile;
     elemsPerThread[0] = elemsRow;
     elemsPerThread[1] = elemsCol;
@@ -1064,7 +1053,7 @@ DotOperandEncodingAttr::getMMAv2Rep(ArrayRef<int64_t> shape,
 SmallVector<int64_t>
 DotOperandEncodingAttr::getMFMAElemsPerInstr() const {
   auto mfmaEncoding = getParent().cast<MfmaEncodingAttr>();
-  int64_t nonKDim = mfmaEncoding.getMDim();
+  int64_t nonKDim = mfmaEncoding.getNonKDim();
   assert(nonKDim == 32 || nonKDim == 16 || nonKDim == 4);
   int64_t kWidth = getKWidth();
   constexpr int waveSize = 64; // MFMA is used on wave64 architectures only
@@ -1378,46 +1367,32 @@ Attribute MfmaEncodingAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseGreater().failed())
     return {};
 
-  unsigned versionMajor = 0;
-  unsigned versionMinor = 0;
+  unsigned nonKDim = 0;
   SmallVector<unsigned> warpsPerCTA;
-  SmallVector<unsigned> instrShape;
   bool isTransposed;
 
   for (const NamedAttribute &attr : dict) {
-    if (attr.getName() == "versionMajor") {
-      if (parseUInt(parser, attr, versionMajor, "versionMajor").failed())
-        return {};
-    }
-    if (attr.getName() == "versionMinor") {
-      if (parseUInt(parser, attr, versionMinor, "versionMinor").failed())
+    if (attr.getName() == "nonKDim") {
+      if (parseUInt(parser, attr, nonKDim, "nonKDim").failed())
         return {};
     }
     if (attr.getName() == "warpsPerCTA") {
       if (parseIntArrayAttr(parser, attr, warpsPerCTA, "warpsPerCTA").failed())
         return {};
-    }
-    if (attr.getName() == "instrShape") {
-      if (parseIntArrayAttr(parser, attr, instrShape, "instrShape").failed())
-        return {};
-    }
-    if (attr.getName() == "isTransposed") {
+    } else if (attr.getName() == "isTransposed") {
       if (parseBool(parser, attr, isTransposed, "isTransposed").failed())
         return {};
     }
   }
 
-  return parser.getChecked<MfmaEncodingAttr>(
-      parser.getContext(), versionMajor, versionMinor, warpsPerCTA,
-      instrShape[0], instrShape[1], isTransposed);
+  return parser.getChecked<MfmaEncodingAttr>(parser.getContext(), nonKDim,
+                                             warpsPerCTA, isTransposed);
 }
 
 void MfmaEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{"
-          << "version = " << getVersionMajor() << "." << getVersionMinor()
-          << ", "
+          << "nonKDim = " << getNonKDim() << ", "
           << "warpsPerCTA = [" << getWarpsPerCTA() << "], "
-          << "instrShape = [" << getMDim() << ", " << getNDim() << "], "
           << "isTransposed = " << getIsTransposed() << "}>";
 }
 

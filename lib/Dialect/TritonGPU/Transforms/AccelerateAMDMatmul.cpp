@@ -133,23 +133,20 @@ public:
   /// @brief Choose MFMA instruction parameters
   /// @param dot target dot operation
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
-  std::pair<unsigned, unsigned> chooseMfmaDimensions(tt::DotOp dot) const {
+  std::pair<int64_t, int64_t> chooseMfmaDimensions(tt::DotOp dot) const {
     // number of matrix elements along k dim per one MFMA intruction
-    unsigned kDim = 0;
+    int64_t kDim = -1;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
-
-    auto dataTypeA = opType.getElementType();
-    auto dataTypeB =
-        dot.getB().getType().cast<RankedTensorType>().getElementType();
+    auto elemType = opType.getElementType();
 
     auto resType = dot.getD().getType().cast<RankedTensorType>();
     auto resShape = resType.getShape();
 
-    unsigned nonKDim = 0;
+    int64_t nonKDim = -1;
     if (enforcedNonKDim != 0) {
       nonKDim = enforcedNonKDim;
     } else {
-      nonKDim = 0;
+      nonKDim = -1;
       int minSize = std::min(resShape[0], resShape[1]);
       if (minSize >= 32)
         nonKDim = 32;
@@ -157,17 +154,77 @@ public:
         nonKDim = 16;
       if (minSize < 16)
         nonKDim = 4;
-      assert(nonKDim != 0);
+      assert(nonKDim != -1);
     }
-
-    auto maybeMfmaInsn =
-        MfmaInsn::selectMfma(nonKDim, dataTypeA, dataTypeB, mfmaVersion);
-    if (failed(maybeMfmaInsn))
-      llvm::report_fatal_error("No match found in MFMA database\n");
-    else
-      kDim = (*maybeMfmaInsn).getKDim();
-    assert(kDim != 0);
-    assert(nonKDim != 0);
+    switch (nonKDim) {
+    case 32:
+      if (elemType.isF32())
+        kDim = 2;
+      if (elemType.isF16())
+        kDim = 8;
+      if (elemType.isBF16()) {
+        if (mfmaVersion == 1)
+          kDim = 4;
+        if (mfmaVersion >= 2)
+          kDim = 8;
+      }
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim = 16;
+      }
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 16;
+        }
+        else {
+          kDim = 8;
+        }
+      }
+      break;
+    case 16:
+      if (elemType.isF32())
+        kDim = 4;
+      if (elemType.isF16())
+        kDim = 16;
+      if (elemType.isBF16()) {
+        if (mfmaVersion == 1)
+          kDim = 8;
+        if (mfmaVersion >= 2)
+          kDim = 16;
+      }
+      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
+        assert(mfmaVersion == 3);
+        kDim = 32;
+      }
+      if (elemType.isInteger(8)) {
+        if (mfmaVersion == 3) {
+          kDim = 32;
+        }
+        else {
+          kDim = 16;
+        }
+      }
+      break;
+    case 4:
+      if (elemType.isF32())
+        kDim = 16;
+      if (elemType.isF16())
+        kDim = 64;
+      if (elemType.isBF16()) {
+        if (mfmaVersion == 1)
+          kDim = 32;
+        if (mfmaVersion >= 2)
+          kDim = 64;
+      }
+      if (elemType.isInteger(8)) {
+        kDim = 64;
+      }
+      break;
+    default:
+      llvm::report_fatal_error("unsupported nonKDim size in MFMA dot");
+    }
+    assert(kDim != -1);
+    assert(nonKDim != -1);
     assert(resShape[0] % nonKDim == 0 && resShape[1] % nonKDim == 0);
     assert(opType.getShape()[1] % kDim == 0);
     return {nonKDim, kDim};
@@ -211,10 +268,8 @@ public:
         warpsPerTileMFMA(dotOp, retShape, numWarps, {nonKDim, nonKDim});
 
     bool isTransposed = isChainDot(dotOp);
-    mfmaEnc = ttg::MfmaEncodingAttr::get(
-        oldRetType.getContext(),
-        /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
-        /*instrShape*/ nonKDim, nonKDim, isTransposed);
+    mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,
+                                         warpsPerTile, isTransposed);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);

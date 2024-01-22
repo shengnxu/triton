@@ -772,11 +772,11 @@ public:
   void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
                             SmallVector<SmallVector<unsigned>> &offsets,
                             unsigned ctaOffsetX, unsigned ctaOffsetY) const {
-    int mfmaMDim = mfmaLayout.getMDim();
+    auto nonKDim = mfmaLayout.getNonKDim();
     // MFMA output tile consists of repeated "dot operand B" layout groups along
     // row axis. This variable defines number of these groups.
     DenseMap<int, int> groups{{4, 1}, {16, 1}, {32, 4}};
-    unsigned numGroups = groups.at(mfmaMDim);
+    unsigned numGroups = groups.at(nonKDim);
 
     const unsigned elemsPerThreadPerGroup = 4;
     auto warpSize = getWarpSize(mfmaLayout);
@@ -784,7 +784,7 @@ public:
     auto shapePerCta = getShapePerCTATile(mfmaLayout);
     for (unsigned block = 0; block < numGroups; block++) {
       unsigned rowOrColOffset =
-          block * elemsPerThreadPerGroup * warpSize / mfmaMDim;
+          block * elemsPerThreadPerGroup * warpSize / nonKDim;
       for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
         if (mfmaLayout.getIsTransposed()) {
           offsets.push_back(
@@ -1191,12 +1191,12 @@ private:
     assert(_warpsPerCTA.size() == 2);
     SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
                                       i32_val(_warpsPerCTA[1])};
-    int mfmaMDim = mfmaLayout.getMDim();
+    int nonKDim = mfmaLayout.getNonKDim();
 
     Value threadId = getThreadId(rewriter, loc);
     Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
     Value effectiveWarpSize = warpSize;
-    if (mfmaMDim == 4) {
+    if (nonKDim == 4) {
       const int uniqueValuesPerWarp = 4;
       effectiveWarpSize = i32_val(uniqueValuesPerWarp);
     }
@@ -1204,22 +1204,22 @@ private:
 
     Value warpId = udiv(threadId, warpSize);
     Value warpId0 =
-        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / mfmaMDim));
+        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / nonKDim));
     Value warpId1 = urem(urem(udiv(warpId, warpsPerCTA[0]), warpsPerCTA[1]),
-                         i32_val(shape[1] / mfmaMDim));
+                         i32_val(shape[1] / nonKDim));
 
-    Value offWarp0 = mul(warpId0, i32_val(mfmaMDim));
-    Value offWarp1 = mul(warpId1, i32_val(mfmaMDim));
+    Value offWarp0 = mul(warpId0, i32_val(nonKDim));
+    Value offWarp1 = mul(warpId1, i32_val(nonKDim));
 
     SmallVector<Value> multiDimBase(2);
     if (mfmaLayout.getIsTransposed()) {
       multiDimBase[1] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(mfmaMDim))), offWarp1);
-      multiDimBase[0] = add(urem(laneId, i32_val(mfmaMDim)), offWarp0);
+          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp1);
+      multiDimBase[0] = add(urem(laneId, i32_val(nonKDim)), offWarp0);
     } else {
       multiDimBase[0] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(mfmaMDim))), offWarp0);
-      multiDimBase[1] = add(urem(laneId, i32_val(mfmaMDim)), offWarp1);
+          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp0);
+      multiDimBase[1] = add(urem(laneId, i32_val(nonKDim)), offWarp1);
     }
     return multiDimBase;
   }
@@ -1236,7 +1236,7 @@ private:
     for (unsigned d = 0; d < 2; ++d) {
       unsigned inPerCTA = std::min<unsigned>(tensorShape[d], shapePerCTA[d]);
       unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
-      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getMDim());
+      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getNonKDim());
     }
 
     for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {

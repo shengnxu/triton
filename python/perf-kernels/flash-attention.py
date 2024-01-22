@@ -679,8 +679,6 @@ class _attention(torch.autograd.Function):
         if seqlen_k < BLOCK_N:
             need_padding = True
             extra_tokens_n = BLOCK_N - seqlen_k
-            # This effectively means we cannot slice across Q.
-            assert(grid[0] == 1)
         elif seqlen_k % BLOCK_N:
             need_padding = True
             extra_tokens_n = seqlen_k % BLOCK_N

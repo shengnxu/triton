@@ -83,11 +83,11 @@ def _attn_fwd_inner(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     STAGE: tl.constexpr,
-    offs_m: tl.constexpr,
-    offs_n: tl.constexpr,
-    pre_load_v: tl.constexpr,
-    padded_block: tl.constexpr,
-    total_tokens: tl.constexpr,
+    OFFS_M: tl.constexpr,
+    OFFS_N: tl.constexpr,
+    PRE_LOAD_V: tl.constexpr,
+    PADDED_BLOCK: tl.constexpr,
+    TOTAL_TOKENS: tl.constexpr,
     bias_ptr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
@@ -106,7 +106,7 @@ def _attn_fwd_inner(
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, lo))
     # So here, we are computing the elements for that last irregular block.
     # In the loop,  we will mask the elements of BLOCK_N that do not exist.
-    elif padded_block:
+    elif PADDED_BLOCK:
         lo, hi = seqlen_k, seqlen_k + BLOCK_N
         lo = tl.multiple_of(lo, BLOCK_N)
         K_block_ptr = tl.advance(K_block_ptr, (0, lo))
@@ -125,28 +125,28 @@ def _attn_fwd_inner(
             start_n = tl.multiple_of(start_n, BLOCK_N)
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
-        if padded_block:
+        if PADDED_BLOCK:
             k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
         else:
             k = tl.load(K_block_ptr)
-        if pre_load_v:
-            if padded_block:
+        if PRE_LOAD_V:
+            if PADDED_BLOCK:
                 v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
         # -- compute qk ----
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if STAGE == 2:
-            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+            mask = OFFS_M[:, None] >= (start_n + OFFS_N[None, :])
             qk = tl.where(mask, qk, float("-inf"))
         qk += tl.dot(q, k)
         if bias_ptr is not None:
-            if padded_block:
+            if PADDED_BLOCK:
                 if bias_ptr.type.element_ty.is_block():
                     bias = tl.load(bias_ptr,boundary_check=(1,), padding_option="zero")
                 else:
-                    size_n = start_n + offs_n
-                    boundary_n = tl.full([BLOCK_N], total_tokens, dtype=tl.float32)
+                    size_n = start_n + OFFS_N
+                    boundary_n = tl.full([BLOCK_N], TOTAL_TOKENS, dtype=tl.float32)
                     bias_padding = tl.full([BLOCK_N], 0, dtype=tl.float32)
                     bias = tl.load(bias_ptr, mask=size_n < boundary_n, other=bias_padding)
             else:
@@ -155,9 +155,9 @@ def _attn_fwd_inner(
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += (bias * 1.44269504)
-        if padded_block:
-            boundary_m = tl.full([BLOCK_M], total_tokens, dtype=tl.float32)
-            size_n = start_n + offs_n[None,:]
+        if PADDED_BLOCK:
+            boundary_m = tl.full([BLOCK_M], TOTAL_TOKENS, dtype=tl.float32)
+            size_n = start_n + OFFS_N[None,:]
             mask = size_n < boundary_m[:,None]
             qk = tl.where(mask, qk, float("-inf"))
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -179,8 +179,8 @@ def _attn_fwd_inner(
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
-        if not pre_load_v:
-            if padded_block:
+        if not PRE_LOAD_V:
+            if PADDED_BLOCK:
                 v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
@@ -220,10 +220,10 @@ def _attn_fwd(
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    pre_load_v: tl.constexpr,
-    need_padding: tl.constexpr,
-    extra_tokens_n: tl.constexpr,
-    bias_type: tl.constexpr,
+    PRE_LOAD_V: tl.constexpr,
+    NEED_PADDING: tl.constexpr,
+    EXTRA_TOKENS_N: tl.constexpr,
+    BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
@@ -260,9 +260,9 @@ def _attn_fwd(
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     if bias is not None:
-        if bias_type == "vector":
+        if BIAS_TYPE == "vector":
             bias_ptr = bias + ((off_hz % H) * stride_bh) + offs_n
-        elif bias_type == "matrix":
+        elif BIAS_TYPE == "matrix":
             bias_ptr = tl.make_block_ptr(
                 base=bias + ((off_hz % H) * stride_bh),
                 shape=(seqlen_q, seqlen_k),
@@ -306,9 +306,9 @@ def _attn_fwd(
         encoded_softmax_block_ptr = 0
     if STAGE & 1:
         # We don't currently support causal masking and padding.
-        tl.static_assert((STAGE != 3) or not need_padding)
+        tl.static_assert((STAGE != 3) or not NEED_PADDING)
         # equal to N_CTX if N_CTX is already a multiple of block_M
-        seqlen_aligned = seqlen_k - extra_tokens_n
+        seqlen_aligned = seqlen_k - EXTRA_TOKENS_N
         if seqlen_k >= BLOCK_N:
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
@@ -316,14 +316,14 @@ def _attn_fwd(
                 dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
-                pre_load_v,
+                PRE_LOAD_V,
                 False, seqlen_aligned,
                 bias_ptr,
                 ENABLE_DROPOUT,
                 RETURN_ENCODED_SOFTMAX
             )
         tl.debug_barrier()
-        if need_padding:
+        if NEED_PADDING:
             if seqlen_k < BLOCK_N:
                 seqlen_aligned = 0
             acc, l_i, m_i = _attn_fwd_inner(
@@ -332,7 +332,7 @@ def _attn_fwd(
                 dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
                 BLOCK_M, BLOCK_DMODEL, BLOCK_N,
                 4 - STAGE, offs_m, offs_n,
-                pre_load_v,
+                PRE_LOAD_V,
                 True, seqlen_k,
                 bias_ptr,
                 ENABLE_DROPOUT,
@@ -349,7 +349,7 @@ def _attn_fwd(
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
             2, offs_m, offs_n,
-            pre_load_v,
+            PRE_LOAD_V,
             False, seqlen_aligned,
             bias_ptr,
             ENABLE_DROPOUT,
@@ -719,9 +719,9 @@ class _attention(torch.autograd.Function):
             encoded_softmax=encoded_softmax,
             STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=Lk, BLOCK_N=BLOCK_N,
-            pre_load_v=pre_load_v,
-            need_padding=need_padding, extra_tokens_n=extra_tokens_n,
-            bias_type=bias_type,
+            PRE_LOAD_V=pre_load_v,
+            NEED_PADDING=need_padding, EXTRA_TOKENS_N=extra_tokens_n,
+            BIAS_TYPE=bias_type,
             ENABLE_DROPOUT=dropout_p > 0.0,
             RETURN_ENCODED_SOFTMAX=return_encoded_softmax,
             num_stages=1, num_warps=num_warps

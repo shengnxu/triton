@@ -447,7 +447,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         else:
             raise ValueError("Bad matrix initialization type.")
 
-    raw_data = init_by_size_and_type((N,M) if needTrans else (M,N), torch.float32, init_type)
+    raw_data = init_by_size_and_type((M,N), torch.float32, init_type)
     if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
         (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) or not d_type.is_fp8():
         input = raw_data.to(tl_to_torch_types[d_type])

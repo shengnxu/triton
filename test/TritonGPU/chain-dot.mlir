@@ -64,7 +64,7 @@ module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ct
 }
 
 
-// CHECK: #mfma1 = #triton_gpu.mfma<{version = 2.0, warpsPerCTA = [4, 1], instrShape = [32, 32], isTransposed = true}>
+// CHECK: #mfma1 = #triton_gpu.mfma<{version = 2.0, warpsPerCTA = [4, 1], instrShape = [32, 32], isTransposed = false}>
 
 #blocked2 = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [8, 8], warpsPerCTA = [4, 1], order = [1, 0], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [0, 1]}>
 #blocked3 = #triton_gpu.blocked<{sizePerThread = [2, 2], threadsPerWarp = [4, 16], warpsPerCTA = [4, 1], order = [1, 0], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [1, 0]}>
@@ -127,7 +127,7 @@ module attributes {"triton_gpu.compute-capability" = 0 : i32, "triton_gpu.num-ct
   }
 }
 
-// CHECK: #mfma2 = #triton_gpu.mfma<{version = 2.0, warpsPerCTA = [4, 1], instrShape = [16, 16], isTransposed = true}>
+// CHECK: #mfma2 = #triton_gpu.mfma<{version = 2.0, warpsPerCTA = [1, 4], instrShape = [16, 16], isTransposed = false}>
 
 #blocked4 = #triton_gpu.blocked<{sizePerThread = [1, 4], threadsPerWarp = [4, 16], warpsPerCTA = [4, 1], order = [1, 0], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [0, 1]}>
 #blocked5 = #triton_gpu.blocked<{sizePerThread = [1, 2], threadsPerWarp = [4, 16], warpsPerCTA = [4, 1], order = [1, 0], CTAsPerCGA = [1, 1], CTASplitNum = [1, 1], CTAOrder = [0, 1]}>

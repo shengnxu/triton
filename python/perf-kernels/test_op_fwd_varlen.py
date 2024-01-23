@@ -17,9 +17,8 @@ def test_op_fwd_varlen(Z, H, D_HEAD, causal,
     max_seqlens_q=10
     seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z,))
     seqlens_k=seqlens_q
-
-    print(seqlens_q)
-    print(seqlens_k)
+    print('seqlens_q= ', seqlens_q)
+    print('seqlens_k= ', seqlens_k)
 
     max_seqlen_q=max(seqlens_q)
     max_seqlen_k=max(seqlens_k)
@@ -28,6 +27,9 @@ def test_op_fwd_varlen(Z, H, D_HEAD, causal,
     cu_seqlens_q = torch.cat([torch.tensor([0]), seqlens_q.cumsum(dim=0)])
     cu_seqlens_k = torch.cat([torch.tensor([0]), seqlens_k.cumsum(dim=0)])
 
+    num_seqs=len(cu_seqlens_q) -1
+    print("num_seqs= ", num_seqs)
+
     # Initialize q, k, v with variable lengths
     total_q = cu_seqlens_q[-1].item()
     total_k = cu_seqlens_k[-1].item()
@@ -35,9 +37,9 @@ def test_op_fwd_varlen(Z, H, D_HEAD, causal,
     q = torch.randn((total_q, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    print(q.shape)
-    print(k.shape)
-    print(v.shape)
+    print('q.shape ', q.shape)
+    print('k.shape', k.shape)
+    print('v.shape', v.shape)
 
     # Initialize bias
     if use_bias:
@@ -53,65 +55,29 @@ def test_op_fwd_varlen(Z, H, D_HEAD, causal,
         k = k.to(torch_dtype)
     sm_scale = D_HEAD ** -0.5
 
-    k_transposed_list = []
-    for h in range(H):  # Iterate over each head
-        k_seq_list = []
-        start_index = 0
-        for i in range(seqlens_q.numel()):
-            # Determine the end index for each sequence
-            end_index = cu_seqlens_k[i]
-            # Slice along the H dimension
-            k_seq = k[start_index:end_index, h, :]
-
-        # Transpose along seqlens_k (which is now the first dimension) and D_HEAD
-        k_seq_transposed = k_seq.transpose(0, 1)
-
-        k_seq_list.append(k_seq_transposed)
-        start_index = end_index
-
-    # Concatenating along the sequence length dimension (dim=0 after transpose)
-    k_transposed_per_head = torch.cat(k_seq_list, dim=0)
-    k_transposed_list.append(k_transposed_per_head)
-
-    for i, kt in enumerate(k_transposed_list):
-        print(f"Tensor {i} shape: {kt.shape}")
     # Concatenating along the number of heads dimension
-    k_transposed = torch.cat(k_transposed_list, dim=1)
-
-    # Ensure dimensions align for the matrix multiplication
-    p = torch.matmul(q, k_transposed) * sm_scale
+    p= sm_scale * torch.einsum('qhd, khd -> qhk',q,k).half()
     print("p.shape=",p.shape)
-    # Reference implementation with masking for variable lengths
-    M = torch.zeros((Z, max_seqlen_q, max_seqlen_k), device="cuda")
-    print(M.shape)
 
-    # Adjust the mask for each sequence based on their actual lengths
-    for i, (len_q, len_k) in enumerate(zip(seqlens_q, seqlens_k)):
-        M[i, :len_q, :len_k] = 1
+    start=0
+    for seq_len in seqlens_q:
 
-    # Now reshape and expand M to match the shape of p
-    # p has shape [total_q, H, max_seqlen_k]
-    # We need to align the sequence dimension of M with the total_q dimension
-    expanded_M = torch.zeros_like(p, dtype=torch.bool)
-    idx = 0
-    for i, len_q in enumerate(seqlens_q):
-        expanded_M[idx:idx+len_q] = M[i, :len_q].unsqueeze(1)
-        idx += len_q
+        end=start+seq_len
 
+        mask = torch.tril(torch.ones((seq_len, seq_len), device="cuda"))
+        if mask.size(0) != seq_len or mask.size(1) != seq_len:
+           raise ValueError(f"Mask shape {mask.size()} does not match sequence length {seq_len}")
+        expanded_mask = mask.unsqueeze(1).expand(seq_len, H, seq_len)
 
-    if causal:
-       causal_mask = torch.tril(torch.ones((max_seqlen_q, max_seqlen_k), device="cuda"))
-       M *= causal_mask
-
-    # Apply the mask
-    p = p.masked_fill(expanded_M == 0, float("-inf"))
+        p[start:end, :, start:end] = p[start:end, :, start:end].masked_fill(expanded_mask == 0, float("-inf"))
+        start += seq_len
 
 #   if use_bias:
 #       # Add bias here as per the original implementation
 #       pass
 
     p = torch.softmax(p, dim=-1)
-    ref_out = torch.matmul(p, v)
+    ref_out= torch.einsum('qhk, khd -> qhd',p,v).half()
 
     # Triton implementation (or other custom implementation)
 #    tri_out = attention(q, k, v, causal, bias, sm_scale)

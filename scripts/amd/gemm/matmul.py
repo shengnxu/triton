@@ -15,7 +15,7 @@ import subprocess
 
 
 # global flag to indicate whether using the full tuing space
-tuning_full_space = True
+tuning_full_space = False
 
 # pruned some unreasonable config
 def prune_configs(configs, named_args):
@@ -264,7 +264,7 @@ def run_speed(M, N, K, datatype, use_rocprof, provider):
     return min_ms
 
 def run_bash_command(commandstring):
-    #print( commandstring )
+    print( commandstring )
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout = subprocess.PIPE)
     return proc.stdout.splitlines()
 

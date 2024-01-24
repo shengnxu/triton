@@ -34,16 +34,22 @@ public:
            "Unexpected srcLayout in ReduceOpConversion");
     Location loc = op->getLoc();
 
+// llvm::outs() << "beforeUnpackInputs\n";
+
     auto srcValues = unpackInputs(loc, op, adaptor, rewriter);
     std::map<SmallVector<unsigned>, SmallVector<Value>> accs;
     std::map<SmallVector<unsigned>, SmallVector<Value>> indices;
+
+// llvm::outs() << "beforeReduceWinthinThreads\n";
     // First reduce all the values along axis within each thread.
     reduceWithinThreads(helper, srcValues, accs, indices, rewriter);
 
+// llvm::outs() << "afterReduceWinthinThreads\n";
     // Then reduce across threads within a warp.
     reduceWithinWarps(helper, accs, rewriter);
 
     if (helper.isWarpSynchronous()) {
+// llvm::outs() << "inisWarpSynchronous\n";
       // If all the values to be reduced are within the same warp there is
       // nothing left to do.
       packResults(helper, accs, rewriter);
@@ -53,12 +59,15 @@ public:
     // Compute a shared memory base per operand.
     auto smemShape = helper.getScratchConfig();
 
+// llvm::outs() << "beforeStoreWarpReduceToSharedMemory\n";
+
     SmallVector<Value> smemBases =
         getSmemBases(helper, op, smemShape, rewriter);
-
+// llvm::outs() << "afterGetSmemBase\n";
     storeWarpReduceToSharedMemory(helper, accs, indices, smemBases, rewriter);
-
     sync(rewriter, loc, op);
+
+// llvm::outs() << "afterStoreToLDS\n";
 
     // The second round of shuffle reduction
     //   now the problem size: sizeInterWarps, s1, s2, .. , sn
@@ -68,6 +77,8 @@ public:
     //   elemsPerThread = sizeInterWarps * s1 * s2 .. Sn / numThreads
     accumulatePartialReductions(helper, smemBases, rewriter);
 
+// llvm::outs() << "afterAccumulatePartialReductions\n";
+
     // We could avoid this barrier in some of the layouts, however this is not
     // the general case.
     // TODO: optimize the barrier in case the layouts are accepted.
@@ -75,6 +86,8 @@ public:
 
     // set output values
     loadReductionAndPackResult(helper, smemShape, smemBases, rewriter);
+
+// llvm::outs() << "afterLoadReductionAndPackResult\n";
 
     return success();
   }
@@ -95,7 +108,7 @@ private:
     rewriter.cloneRegionBefore(combineOp, &parent.front());
     auto &newReduce = parent.front();
     auto returnOp = dyn_cast<triton::ReduceReturnOp>(newReduce.getTerminator());
-
+    // llvm::outs() << "acc_size = " << acc.size() << "\n";
     llvm::SmallVector<Value> combineArgs(2 * acc.size());
     for (unsigned i = 0; i < acc.size(); ++i) {
       combineArgs[i] = acc[i];
@@ -121,10 +134,11 @@ private:
     auto operands = adaptor.getOperands();
     unsigned srcElems = getTotalElemsPerThread(types[0]);
     SmallVector<SmallVector<Value>> srcValues(srcElems);
+    // llvm::outs() << "numOperands = " << op.getNumOperands() << "\n";
+    // llvm::outs() << "srcElements = " << srcElems << "\n";
     for (unsigned i = 0; i < op.getNumOperands(); ++i) {
       auto values = getTypeConverter()->unpackLLElements(loc, operands[i],
                                                          rewriter, types[i]);
-
       assert(values.size() == srcValues.size());
       for (unsigned j = 0; j < srcValues.size(); ++j) {
         srcValues[j].push_back(values[j]);
@@ -224,17 +238,22 @@ private:
       std::map<SmallVector<unsigned>, SmallVector<Value>> &indices,
       ConversionPatternRewriter &rewriter) const {
     triton::ReduceOp op = helper.getOperation();
+    // llvm::outs() << "reduce_op = " << op << "\n";
     RankedTensorType operandType = op.getInputTypes()[0];
+    // llvm::outs() << "operandType = " << operandType << "\n";
+    // llvm::outs() << "srcLayout = " << helper.getSrcLayout() << "\n";
     // Assumes offsets don't actually depend on type
     SmallVector<SmallVector<unsigned>> offset =
         emitOffsetForLayout(helper.getSrcLayout(), operandType);
     unsigned srcElems = getTotalElemsPerThread(operandType);
+    // llvm::outs() << "srcElems = " << srcElems << ", op_axis = " << op.getAxis() << "\n";
     auto *combineOp = &op.getCombineOp();
     auto srcIndices =
         emitIndices(op.getLoc(), rewriter, helper.getSrcLayout(), operandType);
     // reduce within threads
     for (unsigned i = 0; i < srcElems; ++i) {
       SmallVector<unsigned> key = offset[i];
+      // llvm::outs() << "key = [" << key[0] << ", " << key[1] << "]\n";
       key[op.getAxis()] = 0;
       bool isFirst = accs.find(key) == accs.end();
       accumulate(rewriter, *combineOp, accs[key], srcValues[i], isFirst);
@@ -248,7 +267,9 @@ private:
   void warpReduce(ConversionPatternRewriter &rewriter, Location loc,
                   SmallVector<Value> &acc, triton::ReduceOp op,
                   unsigned numLaneToReduce, unsigned interleave) const {
+    // llvm::outs() << "warpSizeUsed0---------------\n";
     if (auto kind = matchReduxKind(op)) {
+    // llvm::outs() << "warpSizeUsed00---------------\n";
       // Based on benchmarking on A100 redux op gives a speed up only when doing
       // a single reduction (not partioned) and when the mask is static.
       // Therefore we currently only enable it to reduce across all the lanes.
@@ -262,7 +283,9 @@ private:
           // each group of numLaneToReduce threads has the correct mask.
           unsigned bitmask = (1 << numLaneToReduce) - 1;
           Value threadId = getThreadId(rewriter, loc);
+          // llvm::outs() << "warpSizeUsed1\n";
           Value laneId = urem(threadId, i32_val(32));
+          // llvm::outs() << "warpSizeUsed2\n";
           mask = shl(i32_val(bitmask),
                      and_(laneId, i32_val(~(numLaneToReduce - 1))));
         }
@@ -283,12 +306,15 @@ private:
       }
     }
 
+    // llvm::outs() << "acc_size1111 = " << acc.size() << "\n";
+    // llvm::outs() << "numLaneToReduce = " << numLaneToReduce << "\n";
     for (unsigned N = numLaneToReduce / 2; N > 0; N >>= 1) {
       SmallVector<Value> shfl(acc.size());
       unsigned shuffleIdx = N;
 #ifdef USE_ROCM
       auto srcTys = op.getInputTypes();
       auto inputTy = srcTys[0].cast<RankedTensorType>();
+      // llvm::outs() << "inputTy = " << inputTy << "\n";
       auto inMfma =
         inputTy.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
       if (inMfma && inMfma.getIsTransposed()) {
@@ -302,8 +328,9 @@ private:
         shuffleIdx = warpSize / N / 2;
       }
 #endif
+      // llvm::outs() << "shuffleIdx = " << shuffleIdx << "\n";
       for (unsigned i = 0; i < acc.size(); ++i) {
-	shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx * interleave);
+	      shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx * interleave);
       }
       accumulate(rewriter, op.getCombineOp(), acc, shfl, false);
     }
@@ -318,8 +345,11 @@ private:
     unsigned sizeIntraWarps = helper.getIntraWarpSizeWithUniqueData();
     unsigned threadOffsetOnReductionAxis =
         helper.getThreadOffsetOnReductionAxis();
+    // llvm::outs() << "sizeIntraWarps = " << sizeIntraWarps << "\n";
+    // llvm::outs() << "threadOffsetOnReductionAxis = " << threadOffsetOnReductionAxis << "\n";
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
+      // llvm::outs() << "key = " << key[0] << ", " << key[1] << "\n";
       SmallVector<Value> &acc = accs[key];
       warpReduce(rewriter, op.getLoc(), acc, op, sizeIntraWarps,
                  threadOffsetOnReductionAxis);
@@ -397,18 +427,27 @@ private:
     triton::ReduceOp op = helper.getOperation();
     Location loc = op.getLoc();
     Value threadId = getThreadId(rewriter, loc);
+
     auto srcLayout = helper.getSrcLayout();
+    // llvm::outs() << "srcLayout11 = " << srcLayout << "\n";
     unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
     Value warpSize = i32_val(wavefront_size);
     Value warpId = udiv(threadId, warpSize);
     Value laneId = urem(threadId, warpSize);
     auto srcShape = helper.getSrcShape();
+    // llvm::outs() << "srcShape11 = [" << srcShape[0] << ", " << srcShape[1] << "]\n";
     unsigned axis = op.getAxis();
+    // llvm::outs() << "axis = " << axis << "\n";
     auto smemShape = helper.getScratchConfig();
+    // llvm::outs() << "smemShape11 = [" << smemShape[0] << ", " << smemShape[1] << "]\n";
 
     auto threadsPerWarp =
         triton::gpu::getThreadsPerWarpWithUniqueData(srcLayout, srcShape);
+    // llvm::outs() << "threadsPerWarp11 = [" << threadsPerWarp[0] << ", " << threadsPerWarp[1] << "]\n";
+
     auto order = getOrder(srcLayout);
+    // llvm::outs() << "order11 = [" << order[0] << ", " << order[1] << "]\n";
+
     SmallVector<Value> multiDimLaneId =
         delinearize(rewriter, loc, laneId, threadsPerWarp, order);
     Value laneIdAxis = multiDimLaneId[axis];
@@ -420,6 +459,8 @@ private:
     Value warpIdAxis = multiDimWarpId[axis];
 
     auto smemOrder = helper.getOrderWithAxisAtBeginning();
+    // llvm::outs() << "smemOrder = [" << smemOrder[0] << ", " << smemOrder[1] << "]\n";
+    // llvm::outs() << "accs_size = " << accs.size() << "\n";
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
       SmallVector<Value> acc = it.second;
@@ -443,14 +484,19 @@ private:
                                    ConversionPatternRewriter &rewriter) const {
     triton::ReduceOp op = helper.getOperation();
     auto srcLayout = helper.getSrcLayout();
+    // llvm::outs() << "222srcLayout = " << srcLayout << "\n";
     auto smemShape = helper.getScratchConfig();
+    // llvm::outs() << "222smemShape = [" << smemShape[0] << ", " << smemShape[1] << "]\n";
     unsigned elems = product<unsigned>(smemShape);
     unsigned sizeInterWarps = helper.getInterWarpSizeWithUniqueData();
+    // llvm::outs() << "22elems = " << elems << ", sizeInterWarps = " << sizeInterWarps << "\n";
     Location loc = op.getLoc();
 
-    Value threadId = getThreadId(rewriter, loc);
     unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
+    // llvm::outs() << "wavefront_size = " << wavefront_size << "\n";
     Value warpSize = i32_val(wavefront_size);
+
+    Value threadId = getThreadId(rewriter, loc);
     Value laneId = urem(threadId, warpSize);
     Value zero = i32_val(0);
 
@@ -458,10 +504,13 @@ private:
     unsigned numThreads =
         product<unsigned>(triton::gpu::getWarpsPerCTA(srcLayout)) *
         triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
+    // llvm::outs() << "numThreads = " << numThreads << "\n";
     unsigned elemsPerThread = std::max<unsigned>(elems / numThreads, 1);
+    // llvm::outs() << "elemsPerThread = " << elemsPerThread << "\n";
     Value threadIsNeeded = icmp_slt(threadId, i32_val(elems));
     Value readOffset = threadId;
     for (unsigned round = 0; round < elemsPerThread; ++round) {
+      // llvm::outs() << "-------round = " << round << "\n";
       SmallVector<Value> acc(op.getNumOperands());
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
         auto elemPtrTy = getElementPtrType(op, i);

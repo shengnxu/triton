@@ -223,6 +223,11 @@ SmallVector<Value> delinearize(ConversionPatternRewriter &rewriter,
   assert(rank > 0);
   SmallVector<Value> multiDim(rank);
   Value remained = linear;
+  // if (shape.size() == 1) {
+  //   llvm::outs() << "delnearizeShape = [" << shape[0] << "]\n";
+  // } else {
+  //   llvm::outs() << "delnearizeShape = [" << shape[0] << ", " << shape[1] << "]\n";
+  // }
   for (auto &&en : llvm::enumerate(shape)) {
     Value dimSize = i32_val(en.value());
     multiDim[en.index()] = urem(remained, dimSize);
@@ -256,10 +261,13 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  rewriter.create<scf::IfOp>(loc, pred,
-    [&](OpBuilder& builder, Location loc) {
-      store(val, ptr);
-    }, nullptr);
+  store(val, ptr);
+  // rewriter.create<scf::IfOp>(loc, pred,
+  //   [&](OpBuilder& builder, Location loc) {
+  //     // store(val, ptr);
+  //     builder.create<LLVM::StoreOp>(loc, val, ptr);
+  //     builder.create<scf::YieldOp>(loc);
+  //   }, nullptr);
   return val;
 #else
   MLIRContext *ctx = rewriter.getContext();
@@ -278,13 +286,15 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                  Value pred) {
 #if USE_ROCM
-  auto loaded = rewriter.create<scf::IfOp>(loc, pred,
-    [&](OpBuilder& builder, Location loc) {
-      load(ptr);
-    },
-    nullptr
-  );
-  return loaded->getResult(0);
+  return load(ptr);
+  // auto loaded = rewriter.create<scf::IfOp>(loc, pred,
+  //   [&](OpBuilder& builder, Location loc) {
+  //     load(ptr);
+  //     builder.create<scf::YieldOp>(loc);
+  //   },
+  //   nullptr
+  // );
+  // return loaded->getResult(0);
 #else
   MLIRContext *ctx = rewriter.getContext();
   auto ptrTy = ptr.getType().cast<LLVMPointerType>();

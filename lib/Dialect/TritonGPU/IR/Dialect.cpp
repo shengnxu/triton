@@ -496,7 +496,7 @@ SmallVector<unsigned> getOrder(Attribute layout) {
   } else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>()) {
     return {1, 0};
   } else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>()) {
-    return {1, 0};
+      return {1, 0};
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     return {1, 0};
   } else if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>()) {
@@ -530,6 +530,10 @@ CTALayoutAttr getCTALayout(Attribute layout) {
                               getCTAOrder(sliceLayout));
   else if (auto mmaLayout = layout.dyn_cast<MmaEncodingAttr>())
     return mmaLayout.getCTALayout();
+#ifdef USE_ROCM
+  else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
+    return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(mfmaLayout), getCTASplitNum(mfmaLayout), getCTAOrder(mfmaLayout));
+#endif
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(dotLayout),
                               getCTASplitNum(dotLayout),
@@ -537,7 +541,7 @@ CTALayoutAttr getCTALayout(Attribute layout) {
   else if (auto sharedLayout = layout.dyn_cast<SharedEncodingAttr>())
     return sharedLayout.getCTALayout();
   else
-    llvm::report_fatal_error("Unimplemented usage of getCTALayout");
+    llvm::report_fatal_error("Unimplemented usage of getCTALayoutaaaaaaaa");
   return {};
 }
 

@@ -161,12 +161,12 @@ struct LoadOpConversion
         size_t elemOffset = vecStart + wordIdx * wordNElems;
         Value ptr =
             addrspacecast(ptrElems[elemOffset],
-                          ptr_ty(getContext(), width));
+                          ptr_ty(getContext()));
         auto loaded = rewriter.create<scf::IfOp>(
             loc, pred,
             [&](OpBuilder &builder, Location loc) {
               Value w = int_val(width, width);
-              auto loadVal = builder.create<LLVM::LoadOp>(loc, valueElemTy, ptr);
+              auto loadVal = builder.create<LLVM::LoadOp>(loc, IntegerType::get(getContext(), width), ptr);
               builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
             },
             [&](OpBuilder &builder, Location loc) {

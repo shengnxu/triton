@@ -1,6 +1,7 @@
 import pytest
 import random
 import torch
+from typing import List, Optional, Tuple
 
 import triton
 import triton.language as tl
@@ -9,6 +10,26 @@ torch_dtype:tl.constexpr = torch.float16
 TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+
+def ref_mask_attention(
+    q:torch.Tensor,
+    k:torch.Tensor,
+    v:torch.Tensor,
+    sm_scale: float,
+    attn_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+
+    p = sm_scale * torch.einsum('qhd, khd -> qhk',q,k).half()
+    if attn_mask is not None:
+        expanded_mask = attn_mask.unsqueeze(1).expand(-1, H, -1)
+        p[expanded_mask==0] = float("-inf")
+
+    p = torch.softmax(p, dim=-1)
+    out= torch.einsum('qhk, khd -> qhd',p,v).half()
+    print("out= ", out.shape)
+
+    return out
+
 
 def test_op_fwd_varlen(Z, H, D_HEAD, causal,
         use_bias, bias_type, dtype=torch.float16):
@@ -56,30 +77,34 @@ def test_op_fwd_varlen(Z, H, D_HEAD, causal,
     sm_scale = D_HEAD ** -0.5
 
     # Concatenating along the number of heads dimension
-    p= sm_scale * torch.einsum('qhd, khd -> qhk',q,k).half()
-    print("p.shape=",p.shape)
 
-    if causal:
-        start=0
-        for seq_len in seqlens_q:
+    ref_outputs = []
+    start=0
+    for seq_len in seqlens_q:
+        end=start+seq_len
 
-            end=start+seq_len
+        attn_mask = torch.tril(torch.ones((seq_len, seq_len), device="cuda"))
+        if attn_mask.size(0) != seq_len or attn_mask.size(1) != seq_len:
+            raise ValueError(f"Mask shape {attn_mask.size()} does not match sequence length {seq_len}")
 
-            mask = torch.tril(torch.ones((seq_len, seq_len), device="cuda"))
-            if mask.size(0) != seq_len or mask.size(1) != seq_len:
-                raise ValueError(f"Mask shape {mask.size()} does not match sequence length {seq_len}")
-            expanded_mask = mask.unsqueeze(1).expand(seq_len, H, seq_len)
+        ref_output = ref_mask_attention(
+            q[start:end],
+            k[start:end],
+            v[start:end],
+            sm_scale,
+            attn_mask=attn_mask,
+        )
+        ref_outputs.append(ref_output)
+        start += seq_len
 
-            p[start:end, :, start:end] = p[start:end, :, start:end].masked_fill(expanded_mask == 0, float("-inf"))
-            start += seq_len
+    ref_output=torch.cat(ref_outputs, dim=0)
+    print("ref_output.shape=",ref_output.shape)
+
 
 #   if use_bias:
 #       # Add bias here as per the original implementation
 #       pass
 
-    p = torch.softmax(p, dim=-1)
-    ref_out= torch.einsum('qhk, khd -> qhd',p,v).half()
-    print("ref_out= ", ref_out.shape)
 
     # Triton implementation (or other custom implementation)
 #    tri_out = attention(q, k, v, causal, bias, sm_scale)

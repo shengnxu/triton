@@ -256,13 +256,7 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  // store(val, ptr);
   rewriter.create<scf::IfOp>(loc, pred,
-    [&](OpBuilder& builder, Location loc) {
-      builder.create<LLVM::StoreOp>(loc, val, ptr);
-      builder.create<scf::YieldOp>(loc);
-    }, 
-    // nullptr
     [&](OpBuilder& builder, Location loc) {
       builder.create<LLVM::StoreOp>(loc, val, ptr);
       builder.create<scf::YieldOp>(loc);
@@ -295,8 +289,9 @@ Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
     [&](OpBuilder& builder, Location loc) {
       auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
       builder.create<scf::YieldOp>(loc, ValueRange(loadVal));
-    });
-  return loaded->getResult(0);
+    }
+    );
+  // return loaded->getResult(0);
 #else
   MLIRContext *ctx = rewriter.getContext();
   auto ptrTy = ptr.getType().cast<LLVMPointerType>();

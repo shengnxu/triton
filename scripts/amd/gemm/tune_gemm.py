@@ -560,7 +560,6 @@ def parse_args():
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
     parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
     parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
-
     args = parser.parse_args()
 
     return args
@@ -668,7 +667,6 @@ def main():
         col_a = args.col_a
         col_b = args.col_b
         mnks = [(M, N, K, col_a, col_b, init_type, None)]
-
     else:
         with open(matrix_size_file) as file:
             matrix_sizes = yaml.safe_load(file)

@@ -131,6 +131,8 @@ compared to 1*64 when the hasLeadingOffset is false.
 
         if (mfmaEnc) {
           int kDimNum = dotOpEnc.getOpIdx() == 0 ? 1 : 0;
+          if (needTrans)
+            kDimNum = 1 - kDimNum;
           bool isKDimInner = (order[0] == kDimNum);
           if (isKDimInner) {
             const int numBanks = 32;
@@ -161,8 +163,11 @@ compared to 1*64 when the hasLeadingOffset is false.
               vecSize = 8;
             int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);
             // TODO (zhanglx): figure out better parameters for mfma4
-            if (4 == mfmaEnc.getMDim())
-              maxPhase = 4;
+            auto mDim = mfmaEnc.getMDim();
+            auto nDim = mfmaEnc.getNDim();
+            auto nonKDim = dotOpEnc.getOpIdx() == 0 ? mDim : nDim;
+            if (4 == nonKDim)
+               maxPhase = 4;
             assert(maxPhase > 0);
 
             return get(context, vecSize, perPhase, maxPhase, order, CTALayout);

@@ -475,10 +475,8 @@ def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_
     K, N = b.shape
     # 1D launch kernel where each block gets its own program.
 
-    grid = lambda META: (
-        triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
-        META['SPLIT_K']
-    )
+    grid = triton.cdiv(M, block_m) * triton.cdiv(N, block_n), split_k
+
     matmul_kernel[grid](
         a, b, c,
         M, N, K,
@@ -518,7 +516,7 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     size_str = ''
     if verbose:
         size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {row_a_str}{row_b_str}'
-    if torch.allclose(triton_output.to(torch.float16), torch_output, atol=1e-1, rtol=rtol):
+    if torch.allclose(triton_output.to(torch.float16), torch_output, atol=1e-3, rtol=rtol):
         print(f'{size_str} Correct✅')
     else:
         print(f'{size_str} Incorrect❌')
@@ -562,6 +560,7 @@ def parse_args():
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
     parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
     parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
+
     args = parser.parse_args()
 
     return args
@@ -669,6 +668,7 @@ def main():
         col_a = args.col_a
         col_b = args.col_b
         mnks = [(M, N, K, col_a, col_b, init_type, None)]
+
     else:
         with open(matrix_size_file) as file:
             matrix_sizes = yaml.safe_load(file)

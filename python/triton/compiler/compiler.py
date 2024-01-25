@@ -376,6 +376,18 @@ def translate_aot_arch(aot_arch):
                  "num_stages": 2,
                  "num_ctas": 1,
                  "warp_size": 64 }, 'hip'
+    if aot_arch == 'MI300X':
+        mat_core_ver = 3
+        capability = mat_core_ver * 100
+        return { "gfx_triple": 'amdgcn-amd-amdhsa',
+                 "gfx_arch": 'gfx942',
+                 "gfx_features": '+sramecc,-xnack',
+                 "capability": capability,
+                 "matrix_core_version": mat_core_ver,
+                 "num_warps": 4,
+                 "num_stages": 2,
+                 "num_ctas": 1,
+                 "warp_size": 64 }, 'hip'
     raise NotImplementedError(f'{aot_arch} is not supported as Ahead Of Time target')
 
 def get_cuda_capability(capability):

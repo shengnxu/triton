@@ -785,7 +785,6 @@ public:
     auto warpSize = getWarpSize(mfmaLayout);
     assert(warpSize == 64);
     auto shapePerCta = getShapePerCTATile(mfmaLayout);
-
     for (unsigned block = 0; block < numGroups; block++) {
       unsigned rowOrColOffset =
           block * elemsPerThreadPerGroup * warpSize / std::min(mDim, nDim);

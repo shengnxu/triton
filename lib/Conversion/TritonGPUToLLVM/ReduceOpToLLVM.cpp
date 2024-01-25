@@ -37,7 +37,6 @@ public:
     auto srcValues = unpackInputs(loc, op, adaptor, rewriter);
     std::map<SmallVector<unsigned>, SmallVector<Value>> accs;
     std::map<SmallVector<unsigned>, SmallVector<Value>> indices;
-
     // First reduce all the values along axis within each thread.
     reduceWithinThreads(helper, srcValues, accs, indices, rewriter);
 
@@ -56,7 +55,9 @@ public:
 
     SmallVector<Value> smemBases =
         getSmemBases(helper, op, smemShape, rewriter);
+
     storeWarpReduceToSharedMemory(helper, accs, indices, smemBases, rewriter);
+
     sync(rewriter, loc, op);
 
     // The second round of shuffle reduction
@@ -94,6 +95,7 @@ private:
     rewriter.cloneRegionBefore(combineOp, &parent.front());
     auto &newReduce = parent.front();
     auto returnOp = dyn_cast<triton::ReduceReturnOp>(newReduce.getTerminator());
+
     llvm::SmallVector<Value> combineArgs(2 * acc.size());
     for (unsigned i = 0; i < acc.size(); ++i) {
       combineArgs[i] = acc[i];
@@ -122,6 +124,7 @@ private:
     for (unsigned i = 0; i < op.getNumOperands(); ++i) {
       auto values = getTypeConverter()->unpackLLElements(loc, operands[i],
                                                          rewriter, types[i]);
+
       assert(values.size() == srcValues.size());
       for (unsigned j = 0; j < srcValues.size(); ++j) {
         srcValues[j].push_back(values[j]);
@@ -300,7 +303,7 @@ private:
       }
 #endif
       for (unsigned i = 0; i < acc.size(); ++i) {
-	      shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx * interleave);
+	shfl[i] = shflSync(loc, rewriter, acc[i], shuffleIdx * interleave);
       }
       accumulate(rewriter, op.getCombineOp(), acc, shfl, false);
     }
@@ -394,7 +397,6 @@ private:
     triton::ReduceOp op = helper.getOperation();
     Location loc = op.getLoc();
     Value threadId = getThreadId(rewriter, loc);
-
     auto srcLayout = helper.getSrcLayout();
     unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
     Value warpSize = i32_val(wavefront_size);
@@ -406,7 +408,6 @@ private:
 
     auto threadsPerWarp =
         triton::gpu::getThreadsPerWarpWithUniqueData(srcLayout, srcShape);
-
     auto order = getOrder(srcLayout);
     SmallVector<Value> multiDimLaneId =
         delinearize(rewriter, loc, laneId, threadsPerWarp, order);
@@ -447,10 +448,9 @@ private:
     unsigned sizeInterWarps = helper.getInterWarpSizeWithUniqueData();
     Location loc = op.getLoc();
 
+    Value threadId = getThreadId(rewriter, loc);
     unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
     Value warpSize = i32_val(wavefront_size);
-
-    Value threadId = getThreadId(rewriter, loc);
     Value laneId = urem(threadId, warpSize);
     Value zero = i32_val(0);
 

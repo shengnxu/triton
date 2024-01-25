@@ -261,7 +261,8 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
     [&](OpBuilder& builder, Location loc) {
       builder.create<LLVM::StoreOp>(loc, val, ptr);
       builder.create<scf::YieldOp>(loc);
-    },
+    }, 
+    // nullptr
     [&](OpBuilder& builder, Location loc) {
       builder.create<LLVM::StoreOp>(loc, val, ptr);
       builder.create<scf::YieldOp>(loc);
@@ -290,6 +291,7 @@ Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
       auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
       builder.create<scf::YieldOp>(loc, ValueRange(loadVal));
     },
+    // nullptr
     [&](OpBuilder& builder, Location loc) {
       auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
       builder.create<scf::YieldOp>(loc, ValueRange(loadVal));

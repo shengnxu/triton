@@ -785,8 +785,6 @@ public:
     auto warpSize = getWarpSize(mfmaLayout);
     assert(warpSize == 64);
     auto shapePerCta = getShapePerCTATile(mfmaLayout);
-    // llvm::outs() << "shapePerCtaTile = [" << shapePerCta[0] << ", " << shapePerCta[1] << "]\n";
-    // llvm::outs() << "numGroups = " << numGroups << "\n";
 
     for (unsigned block = 0; block < numGroups; block++) {
       unsigned rowOrColOffset =
@@ -801,7 +799,6 @@ public:
               {ctaOffsetX * shapePerCta[0] + elem + rowOrColOffset,
                ctaOffsetY * shapePerCta[1]});
         }
-        // llvm::outs() << "offsets = [" << offsets[block][0] << ", " << offsets[block][1] << "]\n";
       }
     }
   }
@@ -1194,9 +1191,7 @@ private:
                              const MfmaEncodingAttr &mfmaLayout,
                              RankedTensorType type) const {
     auto shape = type.getShape();
-    // llvm::outs() << "shape = " << shape << "\n";
     auto _warpsPerCTA = mfmaLayout.getWarpsPerCTA();
-    // llvm::outs() << "warpsPerCTA = " << _warpsPerCTA << "\n";
     assert(_warpsPerCTA.size() == 2);
     SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
                                       i32_val(_warpsPerCTA[1])};
@@ -1207,7 +1202,6 @@ private:
 
     Value threadId = getThreadId(rewriter, loc);
     Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
-    // llvm::outs() << "warpSize = " << triton::gpu::getWarpSize(mfmaLayout) << ", mfmaMDim = " << mDim << "\n";
     Value effectiveWarpSize = warpSize;
     if (mDim == 4 && nDim == 4) {
       const int uniqueValuesPerWarp = 4;
@@ -1245,10 +1239,6 @@ private:
     auto shapePerCTA = getShapePerCTA(mfmaLayout, tensorShape);
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
 
-    // llvm::outs() << "tensorShape = [" << tensorShape[0] << ", " << tensorShape[1] << "]\n";
-    // llvm::outs() << "shapePerCTA = [" << shapePerCTA[0] << ", " << shapePerCTA[1] << "]\n";
-    // llvm::outs() << "warpsPerCTA = [" << warpsPerCTA[0] << ", " << warpsPerCTA[1] << "]\n";
-
     SmallVector<unsigned> numWarpsPerDim(2);
     unsigned mDim = mfmaLayout.getMDim();
     unsigned nDim = mfmaLayout.getNDim();
@@ -1260,7 +1250,6 @@ private:
       unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
       numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, tileShape[d]);
     }
-    // llvm::outs() << "numWarpsPerDim = [" << numWarpsPerDim[0] << ", " << numWarpsPerDim[1] << "]\n";
 
     for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {
       for (unsigned j = 0; j < numWarpsPerDim[1]; ++j) {

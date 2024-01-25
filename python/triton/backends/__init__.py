@@ -1,5 +1,6 @@
 import os
 import importlib.util
+import sys
 import inspect
 from dataclasses import dataclass
 from .driver import DriverBase
@@ -44,6 +45,7 @@ def _discover_backends():
         driver = _load_module(name, os.path.join(root, name, 'driver.py'))
         backends[name] = Backend(_find_concrete_subclasses(compiler, BaseBackend),
                                  _find_concrete_subclasses(driver, DriverBase))
+        importlib.import_module('triton.backends.' + name)
     return backends
 
 

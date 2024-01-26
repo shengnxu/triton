@@ -435,10 +435,10 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
     def init_by_size_and_type(size, dtype, init_type):
         if init_type == 'hpl':
             return torch.empty(size, device='cuda', dtype=dtype).uniform_(-0.5, 0.5)
-        # This init type has element[i] in row[j] equal to sin(i)
+        # This init type has element[i] in row[j] equal to sin(i+j*N)
         elif init_type == 'trig_float':
             M, N = size
-            return torch.arange(0, N).expand(M,-1).sin().to(dtype=dtype, device='cuda')
+            return torch.reshape(torch.arange(0, M*N), (M, N)).sin().to(dtype=dtype, device='cuda')
         elif init_type == 'zeros':
             return torch.zeros(size, dtype=dtype, device='cuda')
         elif init_type == "randn":
@@ -687,7 +687,7 @@ def main():
         print(f"Benchmarking gemm with {dtype_a} inputs")
         print("trans     M      N      K    TFLOPS")
     else:
-        print(f"Tuning starts at: {start_time}", flush=True)
+        print(f"Tuning {len(mnks)} gemm sizes starts at: {start_time}", flush=True)
         f_results = open(tuning_output_file, 'w')
 
     for (M, N, K, col_a, col_b, myConfig) in mnks:
@@ -701,6 +701,8 @@ def main():
         size_str = f'SIZE: {M} {N} {K} {row_a_str}{row_b_str}'
         if not run_bench:
             print(f"{size_str} nConfigs: {len(pruned_configs)}", end=" ", flush=True)
+        else:
+            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    ", end="")
 
         # The main tuning funtion for one gemm size
         verbose_level = 0
@@ -728,7 +730,7 @@ def main():
 
         # write best config to tuning_results.yaml
         if run_bench:
-            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    {formatted_tflops}")
+            print(f"{formatted_tflops}")
 
         sizeDict = {'M': M, 'N': N, 'K': K, 'rowMajorA': row_a_str, 'rowMajorB': row_b_str}
         sizeDict.update(bestConfig)

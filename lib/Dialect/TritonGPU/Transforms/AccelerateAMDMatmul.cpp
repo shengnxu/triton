@@ -76,9 +76,8 @@ static bool isChainDot(tt::DotOp &dotOp) {
   bwdOpt.filter = filter;
   mlir::SetVector<mlir::Operation*> bwdSlices;
   // search backward of the operand 0 of the dot 
-  auto oper0 = dotOp.getOperand(0).getDefiningOp();
-  mlir::getBackwardSlice(dyn_cast<mlir::Operation*>(oper0), &bwdSlices, bwdOpt);
-  int i = 0;
+  mlir::Operation* oper0 = dotOp.getOperand(0).getDefiningOp();
+  mlir::getBackwardSlice(oper0, &bwdSlices, bwdOpt);
   for (Operation *op : bwdSlices) {
     if (isa<tt::DotOp>(op) && (op != dotOp)) {
       return true;
@@ -87,7 +86,6 @@ static bool isChainDot(tt::DotOp &dotOp) {
 
   return false;
 }
-
 
 SmallVector<unsigned, 2>
 warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,

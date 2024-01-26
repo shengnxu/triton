@@ -666,17 +666,17 @@ def main():
         K = args.k
         col_a = args.col_a
         col_b = args.col_b
-        mnks = [(M, N, K, col_a, col_b, init_type, None)]
+        mnks = [(M, N, K, col_a, col_b, None)]
     else:
         with open(matrix_size_file) as file:
             matrix_sizes = yaml.safe_load(file)
         for item in matrix_sizes:
             M, N, K, col_a, col_b, item = process_item(item)
-            mnks.append((M, N, K, col_a, col_b, init_type, item))
+            mnks.append((M, N, K, col_a, col_b, item))
 
     # Check correctness from given configs
     if args.compare_wo_tuning:
-        for (M, N, K, col_a, col_b, init_type, myConfig) in mnks:
+        for (M, N, K, col_a, col_b, myConfig) in mnks:
             test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, item, True)
         return
 
@@ -690,7 +690,7 @@ def main():
         print(f"Tuning starts at: {start_time}", flush=True)
         f_results = open(tuning_output_file, 'w')
 
-    for (M, N, K, col_a, col_b, init_type, myConfig) in mnks:
+    for (M, N, K, col_a, col_b, myConfig) in mnks:
         start_local_time = datetime.now()
         # Obtain a pruned tuning space according to gemm size
         # If running benchmark, use the provided config

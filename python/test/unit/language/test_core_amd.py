@@ -1029,7 +1029,7 @@ def deserialize_fp8(np_data, in_dtype):
                                       tl.float8e4b8, 
                                       tl.float8e5, 
                                       tl.float8e5b16])
-@pytest.mark.parametrize("out_dtype", [torch.float16, torch.float32])
+@pytest.mark.parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
 def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
     """
     For all possible float8 values (ref_fp8 = range(0, 256)), test that:
@@ -1039,6 +1039,14 @@ def test_fp8_fpN_roundtrip(in_dtype, out_dtype, device):
     """
     check_type_supported(in_dtype, device)
     check_type_supported(out_dtype, device)
+
+    backend = triton.common.backend.get_backend("hip")
+    if backend.get_matrix_core_version() == 3:
+        if out_dtype == torch.bfloat16 and (in_dtype == tl.float8e4b15 or in_dtype == tl.float8e4b15x4):
+           pytest.skip(f"Type conversion between {in_dtype} and {out_dtype} is not available on hardware")
+    elif backend.get_matrix_core_version() == 2:
+        if out_dtype == torch.bfloat16 and in_dtype != tl.float8e5:
+           pytest.skip(f"Type conversion between {in_dtype} and {out_dtype} is not available on hardware")
 
     @triton.jit
     def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -1139,7 +1147,8 @@ def gen_input(M, N, d_type, seed, device='cuda'):
                                            [tl.float16, tl.float8e4b15],
                                            [tl.float16, tl.float8e4b15x4],
                                            [tl.float16, tl.float8e5]]
-                          for out_dtype in [torch.float16, torch.float32]
+                        #   for out_dtype in [torch.float16, torch.bfloat16, torch.float32]
+                          for out_dtype in [torch.bfloat16]
                         ])
 def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
     check_type_supported(out_dtype, device)
@@ -1249,7 +1258,7 @@ def test_gemm_fp816_mixed_inputs(M, N, K, a_type, b_type, out_dtype, device = 'c
                                           [tl.float8e5b16, tl.float8e4b8],
                                           [tl.float8e4b8, tl.float8e5b16],
                                           [tl.float8e5b16, tl.float8e5b16]]
-                          for out_dtype in [torch.float32]
+                          for out_dtype in [torch.float32, torch.float16, torch.bfloat16]
                         ])
 def test_gemm_amd_fp8_inputs(M, N, K, a_type, b_type, out_dtype, device = 'cuda'):
     check_type_supported(out_dtype, device)
@@ -1681,7 +1690,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                            [8, 32, 128, 2],
                                            [4, 32, 64, 4],
                                            [32, 4, 64, 2],
-                                           [16, 4, 64, 8]
+                                           [16, 4, 64, 8],
+                                           [64, 4, 16, 1],
+                                           [4, 64, 16, 1],
                                            ]
                           for allow_tf32 in [False, True]
                           for col_a in [True, False]
@@ -1714,7 +1725,7 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         if non_k_dim == 4 and (K < 64):
             pytest.skip("incompatible non_k_dim == 4 with K size")
         if non_k_dim == 4 and (M > 16 or N > 16):
-            pytest.skip("skipping lage matrices for non_k_dim == 4 to speedup testing")
+            pytest.skip("skipping large matrices for non_k_dim == 4 to speedup testing")
 
     if capability[0] < 7:
         pytest.skip("Only test tl.dot() on devices with sm >= 70")
@@ -1904,12 +1915,25 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, allow_tf32, in_dtype, o
         backend = triton.common.backend.get_backend("hip")
         if backend.get_matrix_core_version() > 0:
             ttgir = pgm.asm['ttgir']
-            if non_k_dim == 16:
-                assert "#triton_gpu.mfma<{nonKDim = 16" in ttgir
-                assert "#triton_gpu.mfma<{nonKDim = 32" not in ttgir
+            if non_k_dim == 0 and ((M == 4 and N == 64) or (M == 64 and N == 4)):
+                m64n4 = "instrShape = [64, 4]"
+                m4n64 = "instrShape = [4, 64]"
+                assert (m64n4 in ttgir) or (m4n64 in ttgir)
+                assert "instrShape = [4, 4]" not in ttgir
+                assert "instrShape = [16, 16]" not in ttgir
+                assert "instrShape = [32, 32]" not in ttgir
+            if non_k_dim == 4:
+                assert "instrShape = [4, 4]" in ttgir
+                assert "instrShape = [16, 16]" not in ttgir
+                assert "instrShape = [32, 32]" not in ttgir
+            elif non_k_dim == 16:
+                assert "instrShape = [4, 4]" not in ttgir
+                assert "instrShape = [16, 16]" in ttgir
+                assert "instrShape = [32, 32]" not in ttgir
             elif non_k_dim == 32:
-                assert "#triton_gpu.mfma<{nonKDim = 32" in ttgir
-                assert "#triton_gpu.mfma<{nonKDim = 16" not in ttgir
+                assert "instrShape = [4, 4]" not in ttgir
+                assert "instrShape = [16, 16]" not in ttgir
+                assert "instrShape = [32, 32]" in ttgir
         gcn = pgm.asm['amdgcn']
         if backend.get_matrix_core_version() == 3 and effective_in_dtype == tl.float8e5b16:
             assert "v_mfma_f32_32x32x16_bf8_bf8" in gcn or "v_mfma_f32_16x16x32_bf8_bf8" in gcn
@@ -2700,13 +2724,14 @@ class MmaLayout:
 
 
 class MfmaLayout:
-    def __init__(self, non_k_dim, warps_per_cta, is_transposed):
-        self.non_k_dim = str(non_k_dim)
+    def __init__(self, version, warps_per_cta, instr_shape, is_transposed):
+        self.version = version
         self.warps_per_cta = str(warps_per_cta)
+        self.instr_shape = str(instr_shape)
         self.is_transposed = str(is_transposed).lower()
 
     def __str__(self):
-        return f"#{GPU_DIALECT}.mfma<{{nonKDim = {self.non_k_dim}, warpsPerCTA = {self.warps_per_cta}, isTransposed = {self.is_transposed}}}>"
+        return f"#{GPU_DIALECT}.mfma<{{versionMajor={self.version[0]}, versionMinor={self.version[1]}, warpsPerCTA = {self.warps_per_cta}, instrShape={self.instr_shape}, isTransposed = {self.is_transposed}}}>"
 
 
 class BlockedLayout:
@@ -2773,7 +2798,7 @@ def test_dot_mfma_vector_load(vec_size, swizzle, transposeA, transposeB):
     blocked = BlockedLayout(size_per_thread=[1, 4], threads_per_warp=[8, 8], warps_per_cta=[4, 1], order=[1, 0], ctas_per_cga=[1, 1], cta_split_num=[1, 1], cta_order=[0, 1])
     shared_a = SharedLayout(vec=vec_size, per_phase=1, max_phase=max_phase, order=[0, 1] if transposeA else [1, 0], ctas_per_cga=[1, 1], cta_split_num=[1, 1], cta_order=[0, 1])
     shared_b = SharedLayout(vec=vec_size, per_phase=1, max_phase=max_phase, order=[0, 1] if transposeB else [1, 0], ctas_per_cga=[1, 1], cta_split_num=[1, 1], cta_order=[0, 1])
-    mfma = MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=False)
+    mfma = MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=False)
 
     ir = f"""
 #blocked = {blocked}
@@ -2938,8 +2963,8 @@ view_layouts = [
     BlockedLayout([2, 2], [16, 4], [2, 2], [0, 1], [1, 1], [1, 1], [0, 1]),
     BlockedLayout([1, 8], [16, 4], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
     BlockedLayout([1, 8], [16, 4], [4, 1], [0, 1], [1, 1], [1, 1], [0, 1]),
-    MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=True),
-    MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=False),
+    MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=True),
+    MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=False),
 ]
 blocked_layouts = [
     BlockedLayout([1, 8], [16, 4], [4, 1], [1, 0], [1, 1], [1, 1], [0, 1]),
@@ -3009,8 +3034,8 @@ module attributes {"triton_gpu.num-ctas" = 1, "triton_gpu.num-warps" = 4 : i32, 
 
 if torch.version.hip is not None and _get_warp_size() == 64:
     layouts = [
-        MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=True),
-        MfmaLayout(non_k_dim=32, warps_per_cta=[2, 2], is_transposed=False),
+        MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=True),
+        MfmaLayout(version=(2,0), warps_per_cta=[2, 2], instr_shape=[32,32], is_transposed=False),
     ]
     shapes = [[128, 32], [128, 128], [32, 128], [64, 64]]
 else:
@@ -3168,8 +3193,8 @@ def test_scan_layouts(M, N, src_layout, axis, device):
 
 @pytest.mark.parametrize("shape", [(64, 64)])
 @pytest.mark.parametrize("dtype", ['float16'])
-@pytest.mark.parametrize("src_layout", [MfmaLayout(non_k_dim=32, warps_per_cta=[2, 1], is_transposed=False),
-                                        MfmaLayout(non_k_dim=32, warps_per_cta=[4, 1], is_transposed=True)])
+@pytest.mark.parametrize("src_layout", [MfmaLayout(version=(2,0), warps_per_cta=[2, 1], instr_shape=[32,32], is_transposed=False),
+                                        MfmaLayout(version=(2,0), warps_per_cta=[4, 1], instr_shape=[32,32], is_transposed=True)])
 @pytest.mark.parametrize("dst_layout", [BlockedLayout([1, 4], [4, 16], [1, 1], [1, 0], [1, 1], [1, 1], [0, 1])])
 def test_make_range(dtype, shape, src_layout, dst_layout, device='cuda'):
     ir = f"""

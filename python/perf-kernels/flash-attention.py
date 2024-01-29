@@ -33,6 +33,54 @@ TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
+class MetaData()
+    cu_seqlens_q = None
+    cu_seqlens_k = None
+    max_seqlens_q = None
+    max_seqlens_k = None
+    bias_type = None
+    causal = False
+    num_contexts = 0
+
+    def __init__(self, sm_scale):
+        self.sm_scale = sm_scale
+    
+    def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k):
+        self.cu_seqlens_q = cu_seqlens_q
+        self.cu_seqlens_k = cu_seqlens_k
+        self.cu_maxlens_q = cu_maxlens_q
+        self.cu_maxlens_q = cu_maxlens_q
+        self.num_contexts = len(cu_seqlens_q) - 1
+
+    def need_bias(self, bias_type):
+        self.bias_type = bias_type
+    
+    def need_causal(self):
+        self.causal = True
+
+def check_args(q, k, v, o, metadata):
+    assert q.dim() == 3
+    assert q.dim() == k.dim() and q.dim() == v.dim()
+    total_q, nheads_q, head_size = q.shape
+    total_k, nheads_k, _ = k.shape
+    assert k.shape == v.shape
+    assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
+    # TODO: Change assert if we support qkl f8 and v f16
+    assert q.dtype == k.dtype and q.dtype == v.dtype
+    # TODO: Fix assert to remove is-power-of-2 check once it is handled
+    # TODO: Fix assert to check head size <=256 once supported
+    assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
+    assert o.shape == q.shape
+    if metadata.Varlen:
+        assert metadata.cu_seqlens_q is not None
+        assert metadata.cu_seqlens_k is not None
+        assert len(metadata.cu_seqlens_q) == len(metadata.cu_seqlens_k)
+        assert metadata.max_seqlens_q >= metadata.cu_seqlens_q[-1]
+        assert metadata.max_seqlens_k >= metadata.cu_seqlens_k[-1]
+        #TODO: Remove once bias is supported with varlen
+        assert metadata.bias == None
+    assert (nheads_q % nheads_k) == 0
+
 @triton.jit
 def max_fn(x, y):
     return tl.math.max(x, y)
@@ -200,7 +248,6 @@ def _attn_fwd_inner(
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
 
-
 @triton.jit
 def _attn_fwd(
     Q, K, V, bias, sm_scale, M, Out,
@@ -209,7 +256,7 @@ def _attn_fwd(
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     stride_bz, stride_bh, stride_bm, stride_bn,
-    extra_tokens_n,
+    cu_seqlens_q, cu_seqlens_k,
     H,
     seqlen_q,
     seqlen_k,
@@ -248,6 +295,202 @@ def _attn_fwd(
         order=(0, 1)
     )
     v_offset = off_hz * stride_vh
+    V_block_ptr = tl.make_block_ptr(
+        base=V + v_offset,
+        shape=(seqlen_k, BLOCK_DMODEL),
+        strides=(stride_vk, stride_vn),
+        offsets=(0, 0),
+        block_shape=(BLOCK_N, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    # initialize offsets
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    if bias is not None:
+        if BIAS_TYPE == "vector":
+            bias_ptr = bias + ((off_hz % H) * stride_bh) + offs_n
+        elif BIAS_TYPE == "matrix":
+            bias_ptr = tl.make_block_ptr(
+                base=bias + ((off_hz % H) * stride_bh),
+                shape=(seqlen_q, seqlen_k),
+                strides=(stride_bm, stride_bn),
+                offsets=(start_m * BLOCK_M, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+    else:
+        bias_ptr = None
+    # initialize pointer to m and l
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
+    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
+    # scale sm_scale by log_2(e) and use
+    # 2^x instead of exp in the loop because CSE and LICM
+    # don't work as expected with `exp` in the loop
+    qk_scale = sm_scale * 1.44269504
+    # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
+    q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+    q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
+    # stage 1: off-band
+    # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
+    # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
+    if ENABLE_DROPOUT:
+        batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
+    else:
+        batch_philox_offset = 0
+    # We can ask to return the dropout mask without actually doing any dropout. In
+    # this case, we return an invalid pointer so indicate the mask is not valid.
+    if RETURN_ENCODED_SOFTMAX:
+        encoded_softmax_block_ptr = tl.make_block_ptr(
+                base=encoded_softmax + off_hz * seqlen_q * seqlen_k,
+                shape=(seqlen_q, seqlen_k),
+                strides=(seqlen_k, 1),
+                offsets=(start_m * BLOCK_M, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0)
+                )
+    else:
+        encoded_softmax_block_ptr = 0
+    if STAGE & 1:
+        # We don't currently support causal masking and padding.
+        tl.static_assert((STAGE != 3) or not NEED_PADDING)
+        # equal to N_CTX if N_CTX is already a multiple of block_M
+        seqlen_aligned = seqlen_k - extra_tokens_n
+        if seqlen_k >= BLOCK_N:
+            acc, l_i, m_i = _attn_fwd_inner(
+                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+                start_m, seqlen_aligned,
+                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+                BLOCK_M, BLOCK_DMODEL, BLOCK_N,
+                4 - STAGE, offs_m, offs_n,
+                PRE_LOAD_V,
+                False, seqlen_aligned,
+                bias_ptr,
+                ENABLE_DROPOUT,
+                RETURN_ENCODED_SOFTMAX
+            )
+        tl.debug_barrier()
+        if NEED_PADDING:
+            if seqlen_k < BLOCK_N:
+                seqlen_aligned = 0
+            acc, l_i, m_i = _attn_fwd_inner(
+                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+                start_m, seqlen_aligned,
+                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+                BLOCK_M, BLOCK_DMODEL, BLOCK_N,
+                4 - STAGE, offs_m, offs_n,
+                PRE_LOAD_V,
+                True, seqlen_k,
+                bias_ptr,
+                ENABLE_DROPOUT,
+                RETURN_ENCODED_SOFTMAX
+            )
+    # stage 2: on-band
+    if STAGE & 2:
+        # barrier makes it easier for compielr to schedule the
+        # two loops independently
+        tl.debug_barrier()
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+            start_m, seqlen_k,
+            dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+            BLOCK_M, BLOCK_DMODEL, BLOCK_N,
+            2, offs_m, offs_n,
+            PRE_LOAD_V,
+            False, seqlen_aligned,
+            bias_ptr,
+            ENABLE_DROPOUT,
+            RETURN_ENCODED_SOFTMAX
+        )
+    # epilogue
+    # write back m
+    acc = acc / l_i[:, None]
+    if ENABLE_DROPOUT:
+        acc = acc / (1 - dropout_p)
+    m_ptrs = M + off_hz * seqlen_q + offs_m
+    # Check for last block_M
+    overflow_size = (start_m * BLOCK_M) - seqlen_q
+    if overflow_size > 0:
+        boundary = tl.full((BLOCK_M,), overflow_size, dtype=tl.float32)
+        # This is a > check because mask being 0 blocks the store.
+        m_ptrs_mask = boundary > tl.arange(0, BLOCK_M)
+        tl.store(m_ptrs, m_i + tl.math.log2(l_i), mask=m_ptrs_mask)
+    else:
+        tl.store(m_ptrs, m_i + tl.math.log2(l_i))
+    # write back O
+    o_offset = off_hz * stride_oh
+    O_block_ptr = tl.make_block_ptr(
+        base=Out + o_offset,
+        shape=(seqlen_q, BLOCK_DMODEL),
+        strides=(stride_om, stride_on),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
+
+@triton.jit
+def _attn_varlen_fwd(
+    Q, K, V, sm_scale, M, Out,
+    stride_qm, stride_qh, stride_qk,
+    stride_kn, stride_kh, stride_kk,
+    stride_vk, stride_vh, stride_vn,
+    stride_om, stride_oh, stride_on,
+    cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k,
+    H,
+    dropout_p,
+    philox_seed,
+    philox_offset_base,
+    encoded_softmax,
+    STAGE: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    PRE_LOAD_V: tl.constexpr,
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_ENCODED_SOFTMAX: tl.constexpr
+):
+    start_m = tl.program_id(0)
+    off_h = tl.program_id(1)
+    off_z = tl.program_id(2)
+    seqlen_q = cu_seqlens_q[off_z+1] - cu_seqlens_q[off_z]
+    # We have a one-size-fits-all grid in id(0). Some seqlens might be too
+    # small for all start_m so for those we return early.
+    if start_m * BLOCK_M > seqlen_q:
+        return
+    # cu_seqlens_q has the start m index of each context.
+    # off_z is num_contexts.
+    q_offset = cu_seqlens_q[off_z] * stride_qm
+    # This doesn't exceed bounds as off_z is set to len(cu_seqlens_k) - 1
+    seqlen_k = cu_seqlens_k[off_z+1] - cu_seqlens_k[off_z]
+    need_padding = False
+    extra_tokens_n = 0
+    if seqlen_k < BLOCK_N:
+        need_padding = True
+        extra_tokens_n = BLOCK_N - seqlen_k
+    elif seqlen_k % BLOCK_N:
+        need_padding = True
+        extra_tokens_n = seqlen_k % BLOCK_N
+
+    Q_block_ptr = tl.make_block_ptr(
+        base=Q + q_offset,
+        shape=(seqlen_q, BLOCK_DMODEL),
+        strides=(stride_qm, stride_qk),
+        offsets=(start_m * BLOCK_M, 0),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
+        order=(1, 0)
+    )
+    k_offset = cu_seqlens_k[off_z] * stride_kn
+    K_block_ptr = tl.make_block_ptr(
+        base=K + k_offset,
+        shape=(BLOCK_DMODEL, seqlen_k),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, 0),
+        block_shape=(BLOCK_DMODEL, BLOCK_N),
+        order=(0, 1)
+    )
+    # cu_seqlens_k is for both K and V tensors
+    v_offset = k_offset
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
         shape=(seqlen_k, BLOCK_DMODEL),
@@ -811,6 +1054,159 @@ class _attention(torch.autograd.Function):
 
 attention = _attention.apply
 
+class _attention_varlen(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q, k, v, metadata):
+        check_args(q, k, v, metadata)
+
+        total_q, nheads_q, head_size = q.shape
+        # We've derived these previously from tuning the kernel
+        BLOCK_M = 256
+        BLOCK_N = 128 if head_size == 128 else 64
+        waves_per_eu = 2 if head_size == 128 else 3
+        num_warps = 8 if head_size == 128 else 4
+        pre_load_v = False if head_size == 128 else True
+        # There is some redundancy here. Not all WGs have useful work to do
+        # This is due to the fact that different contexts are asymmetric, while
+        # our 3D grid is uniform. If context 0 has seqlen 1024 and that is max
+        # seqlen_q, then dim0 of the grid is 8, assuming BLOCK_M=128.
+        # If context 1 has seqlen 512, dim0 is still 8 but WGs that belong to 4-7
+        # have nothing to do. We handle this in the kernel by detecting this
+        # and exiting early.
+        grid = (
+            triton.cdiv(max_seqlens_q, BLOCK_M), nheads_q, metadata.num_contexts
+        )
+
+        # TODO: Fix when causal is handled with varlen
+        stage = 1
+        for i in range (0, metadata.num_contexts):
+            seqlen_k = cu_seqlens_k[i+1] - cu_maxlens_q[i]
+            if seqlen_k < BLOCK_N:
+                need_padding = True
+                extra_tokens_n = BLOCK_N - seqlen_k
+            elif seqlen_k % BLOCK_N:
+                need_padding = True
+                extra_tokens_n = seqlen_k % BLOCK_N
+            else:
+                # We don't care if the M dim needs padding, as we
+                # always boundary_check on Q and O
+                need_padding = False
+                extra_tokens_n = 0
+
+        o = torch.empty_like(q, dtype=v.dtype)
+        M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        # Seed the RNG so we get reproducible results for testing.
+        philox_seed = 0x1BF52
+        philox_offset = 0x1D4B42
+        bias = None
+
+        _attn_varlen_fwd[grid](
+            q, k, v, sm_scale, M, o,
+            q.stride(0), q.stride(1), q.stride(2), 
+            k.stride(0), k.stride(1), k.stride(2), 
+            v.stride(0), v.stride(1), v.stride(2), 
+            o.stride(0), o.stride(1), o.stride(2), 
+            *bias_strides,
+            cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k,
+            H=nheads_q,
+            dropout_p=dropout_p,
+            philox_seed=philox_seed,
+            philox_offset_base=philox_offset,
+            encoded_softmax=encoded_softmax,
+            STAGE=stage,
+            BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
+            PRE_LOAD_V=pre_load_v,
+            ENABLE_DROPOUT=dropout_p > 0.0,
+            RETURN_ENCODED_SOFTMAX=return_encoded_softmax,
+            num_stages=1, num_warps=num_warps
+        )
+
+        ctx.save_for_backward(q, k, v, o, M)
+        ctx.grid = grid
+        ctx.sm_scale = sm_scale
+        ctx.BLOCK_DMODEL = Lk
+        ctx.causal = causal
+        ctx.split_kernel = split_kernel
+        return o
+
+    @staticmethod
+    def backward(ctx, do):
+        # configuration is not supported
+        assert(not (ctx.split_kernel and not ctx.causal))
+        if torch.version.hip is not None:
+            BLOCK = 64
+        else:
+            BLOCK = 128
+        q, k, v, o, L = ctx.saved_tensors
+        assert do.is_contiguous()
+        assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
+        do = do.contiguous()
+        dq = torch.zeros_like(q)
+        dk = torch.empty_like(k)
+        dv = torch.empty_like(v)
+        BATCH, N_HEAD, N_CTX = q.shape[:3]
+        delta = torch.empty_like(L)
+        do_scaled = torch.empty_like(do)
+        # Figure out what BLOCK size fwd used and adjust num_blocks accordingly.
+        # If the two are the same, we don't need this but the bwd pass block size
+        # is smaller than the fwd so we need this scaling to ensure we loop over all
+        # values and don't skip some blocks. 
+        # Alternatively we could compute a new grid but this keeps it consistent
+        # with fwd and easier to reason about.
+        block_scale = (q.shape[2] // ctx.grid[0]) // BLOCK
+        _attn_bwd_preprocess[(ctx.grid[0] * ctx.grid[1], )](
+            o, do,  #
+            do_scaled, delta,  #
+            BLOCK_M=block_scale * BLOCK, D_HEAD=ctx.BLOCK_DMODEL,  #
+        )
+        if not ctx.split_kernel:
+            _bwd_kernel[(ctx.grid[1],)](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dq, dk, dv,
+                L, delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                block_scale * ctx.grid[0],
+                BLOCK_M=BLOCK, BLOCK_N=BLOCK,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+                CAUSAL=ctx.causal,
+                num_stages=1,
+            )
+        else :
+            dq = torch.zeros_like(q)
+            _bwd_kernel_dk_dv[(block_scale * ctx.grid[0], ctx.grid[1])](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dk, dv,
+                L, delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                BLOCK_M=BLOCK, BLOCK_N=BLOCK,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4,
+                num_stages=1,
+            )
+            _bwd_kernel_dq[ctx.grid](
+                q, k, v, ctx.sm_scale,
+                o, do_scaled,
+                dq,
+                L, delta,
+                q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+                k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+                v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+                q.shape[0], q.shape[1], q.shape[2],
+                BLOCK_M=2*BLOCK, BLOCK_N=BLOCK,
+                BLOCK_DMODEL=ctx.BLOCK_DMODEL, num_warps=4, waves_per_eu=1,
+                num_stages=1,
+            )
+        # print(h.asm["ttgir"])
+        return dq, dk, dv, None, None, None
+
+attention = _attention.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 63, 64),
@@ -870,6 +1266,54 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     torch.testing.assert_close(ref_out, tri_out, atol=4e-2, rtol=4e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
+                         [(4, 48, 128, 64),
+                          (4, 48, 256, 64),
+                          (4, 48, 512, 64),
+                          (4, 48, 1024, 64),
+                          (8, 48, 4096, 64),
+                          (4, 48, 8192, 64),
+                          (4, 48, 128, 128),
+                          (4, 48, 1024, 128),
+                          (4, 48, 8192, 128),
+                          (4, 16, 1024, 64),
+                          (4, 16, 8192, 64),
+                          (32, 48, 8192, 64)
+                          ])
+@pytest.mark.parametrize('causal', [False])
+def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+    torch.manual_seed(20)
+    
+    # Random sequence lengths
+    max_seqlens = N_CTX // Z
+    seqlens_q = torch.randint(1, max_seqlens + 1, (Z,))
+    seqlens_k = torch.randint(1, max_seqlens + 1, (Z,))
+
+    # Calculate cumulative sequence lengths
+    cu_seqlens_q = torch.cat([torch.tensor([0]), seqlens_q.cumsum(dim=0)])
+    cu_seqlens_k = torch.cat([torch.tensor([0]), seqlens_k.cumsum(dim=0)])
+    # -1 because the last entry of cu_seqlens_q specifies the end of the last seq
+    num_seqs = len(cu_seqlens_q) -1
+
+    # Initialize q, k, v with variable lengths
+    total_q = cu_seqlens_q[-1].item()
+    total_k = cu_seqlens_k[-1].item()
+    q = torch.randn((total_q, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    out = torch.full_like(q, float("nan"))
+    sm_scale = D_HEAD ** -0.5
+
+    for i in range(0, num_seqs):
+        start_q, start_k = cu_seqlens_q[i], cu_seqlens_k[i]
+        end_q, end_k = cu_seqlens_q[i+1], cu_seqlens_k[i+1]
+        q_curr = q[start_q:end_q]
+        k_curr = k[start_k:end_k]
+        v_curr = v[start_k:end_k]
+        scores = torch.einsum('qhd,khd->qhk', q_curr, k_curr) * sm_scale
+        p = torch.softmax(scores,dim=0)
+        out[start_q:end_q] = torch.einsum('qhk,khd->qhd', p, v_curr)
+
+@pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 1024, 64),
                           (4, 48, 2048, 64),
                           (4, 48, 4096, 64),
@@ -912,9 +1356,6 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
         torch.testing.assert_close(ref_dv, tri_dv, atol=5e-2, rtol=0)
     torch.testing.assert_close(ref_dk, tri_dk, atol=5e-2, rtol=1e-2)
     torch.testing.assert_close(ref_dq, tri_dq, atol=5e-2, rtol=1e-2)
-
-
-
 
 try:
     from flash_attn.flash_attn_interface import \

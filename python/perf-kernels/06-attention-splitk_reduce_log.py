@@ -166,7 +166,6 @@ def _fwd_kernel_splitK(
     # This is a solution for Triton native lack of support for lists of tensors.
     # acc: "VAR_ARGS_ARRAY"  # noqa: F821
     # acc = []
-    elem_num = 1
     # for i in range(elem_num):  # noqa: F821
     acc = tl.zeros([BLOCK_M, D_PER_GROUP], dtype=tl.float32)  # noqa: F821
 
@@ -450,6 +449,39 @@ def _splitK_reduce(
     l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
     tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
 
+def quantize_kv_int4(k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
+    """
+    Auxiliary int4 row quantization function used for benchmarking and tests.
+    Matches the behaviour of torch.ops.llama_cpp.dequantize_int4_cache -
+    quantization parameters (scale and offset) of each row along the last
+    dimension of the tensor are assumed to be packed into two float16 values
+    at the beginning of the row.
+    """
+    # Scale and shift are such that quantization linearly maps int4 values range [0..15]
+    # to input values range min(k)..max(k) individually for every row
+    k = k.reshape(*k.shape[:-1], num_groups, k.shape[-1] // num_groups)
+    max_vals = torch.max(k, dim=-1, keepdim=True).values
+    min_vals = torch.min(k, dim=-1, keepdim=True).values
+    scale_k: torch.Tensor = (max_vals - min_vals) / 15
+
+    shift_k = torch.min(k, dim=-1, keepdim=True).values
+    scale_k = scale_k.to(torch.float16)
+    shift_k = shift_k.to(torch.float16)
+    in_bytes = ((k - shift_k.expand(k.shape)) / scale_k.expand(k.shape)).to(torch.uint8)
+    in_int4 = in_bytes & 0xF
+    in_int4_packed = in_int4[..., ::2] + (in_int4[..., 1::2] << 4)
+    scale_shift = torch.concat(
+        [scale_k.view(torch.uint8), shift_k.view(torch.uint8)], dim=-1
+    )
+    k_quant = torch.concat(
+        [
+            scale_shift.flatten(start_dim=-2),
+            in_int4_packed.flatten(start_dim=-2),
+        ],
+        dim=-1,
+    ).view(torch.int16)
+    return k_quant
+
 def get_split_k(B: int, G: int, H: int, Mk: int) -> int:
     """Heuristic for the number of splits"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
@@ -535,7 +567,7 @@ class _attention(torch.autograd.Function):
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H, split_k)
 
-        num_warps = 2
+        num_warps = 4
         split_size = (Mk + split_k - 1) // split_k
         use_seq_len = seq_len is not None
 
@@ -620,8 +652,11 @@ class _attention(torch.autograd.Function):
             lse = lse[:, 0]
         if Mk == 0:
             out.zero_()
-        # print(f"Mk = {Mk}, out_shape = {out.shape}")
-        out = out.reshape(B, H, -1, Kq).transpose(1, 2).contiguous()
+        if mqa_swap_seqlen_head:
+            out = out.reshape(B, -1, M * G, Kq).transpose(1, 2).contiguous()
+        else:
+            out = out.reshape(B, H * G, -1, Kq).contiguous()
+
         return out
 
 attention = _attention.apply
@@ -671,6 +706,58 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
 
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-3, rtol=0)
+
+
+@pytest.mark.parametrize('B, Mq, Mkv, Hq, Hkv, K',
+                         get_input_shapes())
+def test_op_fwd_int4_kv(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
+    torch.manual_seed(20)
+    q = (
+        torch.empty((B, Mq, Hkv, (Hq + Hkv - 1) // Hkv, K), dtype=dtype, device="cuda")
+        .normal_(mean=1.0, std=0.5)
+        .requires_grad_()
+    )
+    k = (
+        torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
+        .normal_(mean=1.0, std=0.5)
+        .requires_grad_()
+    ).expand(-1, -1, -1, (Hq + Hkv - 1) // Hkv, -1)
+    v = (
+        torch.empty((B, Mkv, Hkv, 1, K), dtype=dtype, device="cuda")
+        .normal_(mean=1.0, std=0.5)
+        .requires_grad_()
+    ).expand(-1, -1, -1, (Hq + Hkv - 1) // Hkv, -1)
+
+    num_groups = 1
+    quant_k = (
+        quantize_kv_int4(k, num_groups=num_groups)
+        .contiguous()
+        .view(torch.int32)
+    )
+    quant_v = (
+        quantize_kv_int4(v, num_groups=num_groups)
+        .contiguous()
+        .view(torch.int32)
+    )
+
+    quant_k = quant_k.expand(-1, -1, -1, Hq // Hkv, -1)
+    quant_v = quant_v.expand(-1, -1, -1, Hq // Hkv, -1)
+
+    scale = 1 / K**0.5
+    tri_out = attention(q, quant_k, quant_v, scale)
+    # tri_out = tri_out.permute(0, 2, 1, 3)
+
+    q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
+    k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    v = v.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    attn = (q @ k.transpose(-1, -2) * scale).softmax(-1)
+    ref_out = attn @ v
+
+    print(f"ref_out = \n{ref_out}")
+    print(f"tri_out = \n{tri_out}")
+
+    # compare
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 
 try:

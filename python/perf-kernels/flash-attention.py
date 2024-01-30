@@ -33,7 +33,7 @@ TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
-class MetaData()
+class MetaData():
     cu_seqlens_q = None
     cu_seqlens_k = None
     max_seqlens_q = None
@@ -41,15 +41,18 @@ class MetaData()
     bias_type = None
     causal = False
     num_contexts = 0
+    varlen = False
 
     def __init__(self, sm_scale):
         self.sm_scale = sm_scale
     
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k):
+        self.varlen = True
         self.cu_seqlens_q = cu_seqlens_q
         self.cu_seqlens_k = cu_seqlens_k
-        self.cu_maxlens_q = cu_maxlens_q
-        self.cu_maxlens_q = cu_maxlens_q
+        self.max_seqlens_q = max_seqlens_q
+        self.max_seqlens_k = max_seqlens_k
+        assert len(cu_seqlens_q) == len(cu_seqlens_k)
         self.num_contexts = len(cu_seqlens_q) - 1
 
     def need_bias(self, bias_type):
@@ -71,14 +74,12 @@ def check_args(q, k, v, o, metadata):
     # TODO: Fix assert to check head size <=256 once supported
     assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
     assert o.shape == q.shape
-    if metadata.Varlen:
+    if metadata.varlen:
         assert metadata.cu_seqlens_q is not None
         assert metadata.cu_seqlens_k is not None
         assert len(metadata.cu_seqlens_q) == len(metadata.cu_seqlens_k)
-        assert metadata.max_seqlens_q >= metadata.cu_seqlens_q[-1]
-        assert metadata.max_seqlens_k >= metadata.cu_seqlens_k[-1]
         #TODO: Remove once bias is supported with varlen
-        assert metadata.bias == None
+        assert metadata.bias_type == None
     assert (nheads_q % nheads_k) == 0
 
 @triton.jit
@@ -136,7 +137,6 @@ def _attn_fwd_inner(
     PRE_LOAD_V: tl.constexpr,
     PADDED_BLOCK: tl.constexpr,
     TOTAL_TOKENS: tl.constexpr,
-    bias_ptr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
@@ -159,11 +159,6 @@ def _attn_fwd_inner(
         lo = tl.multiple_of(lo, BLOCK_N)
         K_block_ptr = tl.advance(K_block_ptr, (0, lo))
         V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
-        if bias_ptr is not None:
-            if bias_ptr.type.element_ty.is_block():
-                bias_ptr = tl.advance(bias_ptr, (0, lo))
-            else:
-                bias_ptr += lo
     # causal = False
     else:
         lo, hi = 0, seqlen_k
@@ -188,21 +183,6 @@ def _attn_fwd_inner(
             mask = OFFS_M[:, None] >= (start_n + OFFS_N[None, :])
             qk = tl.where(mask, qk, float("-inf"))
         qk += tl.dot(q, k)
-        if bias_ptr is not None:
-            if PADDED_BLOCK:
-                if bias_ptr.type.element_ty.is_block():
-                    bias = tl.load(bias_ptr,boundary_check=(1,), padding_option="zero")
-                else:
-                    size_n = start_n + OFFS_N
-                    boundary_n = tl.full([BLOCK_N], TOTAL_TOKENS, dtype=tl.float32)
-                    bias_padding = tl.full([BLOCK_N], 0, dtype=tl.float32)
-                    bias = tl.load(bias_ptr, mask=size_n < boundary_n, other=bias_padding)
-            else:
-                bias = tl.load(bias_ptr)
-            # While bias is added after multiplying qk with sm_scale,
-            # our optimization to use 2^x instead of e^x results in an additional
-            # scale factor of log2(e) which we must also multiply the bias with.
-            qk += (bias * 1.44269504)
         if PADDED_BLOCK:
             boundary_m = tl.full([BLOCK_M], TOTAL_TOKENS, dtype=tl.float32)
             size_n = start_n + OFFS_N[None,:]
@@ -239,11 +219,6 @@ def _attn_fwd_inner(
         acc += tl.dot(p.to(V_block_ptr.type.element_ty), v)
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-        if bias_ptr is not None:
-            if bias_ptr.type.element_ty.is_block():
-                bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
-            else:
-                bias_ptr += BLOCK_N
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i
@@ -436,12 +411,13 @@ def _attn_varlen_fwd(
     stride_kn, stride_kh, stride_kk,
     stride_vk, stride_vh, stride_vn,
     stride_om, stride_oh, stride_on,
-    cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k,
-    H,
+    cu_seqlens_q_tensor, cu_seqlens_k_tensor,
     dropout_p,
     philox_seed,
     philox_offset_base,
     encoded_softmax,
+    max_seqlens_q: tl.constexpr, max_seqlens_k: tl.constexpr,
+    B: tl.constexpr, H: tl.constexpr,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -453,16 +429,21 @@ def _attn_varlen_fwd(
     start_m = tl.program_id(0)
     off_h = tl.program_id(1)
     off_z = tl.program_id(2)
-    seqlen_q = cu_seqlens_q[off_z+1] - cu_seqlens_q[off_z]
+    cu_seqlens_addr = cu_seqlens_q_tensor + off_z
+    cu_seqlens_q_start = tl.load(cu_seqlens_q_tensor + off_z)
+    cu_seqlens_q_end = tl.load(cu_seqlens_q_tensor + off_z + 1)
+    cu_seqlens_k_start = tl.load(cu_seqlens_k_tensor + off_z)
+    cu_seqlens_k_end = tl.load(cu_seqlens_k_tensor + off_z + 1)
+    seqlen_q = cu_seqlens_q_end - cu_seqlens_q_start
     # We have a one-size-fits-all grid in id(0). Some seqlens might be too
     # small for all start_m so for those we return early.
     if start_m * BLOCK_M > seqlen_q:
         return
     # cu_seqlens_q has the start m index of each context.
     # off_z is num_contexts.
-    q_offset = cu_seqlens_q[off_z] * stride_qm
+    q_offset = cu_seqlens_q_start * stride_qm + off_h * stride_qh
     # This doesn't exceed bounds as off_z is set to len(cu_seqlens_k) - 1
-    seqlen_k = cu_seqlens_k[off_z+1] - cu_seqlens_k[off_z]
+    seqlen_k = cu_seqlens_k_end - cu_seqlens_k_start
     need_padding = False
     extra_tokens_n = 0
     if seqlen_k < BLOCK_N:
@@ -480,7 +461,7 @@ def _attn_varlen_fwd(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    k_offset = cu_seqlens_k[off_z] * stride_kn
+    k_offset = cu_seqlens_k_start * stride_kn + off_h * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
         shape=(BLOCK_DMODEL, seqlen_k),
@@ -489,8 +470,7 @@ def _attn_varlen_fwd(
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
-    # cu_seqlens_k is for both K and V tensors
-    v_offset = k_offset
+    v_offset = cu_seqlens_k_start * stride_vk + off_h * stride_vh
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
         shape=(seqlen_k, BLOCK_DMODEL),
@@ -502,20 +482,6 @@ def _attn_varlen_fwd(
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
-    if bias is not None:
-        if BIAS_TYPE == "vector":
-            bias_ptr = bias + ((off_hz % H) * stride_bh) + offs_n
-        elif BIAS_TYPE == "matrix":
-            bias_ptr = tl.make_block_ptr(
-                base=bias + ((off_hz % H) * stride_bh),
-                shape=(seqlen_q, seqlen_k),
-                strides=(stride_bm, stride_bn),
-                offsets=(start_m * BLOCK_M, 0),
-                block_shape=(BLOCK_M, BLOCK_N),
-                order=(1, 0),
-            )
-    else:
-        bias_ptr = None
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32) + 1.0
@@ -530,15 +496,17 @@ def _attn_varlen_fwd(
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
+    # TODO: Fix dropout
     if ENABLE_DROPOUT:
-        batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
+        batch_philox_offset = philox_offset_base + off_h * seqlen_q * seqlen_k
     else:
         batch_philox_offset = 0
     # We can ask to return the dropout mask without actually doing any dropout. In
     # this case, we return an invalid pointer so indicate the mask is not valid.
+    # TODO: Fix encoded softmax
     if RETURN_ENCODED_SOFTMAX:
         encoded_softmax_block_ptr = tl.make_block_ptr(
-                base=encoded_softmax + off_hz * seqlen_q * seqlen_k,
+                base=encoded_softmax + off_h * seqlen_q * seqlen_k,
                 shape=(seqlen_q, seqlen_k),
                 strides=(seqlen_k, 1),
                 offsets=(start_m * BLOCK_M, 0),
@@ -548,8 +516,6 @@ def _attn_varlen_fwd(
     else:
         encoded_softmax_block_ptr = 0
     if STAGE & 1:
-        # We don't currently support causal masking and padding.
-        tl.static_assert((STAGE != 3) or not NEED_PADDING)
         # equal to N_CTX if N_CTX is already a multiple of block_M
         seqlen_aligned = seqlen_k - extra_tokens_n
         if seqlen_k >= BLOCK_N:
@@ -561,12 +527,11 @@ def _attn_varlen_fwd(
                 4 - STAGE, offs_m, offs_n,
                 PRE_LOAD_V,
                 False, seqlen_aligned,
-                bias_ptr,
                 ENABLE_DROPOUT,
                 RETURN_ENCODED_SOFTMAX
             )
         tl.debug_barrier()
-        if NEED_PADDING:
+        if need_padding:
             if seqlen_k < BLOCK_N:
                 seqlen_aligned = 0
             acc, l_i, m_i = _attn_fwd_inner(
@@ -577,7 +542,6 @@ def _attn_varlen_fwd(
                 4 - STAGE, offs_m, offs_n,
                 PRE_LOAD_V,
                 True, seqlen_k,
-                bias_ptr,
                 ENABLE_DROPOUT,
                 RETURN_ENCODED_SOFTMAX
             )
@@ -594,7 +558,6 @@ def _attn_varlen_fwd(
             2, offs_m, offs_n,
             PRE_LOAD_V,
             False, seqlen_aligned,
-            bias_ptr,
             ENABLE_DROPOUT,
             RETURN_ENCODED_SOFTMAX
         )
@@ -603,7 +566,7 @@ def _attn_varlen_fwd(
     acc = acc / l_i[:, None]
     if ENABLE_DROPOUT:
         acc = acc / (1 - dropout_p)
-    m_ptrs = M + off_hz * seqlen_q + offs_m
+    m_ptrs = M + off_z * H * max_seqlens_q + off_h * max_seqlens_q + offs_m
     # Check for last block_M
     overflow_size = (start_m * BLOCK_M) - seqlen_q
     if overflow_size > 0:
@@ -614,7 +577,7 @@ def _attn_varlen_fwd(
     else:
         tl.store(m_ptrs, m_i + tl.math.log2(l_i))
     # write back O
-    o_offset = off_hz * stride_oh
+    o_offset = cu_seqlens_q_start * stride_om + off_h * stride_oh
     O_block_ptr = tl.make_block_ptr(
         base=Out + o_offset,
         shape=(seqlen_q, BLOCK_DMODEL),
@@ -1056,8 +1019,10 @@ attention = _attention.apply
 
 class _attention_varlen(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, metadata):
-        check_args(q, k, v, metadata)
+    def forward(ctx, q, k, v, o, metadata):
+        if o is None:
+            o = torch.empty_like(q, dtype=v.dtype)
+        check_args(q, k, v, o, metadata)
 
         total_q, nheads_q, head_size = q.shape
         # We've derived these previously from tuning the kernel
@@ -1074,59 +1039,52 @@ class _attention_varlen(torch.autograd.Function):
         # have nothing to do. We handle this in the kernel by detecting this
         # and exiting early.
         grid = (
-            triton.cdiv(max_seqlens_q, BLOCK_M), nheads_q, metadata.num_contexts
+            triton.cdiv(metadata.max_seqlens_q, BLOCK_M), nheads_q, metadata.num_contexts
         )
 
         # TODO: Fix when causal is handled with varlen
         stage = 1
-        for i in range (0, metadata.num_contexts):
-            seqlen_k = cu_seqlens_k[i+1] - cu_maxlens_q[i]
-            if seqlen_k < BLOCK_N:
-                need_padding = True
-                extra_tokens_n = BLOCK_N - seqlen_k
-            elif seqlen_k % BLOCK_N:
-                need_padding = True
-                extra_tokens_n = seqlen_k % BLOCK_N
-            else:
-                # We don't care if the M dim needs padding, as we
-                # always boundary_check on Q and O
-                need_padding = False
-                extra_tokens_n = 0
 
-        o = torch.empty_like(q, dtype=v.dtype)
-        M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        M = torch.empty((metadata.num_contexts, nheads_q, metadata.max_seqlens_q), device=q.device, dtype=torch.float32)
         # Seed the RNG so we get reproducible results for testing.
         philox_seed = 0x1BF52
         philox_offset = 0x1D4B42
         bias = None
 
+        print(f"cu_seqlens_q = {metadata.cu_seqlens_q}")
+        print(f"cu_seqlens_k = {metadata.cu_seqlens_q}")
+        print(f"max_seqlens_q = {metadata.max_seqlens_q}")
+        print(f"max_seqlens_k = {metadata.max_seqlens_k}")
+        print(f"q shape = {q.shape}")
+        print(f"k shape = {k.shape}")
+
         _attn_varlen_fwd[grid](
-            q, k, v, sm_scale, M, o,
+            q, k, v, metadata.sm_scale, M, o,
             q.stride(0), q.stride(1), q.stride(2), 
             k.stride(0), k.stride(1), k.stride(2), 
             v.stride(0), v.stride(1), v.stride(2), 
             o.stride(0), o.stride(1), o.stride(2), 
-            *bias_strides,
-            cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k,
-            H=nheads_q,
-            dropout_p=dropout_p,
-            philox_seed=philox_seed,
-            philox_offset_base=philox_offset,
-            encoded_softmax=encoded_softmax,
+            metadata.cu_seqlens_q, metadata.cu_seqlens_k, 
+            dropout_p=0, #dropout_p,
+            philox_seed=0, #philox_seed,
+            philox_offset_base=None, #philox_offset,
+            encoded_softmax=None, #encoded_softmax,
+            max_seqlens_q=metadata.max_seqlens_q, 
+            max_seqlens_k=metadata.max_seqlens_k,
+            B=metadata.num_contexts, H=nheads_q,
             STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
-            ENABLE_DROPOUT=dropout_p > 0.0,
-            RETURN_ENCODED_SOFTMAX=return_encoded_softmax,
+            ENABLE_DROPOUT=False, #dropout_p > 0.0,
+            RETURN_ENCODED_SOFTMAX=False, #return_encoded_softmax,
             num_stages=1, num_warps=num_warps
         )
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
-        ctx.sm_scale = sm_scale
-        ctx.BLOCK_DMODEL = Lk
-        ctx.causal = causal
-        ctx.split_kernel = split_kernel
+        ctx.sm_scale = metadata.sm_scale
+        ctx.BLOCK_DMODEL = head_size
+        ctx.causal = metadata.causal
         return o
 
     @staticmethod
@@ -1206,7 +1164,7 @@ class _attention_varlen(torch.autograd.Function):
         # print(h.asm["ttgir"])
         return dq, dk, dv, None, None, None
 
-attention = _attention.apply
+attention_varlen = _attention_varlen.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 63, 64),
@@ -1267,17 +1225,17 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 128, 64),
-                          (4, 48, 256, 64),
-                          (4, 48, 512, 64),
-                          (4, 48, 1024, 64),
-                          (8, 48, 4096, 64),
-                          (4, 48, 8192, 64),
-                          (4, 48, 128, 128),
-                          (4, 48, 1024, 128),
-                          (4, 48, 8192, 128),
-                          (4, 16, 1024, 64),
-                          (4, 16, 8192, 64),
-                          (32, 48, 8192, 64)
+                          #(4, 48, 256, 64),
+                          #(4, 48, 512, 64),
+                          #(4, 48, 1024, 64),
+                          #(8, 48, 4096, 64),
+                          #(4, 48, 8192, 64),
+                          #(4, 48, 128, 128),
+                          #(4, 48, 4096, 128),
+                          #(4, 48, 16384, 128),
+                          #(4, 16, 1024, 128),
+                          #(4, 16, 8192, 128),
+                          #(32, 48, 8192, 128)
                           ])
 @pytest.mark.parametrize('causal', [False])
 def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
@@ -1285,14 +1243,19 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     
     # Random sequence lengths
     max_seqlens = N_CTX // Z
-    seqlens_q = torch.randint(1, max_seqlens + 1, (Z,))
-    seqlens_k = torch.randint(1, max_seqlens + 1, (Z,))
+    seqlens_q = torch.randint(1, max_seqlens + 1, (Z,), dtype=torch.int32)
+    seqlens_k = torch.randint(1, max_seqlens + 1, (Z,), dtype=torch.int32)
+    max_seqlens_q = torch.max(seqlens_q).item()
+    max_seqlens_k = torch.max(seqlens_k).item()
 
     # Calculate cumulative sequence lengths
-    cu_seqlens_q = torch.cat([torch.tensor([0]), seqlens_q.cumsum(dim=0)])
-    cu_seqlens_k = torch.cat([torch.tensor([0]), seqlens_k.cumsum(dim=0)])
+    cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_q.cumsum(dim=0, dtype=torch.int32)])
+    cu_seqlens_k = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_k.cumsum(dim=0, dtype=torch.int32)])
+    cu_seqlens_q = cu_seqlens_q.to(device="cuda")
+    cu_seqlens_k = cu_seqlens_k.to(device="cuda")
+    print(f"cu_seqlens_q type = {cu_seqlens_q.device}")
     # -1 because the last entry of cu_seqlens_q specifies the end of the last seq
-    num_seqs = len(cu_seqlens_q) -1
+    num_ctxs = len(cu_seqlens_q) - 1
 
     # Initialize q, k, v with variable lengths
     total_q = cu_seqlens_q[-1].item()
@@ -1300,10 +1263,11 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     q = torch.randn((total_q, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    o = torch.full_like(q, float("nan"))
     out = torch.full_like(q, float("nan"))
     sm_scale = D_HEAD ** -0.5
 
-    for i in range(0, num_seqs):
+    for i in range(0, num_ctxs):
         start_q, start_k = cu_seqlens_q[i], cu_seqlens_k[i]
         end_q, end_k = cu_seqlens_q[i+1], cu_seqlens_k[i+1]
         q_curr = q[start_q:end_q]
@@ -1312,6 +1276,11 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
         scores = torch.einsum('qhd,khd->qhk', q_curr, k_curr) * sm_scale
         p = torch.softmax(scores,dim=0)
         out[start_q:end_q] = torch.einsum('qhk,khd->qhd', p, v_curr)
+    input_metadata = MetaData(sm_scale)
+    input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k)
+    tri_out = attention_varlen(q, k, v, o, input_metadata)
+    print(f"max err = {torch.max(torch.abs(tri_out) - torch.abs(out))}")
+    
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 1024, 64),
@@ -1468,4 +1437,4 @@ def bench_flash_attention(
 
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path=".", print_data=True)
+#bench_flash_attention.run(save_path=".", print_data=True)

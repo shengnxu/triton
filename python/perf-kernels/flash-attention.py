@@ -1039,7 +1039,9 @@ class _attention_varlen(torch.autograd.Function):
         # have nothing to do. We handle this in the kernel by detecting this
         # and exiting early.
         grid = (
-            triton.cdiv(metadata.max_seqlens_q, BLOCK_M), nheads_q, metadata.num_contexts
+            triton.cdiv(metadata.max_seqlens_q, BLOCK_M),
+            nheads_q,
+            metadata.num_contexts
         )
 
         # TODO: Fix when causal is handled with varlen
@@ -1057,6 +1059,9 @@ class _attention_varlen(torch.autograd.Function):
         print(f"max_seqlens_k = {metadata.max_seqlens_k}")
         print(f"q shape = {q.shape}")
         print(f"k shape = {k.shape}")
+        print(f"q stride = {q.stride()}")
+        print(f"k stride = {k.stride()}")
+        print(f"grid = {grid}")
 
         _attn_varlen_fwd[grid](
             q, k, v, metadata.sm_scale, M, o,
@@ -1224,7 +1229,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     torch.testing.assert_close(ref_out, tri_out, atol=4e-2, rtol=4e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [(4, 48, 128, 64),
+                         [(4, 48, 8192, 64),
                           #(4, 48, 256, 64),
                           #(4, 48, 512, 64),
                           #(4, 48, 1024, 64),
@@ -1274,7 +1279,7 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
         k_curr = k[start_k:end_k]
         v_curr = v[start_k:end_k]
         scores = torch.einsum('qhd,khd->qhk', q_curr, k_curr) * sm_scale
-        p = torch.softmax(scores,dim=0)
+        p = torch.softmax(scores.float(), dim=-1).half()
         out[start_q:end_q] = torch.einsum('qhk,khd->qhd', p, v_curr)
     input_metadata = MetaData(sm_scale)
     input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k)

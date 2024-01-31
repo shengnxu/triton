@@ -763,7 +763,7 @@ def test_op_fwd_int4_kv(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     torch.testing.assert_close(dq_ref_out, tri_out, atol=1e-3, rtol=0)
 
 
-def test_quantize():
+def test_quantization():
     a = torch.randn((2, 4, 32), dtype=torch.float16, device='cuda')
     qa = quantize_kv_int4(a, num_groups=4)
     dqa = dequantize_kv_fp16(qa, num_groups=4)

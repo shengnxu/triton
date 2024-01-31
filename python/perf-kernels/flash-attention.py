@@ -417,7 +417,8 @@ def _attn_varlen_fwd(
     philox_offset_base,
     encoded_softmax,
     max_seqlens_q: tl.constexpr, max_seqlens_k: tl.constexpr,
-    B: tl.constexpr, H: tl.constexpr,
+    B: tl.constexpr, HQ: tl.constexpr, HK: tl.constexpr,
+    MQA: tl.constexpr,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -427,21 +428,20 @@ def _attn_varlen_fwd(
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
     start_m = tl.program_id(0)
-    off_h = tl.program_id(1)
+    off_h_q = tl.program_id(1)
     off_z = tl.program_id(2)
-    cu_seqlens_addr = cu_seqlens_q_tensor + off_z
     cu_seqlens_q_start = tl.load(cu_seqlens_q_tensor + off_z)
     cu_seqlens_q_end = tl.load(cu_seqlens_q_tensor + off_z + 1)
-    cu_seqlens_k_start = tl.load(cu_seqlens_k_tensor + off_z)
-    cu_seqlens_k_end = tl.load(cu_seqlens_k_tensor + off_z + 1)
     seqlen_q = cu_seqlens_q_end - cu_seqlens_q_start
     # We have a one-size-fits-all grid in id(0). Some seqlens might be too
     # small for all start_m so for those we return early.
     if start_m * BLOCK_M > seqlen_q:
         return
+    cu_seqlens_k_start = tl.load(cu_seqlens_k_tensor + off_z)
+    cu_seqlens_k_end = tl.load(cu_seqlens_k_tensor + off_z + 1)
     # cu_seqlens_q has the start m index of each context.
     # off_z is num_contexts.
-    q_offset = cu_seqlens_q_start * stride_qm + off_h * stride_qh
+    q_offset = cu_seqlens_q_start * stride_qm + off_h_q * stride_qh
     # This doesn't exceed bounds as off_z is set to len(cu_seqlens_k) - 1
     seqlen_k = cu_seqlens_k_end - cu_seqlens_k_start
     need_padding = False
@@ -453,6 +453,8 @@ def _attn_varlen_fwd(
         need_padding = True
         extra_tokens_n = seqlen_k % BLOCK_N
 
+    off_h_k = off_h_q % HK if MQA else off_h_q
+
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
         shape=(seqlen_q, BLOCK_DMODEL),
@@ -461,7 +463,7 @@ def _attn_varlen_fwd(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    k_offset = cu_seqlens_k_start * stride_kn + off_h * stride_kh
+    k_offset = cu_seqlens_k_start * stride_kn + off_h_k * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
         shape=(BLOCK_DMODEL, seqlen_k),
@@ -470,7 +472,7 @@ def _attn_varlen_fwd(
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
-    v_offset = cu_seqlens_k_start * stride_vk + off_h * stride_vh
+    v_offset = cu_seqlens_k_start * stride_vk + off_h_k * stride_vh
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
         shape=(seqlen_k, BLOCK_DMODEL),
@@ -498,7 +500,7 @@ def _attn_varlen_fwd(
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
     # TODO: Fix dropout
     if ENABLE_DROPOUT:
-        batch_philox_offset = philox_offset_base + off_h * seqlen_q * seqlen_k
+        batch_philox_offset = philox_offset_base + off_h_q * seqlen_q * seqlen_k
     else:
         batch_philox_offset = 0
     # We can ask to return the dropout mask without actually doing any dropout. In
@@ -506,7 +508,7 @@ def _attn_varlen_fwd(
     # TODO: Fix encoded softmax
     if RETURN_ENCODED_SOFTMAX:
         encoded_softmax_block_ptr = tl.make_block_ptr(
-                base=encoded_softmax + off_h * seqlen_q * seqlen_k,
+                base=encoded_softmax + off_h_q * seqlen_q * seqlen_k,
                 shape=(seqlen_q, seqlen_k),
                 strides=(seqlen_k, 1),
                 offsets=(start_m * BLOCK_M, 0),
@@ -566,7 +568,7 @@ def _attn_varlen_fwd(
     acc = acc / l_i[:, None]
     if ENABLE_DROPOUT:
         acc = acc / (1 - dropout_p)
-    m_ptrs = M + off_z * H * max_seqlens_q + off_h * max_seqlens_q + offs_m
+    m_ptrs = M + off_z * HQ * max_seqlens_q + off_h_q * max_seqlens_q + offs_m
     # Check for last block_M
     overflow_size = (start_m * BLOCK_M) - seqlen_q
     if overflow_size > 0:
@@ -577,7 +579,7 @@ def _attn_varlen_fwd(
     else:
         tl.store(m_ptrs, m_i + tl.math.log2(l_i))
     # write back O
-    o_offset = cu_seqlens_q_start * stride_om + off_h * stride_oh
+    o_offset = cu_seqlens_q_start * stride_om + off_h_q * stride_oh
     O_block_ptr = tl.make_block_ptr(
         base=Out + o_offset,
         shape=(seqlen_q, BLOCK_DMODEL),
@@ -1025,6 +1027,7 @@ class _attention_varlen(torch.autograd.Function):
         check_args(q, k, v, o, metadata)
 
         total_q, nheads_q, head_size = q.shape
+        total_k, nheads_k, _ = k.shape
         # We've derived these previously from tuning the kernel
         BLOCK_M = 256
         BLOCK_N = 128 if head_size == 128 else 64
@@ -1052,16 +1055,18 @@ class _attention_varlen(torch.autograd.Function):
         philox_seed = 0x1BF52
         philox_offset = 0x1D4B42
         bias = None
+        mqa = nheads_q != nheads_k
 
         print(f"cu_seqlens_q = {metadata.cu_seqlens_q}")
-        print(f"cu_seqlens_k = {metadata.cu_seqlens_q}")
+        print(f"cu_seqlens_k = {metadata.cu_seqlens_k}")
         print(f"max_seqlens_q = {metadata.max_seqlens_q}")
         print(f"max_seqlens_k = {metadata.max_seqlens_k}")
         print(f"q shape = {q.shape}")
         print(f"k shape = {k.shape}")
         print(f"q stride = {q.stride()}")
         print(f"k stride = {k.stride()}")
-        print(f"grid = {grid}")
+        #print(f"grid = {grid}")
+        print(f"mqa = {mqa}")
 
         _attn_varlen_fwd[grid](
             q, k, v, metadata.sm_scale, M, o,
@@ -1076,7 +1081,8 @@ class _attention_varlen(torch.autograd.Function):
             encoded_softmax=None, #encoded_softmax,
             max_seqlens_q=metadata.max_seqlens_q, 
             max_seqlens_k=metadata.max_seqlens_k,
-            B=metadata.num_contexts, H=nheads_q,
+            B=metadata.num_contexts, HQ=nheads_q, HK=nheads_k,
+            MQA=mqa,
             STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
@@ -1228,25 +1234,10 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=4e-2, rtol=4e-2)
 
-@pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [(4, 48, 8192, 64),
-                          #(4, 48, 256, 64),
-                          #(4, 48, 512, 64),
-                          #(4, 48, 1024, 64),
-                          #(8, 48, 4096, 64),
-                          #(4, 48, 8192, 64),
-                          #(4, 48, 128, 128),
-                          #(4, 48, 4096, 128),
-                          #(4, 48, 16384, 128),
-                          #(4, 16, 1024, 128),
-                          #(4, 16, 8192, 128),
-                          #(32, 48, 8192, 128)
-                          ])
-@pytest.mark.parametrize('causal', [False])
-def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+def varlen_test_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     
-    # Random sequence lengths
+    # Random sequence lengths. Using N_CTX as kind of max of sum of individual seqs
     max_seqlens = N_CTX // Z
     seqlens_q = torch.randint(1, max_seqlens + 1, (Z,), dtype=torch.int32)
     seqlens_k = torch.randint(1, max_seqlens + 1, (Z,), dtype=torch.int32)
@@ -1258,34 +1249,95 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     cu_seqlens_k = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_k.cumsum(dim=0, dtype=torch.int32)])
     cu_seqlens_q = cu_seqlens_q.to(device="cuda")
     cu_seqlens_k = cu_seqlens_k.to(device="cuda")
-    print(f"cu_seqlens_q type = {cu_seqlens_q.device}")
     # -1 because the last entry of cu_seqlens_q specifies the end of the last seq
     num_ctxs = len(cu_seqlens_q) - 1
 
     # Initialize q, k, v with variable lengths
     total_q = cu_seqlens_q[-1].item()
     total_k = cu_seqlens_k[-1].item()
-    q = torch.randn((total_q, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.randn((total_k, H, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    o = torch.full_like(q, float("nan"))
-    out = torch.full_like(q, float("nan"))
-    sm_scale = D_HEAD ** -0.5
+    q = torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    sm_scale = D_HEAD**-0.5
+    input_metadata = MetaData(sm_scale)
+    input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k)
+    return q, k, v, input_metadata
 
-    for i in range(0, num_ctxs):
-        start_q, start_k = cu_seqlens_q[i], cu_seqlens_k[i]
-        end_q, end_k = cu_seqlens_q[i+1], cu_seqlens_k[i+1]
+
+@pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
+                         [(4, 48, 8192, 64),
+                          (4, 48, 256, 64),
+                          (4, 48, 512, 64),
+                          (4, 48, 1024, 64),
+                          (8, 48, 4096, 64),
+                          (4, 48, 8192, 64),
+                          (4, 48, 128, 128),
+                          (4, 48, 4096, 128),
+                          (4, 48, 16384, 128),
+                          (4, 16, 1024, 128),
+                          (4, 16, 8192, 128),
+                          (32, 48, 8192, 128)
+                          ])
+@pytest.mark.parametrize('causal', [False])
+def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+    q, k, v, input_metadata = varlen_test_helper(Z, H, H, N_CTX, D_HEAD, dtype)
+    tri_out = torch.empty_like(q)
+    ref_out = torch.empty_like(q)
+
+    for i in range(0, input_metadata.num_contexts):
+        start_q, start_k = input_metadata.cu_seqlens_q[i], input_metadata.cu_seqlens_k[i]
+        end_q, end_k = input_metadata.cu_seqlens_q[i+1], input_metadata.cu_seqlens_k[i+1]
         q_curr = q[start_q:end_q]
         k_curr = k[start_k:end_k]
         v_curr = v[start_k:end_k]
-        scores = torch.einsum('qhd,khd->qhk', q_curr, k_curr) * sm_scale
+        scores = torch.einsum('qhd,khd->qhk', q_curr, k_curr) * input_metadata.sm_scale
         p = torch.softmax(scores.float(), dim=-1).half()
-        out[start_q:end_q] = torch.einsum('qhk,khd->qhd', p, v_curr)
-    input_metadata = MetaData(sm_scale)
-    input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k)
-    tri_out = attention_varlen(q, k, v, o, input_metadata)
-    print(f"max err = {torch.max(torch.abs(tri_out) - torch.abs(out))}")
-    
+        ref_out[start_q:end_q] = torch.einsum('qhk,khd->qhd', p, v_curr)
+    attention_varlen(q, k, v, tri_out, input_metadata)
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
+
+@pytest.mark.parametrize('Z, HQ, HK, N_CTX, D_HEAD',
+                         [(2, 48, 24, 128, 64),
+                          #(4, 48, 12, 256, 64),
+                          #(4, 48, 4, 512, 64),
+                          #(4, 48, 2, 1024, 64),
+                          #(8, 48, 6, 4096, 64),
+                          #(4, 48, 24, 8192, 64),
+                          #(4, 64, 16, 128, 128),
+                          #(4, 64, 4, 4096, 128),
+                          #(4, 64, 8, 16384, 128),
+                          #(4, 16, 4, 1024, 128),
+                          #(4, 16, 2, 8192, 128),
+                          #(32, 128, 32, 8192, 128)
+                          ])
+@pytest.mark.parametrize('causal', [False])
+def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16):
+    q, k, v, input_metadata = varlen_test_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype)
+    sm_scale = D_HEAD ** -0.5
+    tri_out = torch.full_like(q, float("nan"))
+    ref_out = torch.full_like(q, float("nan"))
+    # Make KV look like HQ/HK "groups" of HK. Later, we will reshape so the
+    # size aligns with Q.
+    k_ref = k.view(k.shape[0], k.shape[1], 1, k.shape[2]).expand(-1, -1, HQ // HK, -1)
+    v_ref = v.view(v.shape[0], v.shape[1], 1, v.shape[2]).expand(-1, -1, HQ // HK, -1)
+    for i in range(0, input_metadata.num_contexts):
+        start_q, start_k = input_metadata.cu_seqlens_q[i], input_metadata.cu_seqlens_k[i]
+        end_q, end_k = input_metadata.cu_seqlens_q[i+1], input_metadata.cu_seqlens_k[i+1]
+        q_curr = q[start_q:end_q].permute(1,0,2)
+        k_curr = k_ref[start_k:end_k]
+        k_curr = k_curr.reshape(k_curr.shape[0], -1, k_curr.shape[3]).permute(1,0,2)
+        v_curr = v_ref[start_k:end_k]
+        v_curr = v_curr.reshape(v_curr.shape[0], -1, v_curr.shape[3]).permute(1,0,2)
+        print(f"q_curr shape = {q_curr.shape}")
+        print(f"k_curr shape = {k_curr.shape}")
+        print(f"v_curr shape = {v_curr.shape}")
+        scores = (q_curr @ k_curr.transpose(-1, -2)).float() * sm_scale
+        p = torch.softmax(scores.float(), dim=-1).half()
+        ref_out[start_q:end_q] = (p @ v_curr).permute(1,0,2).float()
+    attention_varlen(q, k, v, tri_out, input_metadata)
+    print(f"err = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
+    print(f"triout = {tri_out[0][2][0]}, ref_out = {ref_out[0][2][0]}")
+    #torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 1024, 64),

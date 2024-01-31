@@ -222,7 +222,7 @@ public:
     return std::distance(value.user_begin(), value.user_end());
   }
 
-  void scheduleSlicedDot(ModuleOp m, int stages) {
+  void scheduleSlicedDot(ModuleOp m, int stages, bool sinkLDSRd, bool sinkLDSWr) {
     SmallVector<SmallVector<Operation *>> dotChains;
 
     m.walk([&](tt::DotOp dotOp) {
@@ -270,6 +270,24 @@ public:
                      operations, i == 0, 1);
       }
     }
+
+    if (!sinkLDSRd) {
+      return;
+    }
+
+    for (auto chain : dotChains) {
+      for (int i = 0; i < chain.size(); i++) {
+        Operation *dotOp = chain[i];
+        Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
+        assert(isLDSRead(ldsRd));
+        moveBefore(ldsRd, dotOp);
+        if (sinkLDSWr) {
+          Operation *ldsWr = ldsRd->getOperand(0).getDefiningOp();
+          assert(isLDSWrite(ldsWr));
+          moveBefore(ldsWr, ldsRd);
+        }
+      }
+    }
   }
 
   void runOnOperation() override {
@@ -278,7 +296,9 @@ public:
 
     moveQTensorOutOfTheLoop(m);
     int stages = 4;
-    scheduleSlicedDot(m, stages);
+    bool sinkLDSRd = true;
+    bool sinkLDSWr = true;
+    scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr);
   }
 };
 

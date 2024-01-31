@@ -466,7 +466,30 @@ private:
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
         auto elemPtrTy = getElementPtrType(op, i);
         Value readPtr = gep(elemPtrTy, smemBases[i], readOffset);
-        acc[i] = loadShared(rewriter, loc, readPtr, threadIsNeeded);
+          rewriter.create<scf::IfOp>(loc, threadIsNeeded,
+            [&](OpBuilder& builder, Location loc) {
+              auto loadVal = load(readPtr);
+              acc[i] = loadVal;
+              // builder.create<LLVM::StoreOp>(loc, val, ptr);
+              // return val;
+              builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
+            },
+            [&](OpBuilder& builder, Location loc) {
+              // auto loadVal = load(ptr);
+              // // auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
+              // builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
+
+              // Value zeroConst;
+              // // for fp16
+              // auto zeroConst = f16_val(0.0);
+              // builder.create<mlir::scf::YieldOp>(loc, zeroConst);
+              auto loadVal = load(readPtr);
+              acc[i] = loadVal;
+              // builder.create<LLVM::StoreOp>(loc, val, ptr);
+              // return val;
+              builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
+        });
+        // acc[i] = loadShared(rewriter, loc, readPtr, threadIsNeeded);
       }
       warpReduce(rewriter, loc, acc, op, sizeInterWarps, 1 /* interleave */);
       // only the first thread in each sizeInterWarps is writing

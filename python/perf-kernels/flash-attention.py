@@ -1318,8 +1318,11 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
     ref_out = torch.full_like(q, float("nan"))
     # Make KV look like HQ/HK "groups" of HK. Later, we will reshape so the
     # size aligns with Q.
-    k_ref = k.view(k.shape[0], k.shape[1], 1, k.shape[2]).expand(-1, -1, HQ // HK, -1)
-    v_ref = v.view(v.shape[0], v.shape[1], 1, v.shape[2]).expand(-1, -1, HQ // HK, -1)
+    k_ref = k.view(k.shape[0], 1, k.shape[1], k.shape[2]).expand(-1, HQ // HK, -1, -1)
+    v_ref = v.view(v.shape[0], 1, v.shape[1], v.shape[2]).expand(-1, HQ // HK, -1, -1)
+    print(f"kref outside = {k_ref[0][1][0][0]}, k = {k[0][1][0]}")
+    temp = k_ref.reshape(k_ref.shape[0], -1, k_ref.shape[3])
+    print(f"kref reshaped = {temp[0][1][0]}, kref = {k_ref[0][0][0][0]}")
     for i in range(0, input_metadata.num_contexts):
         start_q, start_k = input_metadata.cu_seqlens_q[i], input_metadata.cu_seqlens_k[i]
         end_q, end_k = input_metadata.cu_seqlens_q[i+1], input_metadata.cu_seqlens_k[i+1]
@@ -1331,13 +1334,16 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
         print(f"q_curr shape = {q_curr.shape}")
         print(f"k_curr shape = {k_curr.shape}")
         print(f"v_curr shape = {v_curr.shape}")
-        scores = (q_curr @ k_curr.transpose(-1, -2)).float() * sm_scale
+        if i == 0:
+            print(f"kref = {k_curr[1][0][0]}, k = {k[0][1][0]}")
+        scores = torch.bmm(q_curr, k_curr.transpose(-1, -2)).float() * sm_scale
         p = torch.softmax(scores.float(), dim=-1).half()
-        ref_out[start_q:end_q] = (p @ v_curr).permute(1,0,2).float()
+        ref_out[start_q:end_q] = torch.bmm(p, v_curr).permute(1,0,2).float()
     attention_varlen(q, k, v, tri_out, input_metadata)
+    print(f"ref shape = {ref_out.shape}, tri shape = {tri_out.shape}")
     print(f"err = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
-    print(f"triout = {tri_out[0][2][0]}, ref_out = {ref_out[0][2][0]}")
-    #torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
+    print(f"triout = {tri_out[0][1][0]}, ref_out = {ref_out[0][1][0]}")
+    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 1024, 64),

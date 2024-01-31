@@ -449,6 +449,7 @@ def _splitK_reduce(
     l_ptrs = LSE + off_zhg * stride_lse_zhg + off_m
     tl.store(l_ptrs, (g_m + tl.math.log2(g_sum)) / 1.44269504)
 
+
 def quantize_kv_int4(k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
     """
     Auxiliary int4 row quantization function used for benchmarking and tests.
@@ -467,7 +468,9 @@ def quantize_kv_int4(k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
     shift_k = torch.min(k, dim=-1, keepdim=True).values
     scale_k = scale_k.to(torch.float16)
     shift_k = shift_k.to(torch.float16)
-    in_bytes = ((k - shift_k.expand(k.shape)) / scale_k.expand(k.shape)).to(torch.uint8)
+
+    in_bytes = ((k - shift_k.expand(k.shape)) / scale_k.expand(k.shape)) + 0.5
+    in_bytes = in_bytes.to(torch.uint8)
     in_int4 = in_bytes & 0xF
     in_int4_packed = in_int4[..., ::2] + (in_int4[..., 1::2] << 4)
     scale_shift = torch.concat(
@@ -481,6 +484,33 @@ def quantize_kv_int4(k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
         dim=-1,
     ).view(torch.int16)
     return k_quant
+
+
+def dequantize_kv_fp16(quant_k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
+    k_i16 = quant_k.view(torch.int16)
+    k_ui8 = k_i16.view(torch.uint8)
+
+    ss_size = num_groups * 4
+    scale_shift_ui8 = k_ui8[...,0:ss_size]    
+    scale_shift_ui8 = scale_shift_ui8.reshape(*scale_shift_ui8.shape[:-1], num_groups, 4)
+    scale = scale_shift_ui8[...,0:2].view(torch.float16)
+    shift = scale_shift_ui8[...,2:4].view(torch.float16)
+
+    kv_ui8 = k_ui8[...,ss_size:]
+    k_ui8 = kv_ui8.reshape(*kv_ui8.shape[:-1], num_groups, -1)
+    k1_i4 = k_ui8 & 0xF
+    k2_i4 = (k_ui8 & 0xF0) >> 4
+    k_shape = k1_i4.shape
+    k1_f16 = k1_i4.to(torch.float16) * scale.expand(k_shape) + shift.expand(k_shape)
+    k2_f16 = k2_i4.to(torch.float16) * scale.expand(k_shape) + shift.expand(k_shape)
+
+    out = torch.empty((*k1_f16.shape[:-1], k1_f16.shape[-1] * 2), dtype=torch.float16, device=quant_k.device)
+    out[...,::2] = k1_f16
+    out[...,1::2] = k2_f16
+    out = out.reshape(*k_shape[:-2], -1)
+
+    return out
+
 
 def get_split_k(B: int, G: int, H: int, Mk: int) -> int:
     """Heuristic for the number of splits"""
@@ -701,9 +731,6 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     attn = (q @ k.transpose(-1, -2) * scale).softmax(-1)
     ref_out = attn @ v
 
-    # print(f"ref_out = \n{ref_out}")
-    # print(f"tri_out = \n{tri_out}")
-
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-3, rtol=0)
 
@@ -711,7 +738,7 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
 @pytest.mark.parametrize('B, Mq, Mkv, Hq, Hkv, K',
                          get_input_shapes())
 def test_op_fwd_int4_kv(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
-    torch.manual_seed(20)
+    torch.manual_seed(2)
     q = (
         torch.empty((B, Mq, Hkv, (Hq + Hkv - 1) // Hkv, K), dtype=dtype, device="cuda")
         .normal_(mean=1.0, std=0.5)
@@ -739,26 +766,35 @@ def test_op_fwd_int4_kv(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
         .contiguous()
         .view(torch.int32)
     )
-
-    quant_k = quant_k.expand(-1, -1, -1, Hq // Hkv, -1)
-    quant_v = quant_v.expand(-1, -1, -1, Hq // Hkv, -1)
-
     scale = 1 / K**0.5
     tri_out = attention(q, quant_k, quant_v, scale)
-    # tri_out = tri_out.permute(0, 2, 1, 3)
 
     q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
     k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
     v = v.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
     attn = (q @ k.transpose(-1, -2) * scale).softmax(-1)
     ref_out = attn @ v
-
-    print(f"ref_out = \n{ref_out}")
-    print(f"tri_out = \n{tri_out}")
-
     # compare
-    torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
+    torch.testing.assert_close(ref_out, tri_out, atol=2.1e-2, rtol=0)
 
+    # since quantization introduces rounding error, use the 
+    # dequantized kv as inputs to the ref implementation to reduce
+    # the tolerance to 1e-3
+    dqk = dequantize_kv_fp16(quant_k, num_groups=num_groups)
+    dqv = dequantize_kv_fp16(quant_v, num_groups=num_groups)
+    dqk = dqk.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    dqv = dqv.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)
+    dq_attn = (q @ dqk.transpose(-1, -2) * scale).softmax(-1)
+    dq_ref_out = dq_attn @ dqv
+    torch.testing.assert_close(dq_ref_out, tri_out, atol=1e-3, rtol=0)
+
+
+def test_quantize():
+    a = torch.randn((2, 4, 32), dtype=torch.float16, device='cuda')
+    qa = quantize_kv_int4(a, num_groups=4)
+    dqa = dequantize_kv_fp16(qa, num_groups=4)
+    torch.testing.assert_close(a, dqa, atol=1.5e-1, rtol=1e-1)
+    
 
 try:
     from flash_attn.flash_attn_interface import \

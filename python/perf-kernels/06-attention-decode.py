@@ -70,9 +70,6 @@ def _fwd_kernel_splitK(
         group1_quant_value0, group1_quant_value1,...]
     where each quant_coef is an int32 which should be interpreted as 2 packed float16: scale and offset.
 
-    Note: this kernel needs to be processed by xformers.triton.vararg_kernel.unroll_varargs
-    before compilation. That will unroll variables marked with "VAR_ARGS_ARRAY" into lists.
-    See how FwOp.apply does it below.
     """
     tl.static_assert(
         (PACKED_PER_VAL == 1 and tl.constexpr(K.dtype.element_ty != tl.int32))
@@ -161,12 +158,6 @@ def _fwd_kernel_splitK(
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
 
-    # Before compilation, this kernel will be processed by xformers.triton.vararg_kernel.unroll_varargs.
-    # That turns tensors annotated as the one below into lists of tensors of length N_GROUPS.
-    # This is a solution for Triton native lack of support for lists of tensors.
-    # acc: "VAR_ARGS_ARRAY"  # noqa: F821
-    # acc = []
-    # for i in range(elem_num):  # noqa: F821
     acc = tl.zeros([BLOCK_M, D_PER_GROUP], dtype=tl.float32)  # noqa: F821
 
     # scale sm_scale by log_2(e) and use
@@ -272,9 +263,10 @@ def load_dequantize_k_v_group(
     dtype: tl.constexpr,
     group_id: tl.constexpr,
 ):
-    """Load K/V for a given block. In case of int4-quantized K/V, dequantize them after loading.
-    If quantization is group-wise, use group_id to advance the pointers to the current group.
-    """
+    #Load K/V for a given block. In case of int4-quantized K/V, 
+    # dequantize them after loading. If quantization is group-wise, 
+    # use group_id to advance the pointers to the current group.
+
     # Advance to the current quantization group
     K_block_ptr = tl.advance(K_block_ptr, (PACKED_D_PER_GROUP * group_id, 0))
     V_block_ptr = tl.advance(V_block_ptr, (0, PACKED_D_PER_GROUP * group_id))
@@ -310,7 +302,7 @@ def load_dequantize_k_v_group(
 
 @triton.jit
 def cast_uint32_to_half2(scale_shift):
-    """Extract two float16 packed into one int32"""
+    # Extract two float16 packed into one int32
     scale = scale_shift & 0xFFFF
     shift = scale_shift >> 16
     scale = scale.to(tl.uint16).to(tl.float16, bitcast=True)
@@ -324,22 +316,10 @@ def dequantize(
     shift,
     PACKED_PER_VAL: tl.constexpr = 8,
 ):
-    """PACKED_PER_VAL is the number of values packed into each element x_.
-    For example, for int4 quantization and x_ of type int32, PACKED_PER_VAL is 8.
-    """
+    # PACKED_PER_VAL is the number of values packed into 
+    # each element x_. For example, for int4 quantization 
+    #and x_ of type int32, PACKED_PER_VAL is 8.
 
-    # Axis along which offsets are applied matters here
-    # It would be natural to have offsets in shape (BLOCK_N, D // PACKED_PER_VAL, PACKED_PER_VAL)
-    # and expand K/V to that shape before applying offsets
-    # However, Triton for some reason considers dim=1 as contiguous when doing tl.view below, and not dim=2
-    # Note that tl.view doesn't guarantee the order of elements in the result - thus the code below depends
-    # on the implementation details which might change in the future.
-    # Ideally we would like to use tl.reshape, but it's not implemented yet.
-    # See https://github.com/openai/triton/blob/9055af1a5dadc576804b38dd77ee91dc42af0bf7/python/triton/language/semantic.py#L541 # noqa: E501
-
-    # x_ : (BLOCK_N, D // PACKED_PER_VAL)
-    # scale: (BLOCK_N, 1)
-    # offsets: (PACKED_PER_VAL,)
     BLOCK_N: tl.constexpr = x_.shape[0]
     BLOCK_DMODEL_PACKED: tl.constexpr = x_.shape[1]
     offsets = tl.arange(0, PACKED_PER_VAL) * 4
@@ -451,15 +431,9 @@ def _splitK_reduce(
 
 
 def quantize_kv_int4(k: torch.Tensor, num_groups: int = 1) -> torch.Tensor:
-    """
-    Auxiliary int4 row quantization function used for benchmarking and tests.
-    Matches the behaviour of torch.ops.llama_cpp.dequantize_int4_cache -
-    quantization parameters (scale and offset) of each row along the last
-    dimension of the tensor are assumed to be packed into two float16 values
-    at the beginning of the row.
-    """
-    # Scale and shift are such that quantization linearly maps int4 values range [0..15]
-    # to input values range min(k)..max(k) individually for every row
+    # Scale and shift are such that quantization linearly maps 
+    # int4 values range [0..15] to input values range min(k)..max(k) 
+    # individually for every row
     k = k.reshape(*k.shape[:-1], num_groups, k.shape[-1] // num_groups)
     max_vals = torch.max(k, dim=-1, keepdim=True).values
     min_vals = torch.min(k, dim=-1, keepdim=True).values
@@ -808,7 +782,6 @@ except BaseException:
         FLASH_VER = None
 HAS_FLASH = FLASH_VER is not None
 
-# vary seq length for fixed head and batch=4
 configs = []
 for mode in ['fwd']:
     # for D_HEAD in [128]:

@@ -1641,10 +1641,6 @@ reduce_configs3 = [(op, 'float32', shape, axis)
 def test_reduce(op, dtype_str, shape, axis, num_ctas, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
 
-    if is_hip():
-        pytest.skip("test_reduce2d not supported on HIP")
-    # triton kernel
-
     @triton.jit
     def kernel(X, Z, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr, IS_3D: tl.constexpr,
                AXIS: tl.constexpr):

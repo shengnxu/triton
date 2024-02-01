@@ -2,8 +2,8 @@ name: Integration Tests
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
+  # pull_request: # disable Upstream tests on AMD Fork
+  #   branches: [main]
   merge_group:
     branches: [main]
     types: [checks_requested]

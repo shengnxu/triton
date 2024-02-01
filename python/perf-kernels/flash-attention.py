@@ -1057,16 +1057,16 @@ class _attention_varlen(torch.autograd.Function):
         bias = None
         mqa = nheads_q != nheads_k
 
-        print(f"cu_seqlens_q = {metadata.cu_seqlens_q}")
-        print(f"cu_seqlens_k = {metadata.cu_seqlens_k}")
-        print(f"max_seqlens_q = {metadata.max_seqlens_q}")
-        print(f"max_seqlens_k = {metadata.max_seqlens_k}")
-        print(f"q shape = {q.shape}")
-        print(f"k shape = {k.shape}")
-        print(f"q stride = {q.stride()}")
-        print(f"k stride = {k.stride()}")
+        #print(f"cu_seqlens_q = {metadata.cu_seqlens_q}")
+        #print(f"cu_seqlens_k = {metadata.cu_seqlens_k}")
+        #print(f"max_seqlens_q = {metadata.max_seqlens_q}")
+        #print(f"max_seqlens_k = {metadata.max_seqlens_k}")
+        #print(f"q shape = {q.shape}")
+        #print(f"k shape = {k.shape}")
+        #print(f"q stride = {q.stride()}")
+        #print(f"k stride = {k.stride()}")
         #print(f"grid = {grid}")
-        print(f"mqa = {mqa}")
+        #print(f"mqa = {mqa}")
 
         _attn_varlen_fwd[grid](
             q, k, v, metadata.sm_scale, M, o,
@@ -1234,7 +1234,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=4e-2, rtol=4e-2)
 
-def varlen_test_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
+def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     
     # Random sequence lengths. Using N_CTX as kind of max of sum of individual seqs
@@ -1280,7 +1280,7 @@ def varlen_test_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
                           ])
 @pytest.mark.parametrize('causal', [False])
 def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
-    q, k, v, input_metadata = varlen_test_helper(Z, H, H, N_CTX, D_HEAD, dtype)
+    q, k, v, input_metadata = varlen_input_helper(Z, H, H, N_CTX, D_HEAD, dtype)
     tri_out = torch.empty_like(q)
     ref_out = torch.empty_like(q)
 
@@ -1298,21 +1298,21 @@ def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX, D_HEAD',
                          [(2, 48, 24, 128, 64),
-                          #(4, 48, 12, 256, 64),
-                          #(4, 48, 4, 512, 64),
-                          #(4, 48, 2, 1024, 64),
-                          #(8, 48, 6, 4096, 64),
-                          #(4, 48, 24, 8192, 64),
-                          #(4, 64, 16, 128, 128),
-                          #(4, 64, 4, 4096, 128),
-                          #(4, 64, 8, 16384, 128),
-                          #(4, 16, 4, 1024, 128),
-                          #(4, 16, 2, 8192, 128),
-                          #(32, 128, 32, 8192, 128)
+                          (4, 48, 12, 256, 64),
+                          (4, 48, 4, 512, 64),
+                          (4, 48, 2, 1024, 64),
+                          (8, 48, 6, 4096, 64),
+                          (4, 48, 24, 8192, 64),
+                          (4, 64, 16, 128, 128),
+                          (4, 64, 4, 4096, 128),
+                          (4, 64, 8, 16384, 128),
+                          (4, 16, 4, 1024, 128),
+                          (4, 16, 2, 8192, 128),
+                          (32, 128, 32, 8192, 128)
                           ])
 @pytest.mark.parametrize('causal', [False])
 def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16):
-    q, k, v, input_metadata = varlen_test_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype)
+    q, k, v, input_metadata = varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype)
     sm_scale = D_HEAD ** -0.5
     tri_out = torch.full_like(q, float("nan"))
     ref_out = torch.full_like(q, float("nan"))
@@ -1320,9 +1320,9 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
     # size aligns with Q.
     k_ref = k.view(k.shape[0], 1, k.shape[1], k.shape[2]).expand(-1, HQ // HK, -1, -1)
     v_ref = v.view(v.shape[0], 1, v.shape[1], v.shape[2]).expand(-1, HQ // HK, -1, -1)
-    print(f"kref outside = {k_ref[0][1][0][0]}, k = {k[0][1][0]}")
+    #print(f"kref outside = {k_ref[0][1][0][0]}, k = {k[0][1][0]}")
     temp = k_ref.reshape(k_ref.shape[0], -1, k_ref.shape[3])
-    print(f"kref reshaped = {temp[0][1][0]}, kref = {k_ref[0][0][0][0]}")
+    #print(f"kref reshaped = {temp[0][1][0]}, kref = {k_ref[0][0][0][0]}")
     for i in range(0, input_metadata.num_contexts):
         start_q, start_k = input_metadata.cu_seqlens_q[i], input_metadata.cu_seqlens_k[i]
         end_q, end_k = input_metadata.cu_seqlens_q[i+1], input_metadata.cu_seqlens_k[i+1]
@@ -1331,18 +1331,18 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
         k_curr = k_curr.reshape(k_curr.shape[0], -1, k_curr.shape[3]).permute(1,0,2)
         v_curr = v_ref[start_k:end_k]
         v_curr = v_curr.reshape(v_curr.shape[0], -1, v_curr.shape[3]).permute(1,0,2)
-        print(f"q_curr shape = {q_curr.shape}")
-        print(f"k_curr shape = {k_curr.shape}")
-        print(f"v_curr shape = {v_curr.shape}")
-        if i == 0:
-            print(f"kref = {k_curr[1][0][0]}, k = {k[0][1][0]}")
+        #print(f"q_curr shape = {q_curr.shape}")
+        #print(f"k_curr shape = {k_curr.shape}")
+        #print(f"v_curr shape = {v_curr.shape}")
+        #if i == 0:
+        #    print(f"kref = {k_curr[1][0][0]}, k = {k[0][1][0]}")
         scores = torch.bmm(q_curr, k_curr.transpose(-1, -2)).float() * sm_scale
         p = torch.softmax(scores.float(), dim=-1).half()
         ref_out[start_q:end_q] = torch.bmm(p, v_curr).permute(1,0,2).float()
     attention_varlen(q, k, v, tri_out, input_metadata)
-    print(f"ref shape = {ref_out.shape}, tri shape = {tri_out.shape}")
-    print(f"err = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
-    print(f"triout = {tri_out[0][1][0]}, ref_out = {ref_out[0][1][0]}")
+    #print(f"ref shape = {ref_out.shape}, tri shape = {tri_out.shape}")
+    #print(f"err = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
+    #print(f"triout = {tri_out[0][1][0]}, ref_out = {ref_out[0][1][0]}")
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
@@ -1396,7 +1396,6 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-# vary seq length for fixed head and batch=4
 configs = []
 for mode in ['fwd']:
     for D_HEAD in [128]:
@@ -1499,5 +1498,77 @@ def bench_flash_attention(
     return total_flops / ms * 1e-9
 
 
-# only works on post-Ampere GPUs right now
 #bench_flash_attention.run(save_path=".", print_data=True)
+
+configs = []
+for mode in ['fwd']:
+    for D_HEAD in [128]:
+        configs.append(triton.testing.Benchmark(
+            x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
+            x_vals=[(16, 16, 4, 1024),
+                    #(8, 16, 2, 2048),
+                    #(4, 16, 8, 4096),
+                    #(2, 16, 4, 8192),
+                    #(2, 16, 8, 16384),
+                    #(2, 48, 12, 1024),
+                    #(2, 48, 24, 2048),
+                    #(2, 48, 8, 4096),
+                    #(2, 48, 4, 8192),
+                    #(2, 48, 2, 16384),
+                    #(8, 64, 32, 1024),
+                    #(4, 64, 16, 2048),
+                    #(4, 64, 8, 4096),
+                    #(4, 64, 32, 8192),
+                    #(16, 128, 16, 16384),
+                    ],
+            line_arg='provider',
+            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+            styles=[('red', '-'), ('blue', '-')],
+            ylabel='ms',
+            plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}-bias={use_bias}',
+            args={
+                'D_HEAD': D_HEAD,
+                'dtype': torch.float16,
+                'mode': mode})
+        )
+
+
+@triton.testing.perf_report(configs)
+def bench_varlen_flash_attention(
+    BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
+):
+    assert mode in ["fwd"]
+    warmup = 25
+    rep = 100
+    print("test")
+
+    if provider == "triton":
+        q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
+        print("test1")
+        tri_out = torch.empty_like(q)
+        print("test2")
+        fn = lambda: attention_varlen(q, k, v, tri_out, input_metadata)
+        print("test3")
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        print("test4")
+    if provider == "flash":
+        qkv = torch.randn(
+            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
+        )
+        fn = lambda: flash_attn_func(qkv, causal=causal)
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        print("test5")
+    flops_per_matmul = 0
+    print("test6")
+    for i in range (0, input_metadata.num_contexts):
+        seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
+        seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
+        # x2 for 2 GEMMs
+        flops_per_matmul += seqlen_q * seqlen_k * HQ * D_HEAD * 2
+    # x2 for mul and add
+    total_flops = 2 * flops_per_matmul
+    print(f"tflops = {total_flops/ms*1e-9}")
+    return total_flops / ms * 1e-9
+
+bench_varlen_flash_attention.run(save_path=".", print_data=True)

@@ -115,8 +115,6 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
                 continue
             if num_warps < 4:
                 continue
-            if kpack == 2:
-                continue
 
         pruned_configs.append(config)
 

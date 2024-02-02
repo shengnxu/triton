@@ -256,18 +256,16 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  // 
-  // return val;
   rewriter.create<scf::IfOp>(loc, pred,
     [&](OpBuilder& builder, Location loc) {
       store(val, ptr);
       builder.create<scf::YieldOp>(loc);
     },
     [&](OpBuilder& builder, Location loc) {
-      // store(val, ptr);
       builder.create<scf::YieldOp>(loc);
     }
     );
+  //store(val, ptr);
   return val;
 #else
   MLIRContext *ctx = rewriter.getContext();

@@ -12,11 +12,11 @@ Features supported:
 3) Any sequence lengths without padding (currently fwd kernel only, no causal masking)
 4) fp8 (e5m2fnuz, QK GEMM in fwd kernel only)
 5) Support for different sequence lengths for q and k
+6) Nested tensor API currently does not support causal masking, dropout or bias.
 
 Not currently supported:
 
-1) Nested / ragged tensors ("varlen")
-2) Non power of two head dims
+1) Non power of two head dims
 
 """
 

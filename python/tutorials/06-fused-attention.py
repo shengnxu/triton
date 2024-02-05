@@ -802,4 +802,4 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     return total_flops / ms * 1e-9
 
 # only works on post-Ampere GPUs right now
-#bench_flash_attention.run(save_path=".", print_data=True)
+bench_flash_attention.run(save_path=".", print_data=True)

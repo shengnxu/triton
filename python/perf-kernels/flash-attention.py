@@ -48,7 +48,7 @@ class MetaData():
     def __init__(self, sm_scale=1.0):
         self.sm_scale = sm_scale
     
-    def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k):
+    def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
         self.cu_seqlens_q = cu_seqlens_q
         self.cu_seqlens_k = cu_seqlens_k
@@ -779,7 +779,6 @@ class _attention(torch.autograd.Function):
         waves_per_eu = 2 if head_size == 128 else 3
         num_warps = 8 if head_size == 128 else 4
         pre_load_v = False if head_size == 128 else True
-        grid = (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         grid = (
             triton.cdiv(metadata.max_seqlens_q, BLOCK_M),
             nheads_q,
@@ -999,7 +998,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     sm_scale = D_HEAD**-0.5
     input_metadata = MetaData(sm_scale=sm_scale)
-    input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k, max_seqlens_q, max_seqlens_k)
+    input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
     return q, k, v, input_metadata
 
 

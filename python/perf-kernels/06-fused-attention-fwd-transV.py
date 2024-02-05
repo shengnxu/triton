@@ -157,6 +157,7 @@ class _attention(torch.autograd.Function):
             num_warps = 4
             num_stages = 1
             pre_load_v = False
+            slice_k_tile = 32
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
@@ -176,6 +177,7 @@ class _attention(torch.autograd.Function):
             num_warps = num_warps,
             num_stages = num_stages,
             pre_load_v = pre_load_v,
+            slice_k_tile = slice_k_tile
         )
 
         return o
@@ -243,16 +245,16 @@ for mode in ['fwd']:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
+                x_vals=[#(16, 16, 1024),
+                        # (8, 16, 2048),
+                        # (4, 16, 4096),
+                        # (2, 16, 8192),
+                        # (1, 16, 16384),
+                        # (4, 48, 1024),
+                        # (4, 48, 2048),
                         (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        # (4, 48, 8192),
+                        # (4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),

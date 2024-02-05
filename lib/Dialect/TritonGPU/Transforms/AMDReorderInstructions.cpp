@@ -222,7 +222,7 @@ public:
     return std::distance(value.user_begin(), value.user_end());
   }
 
-  void scheduleSlicedDot(ModuleOp m, int stages) {
+  void scheduleSlicedDot(ModuleOp m, int stages, bool sinkLDSRd, bool sinkLDSWr) {
     SmallVector<SmallVector<Operation *>> dotChains;
 
     m.walk([&](tt::DotOp dotOp) {
@@ -249,36 +249,169 @@ public:
       }
     });
 
-    for (auto chain : dotChains) {
-      for (int i = 0; i < chain.size() / stages; i++) {
+    if(dotChains.empty()){
+      return;
+    }
+
+    static int num = 0;
+    if (num == 0) {
+      for (auto chain : dotChains) {
+        std::cout << "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n";
+        for (int i = 0; i < chain.size() / stages; i++) {
+          SmallVector<Operation *> operations;
+          SmallVector<Operation *> operationsIdx0;
+          for (int j = 0; j < stages; j++) {
+            processStage(chain[i * stages + j], chain[i], operationsIdx0,
+                         j == 0, 0);
+            processStage(chain[i * stages + j], chain[i], operations, j == 0,
+                         1);
+          }
+        }
+
+        int startDotIdx = (chain.size() / stages) * stages;
         SmallVector<Operation *> operations;
         SmallVector<Operation *> operationsIdx0;
-        for (int j = 0; j < stages; j++) {
-          processStage(chain[i * stages + j], chain[i], operationsIdx0, j == 0,
-                       0);
-          processStage(chain[i * stages + j], chain[i], operations, j == 0, 1);
+        for (int i = 0; i < chain.size() % stages; i++) {
+          processStage(chain[startDotIdx + i], chain[chain.size() / stages],
+                       operationsIdx0, i == 0, 0);
+          processStage(chain[startDotIdx + i], chain[chain.size() / stages],
+                       operations, i == 0, 1);
         }
       }
-
-      int startDotIdx = (chain.size() / stages) * stages;
-      SmallVector<Operation *> operations;
-      SmallVector<Operation *> operationsIdx0;
-      for (int i = 0; i < chain.size() % stages; i++) {
-        processStage(chain[startDotIdx + i], chain[chain.size() / stages],
-                     operationsIdx0, i == 0, 0);
-        processStage(chain[startDotIdx + i], chain[chain.size() / stages],
-                     operations, i == 0, 1);
-      }
     }
+    if (num == 0) {
+      num += 1;
+      return;
+    }
+    // stages = 4;
+    // for (auto chain : dotChains) {
+    //   for (int i = 0; i < chain.size() / stages; i++) {
+    //     SmallVector<Operation *> operations;
+    //     SmallVector<Operation *> operationsIdx0;
+    //     for (int j = 0; j < stages; j++) {
+    //       processStage(chain[i * stages + j], chain[i], operationsIdx0, j ==
+    //       0,
+    //                    0);
+    //       // processStage(chain[i * stages + j], chain[i], operations, j ==
+    //       0, 1);
+    //     }
+    //   }
+    // }
+
+    // if (!sinkLDSRd) {
+    //   return;
+    // }
+
+    // for (auto chain : dotChains) {
+    //   for (int i = 0; i < chain.size(); i++) {
+    //     Operation *dotOp = chain[i];
+    //     Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
+    //     assert(isLDSRead(ldsRd));
+    //     moveBefore(ldsRd, dotOp);
+    //     if (sinkLDSWr) {
+    //       Operation *ldsWr = ldsRd->getOperand(0).getDefiningOp();
+    //       assert(isLDSWrite(ldsWr));
+    //       moveBefore(ldsWr, ldsRd);
+    //     }
+    //   }
+    // }
+  std::cout << "aaaaaaaaaaaaaaaaaaaaaaaaaa" << std::endl;
+  for(int i = 0; i < 4; i++){
+      // Operation *firstDotFirstGEMM = dotChains[i][0];
+      // // firstDotSecondGEMM->dump();
+      // Operation *currOp = firstDotFirstGEMM->getOperand(1).getDefiningOp();
+      // while (!isa<tt::LoadOp>(currOp)) {
+      //   currOp = currOp->getOperand(0).getDefiningOp();
+      // }
+      // Operation *loadOp = currOp;
+      // Operation *ldsRead = firstDotFirstGEMM->getOperand(1).getDefiningOp();
+      // Operation *ldsWrite = ldsRead->getOperand(0).getDefiningOp();
+      // moveAfter(ldsWrite, loadOp);
+      // moveAfter(ldsRead, ldsWrite);
+      std::cout << "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
+      Operation *firstDotFirstGEMM2 = dotChains[i][1];
+      // firstDotSecondGEMM->dump();
+      Operation *currOp2 = firstDotFirstGEMM2->getOperand(1).getDefiningOp();
+      while (!isa<tt::LoadOp>(currOp2)) {
+        currOp2 = currOp2->getOperand(0).getDefiningOp();
+      }
+      Operation *ldsRead2 = firstDotFirstGEMM2->getOperand(1).getDefiningOp();
+      Operation *ldsWrite2 = ldsRead2->getOperand(0).getDefiningOp();
+      Operation *loadOp2 = currOp2;
+      Operation *viewSlice2 = currOp2->getOperand(0).getDefiningOp();
+      // moveAfter(ldsRead2, firstDotFirstGEMM2);
+      // moveBefore(ldsWrite2, ldsRead2);
+
+      Operation *firstDotFirstGEMM3 = dotChains[i][2];
+      // firstDotSecondGEMM->dump();
+      Operation *currOp3 = firstDotFirstGEMM3->getOperand(1).getDefiningOp();
+      while (!isa<tt::LoadOp>(currOp3)) {
+        currOp3 = currOp3->getOperand(0).getDefiningOp();
+      }
+      Operation *ldsRead3 = firstDotFirstGEMM3->getOperand(1).getDefiningOp();
+      Operation *ldsWrite3 = ldsRead3->getOperand(0).getDefiningOp();
+      Operation *loadOp3 = currOp3;
+      Operation *viewSlice3 = currOp3->getOperand(0).getDefiningOp();
+      moveAfter(loadOp3, loadOp2);
+      moveAfter(ldsWrite3, ldsWrite2);
+      moveAfter(ldsRead3, ldsRead2);
+      ldsRead3->dump();
+
+      Operation *firstDotFirstGEMM4 = dotChains[i][3];
+      // firstDotSecondGEMM->dump();
+      Operation *currOp4 = firstDotFirstGEMM4->getOperand(1).getDefiningOp();
+      while (!isa<tt::LoadOp>(currOp4)) {
+        currOp4 = currOp4->getOperand(0).getDefiningOp();
+      }
+      Operation *ldsRead4 = firstDotFirstGEMM4->getOperand(1).getDefiningOp();
+      Operation *ldsWrite4 = ldsRead4->getOperand(0).getDefiningOp();
+      Operation *loadOp4 = currOp4;
+      Operation *viewSlice4 = currOp4->getOperand(0).getDefiningOp();
+      moveAfter(loadOp4, loadOp3);
+      moveAfter(ldsWrite4, ldsWrite3);
+      moveAfter(ldsRead4, ldsRead3);
+  }
+      // Operation *firstDotSecondGEMM = dotChains[1][0];
+      // // firstDotSecondGEMM->dump();
+      // Operation *currOp2 = firstDotSecondGEMM->getOperand(1).getDefiningOp();
+      // while (!isa<tt::LoadOp>(currOp2)) {
+      //   currOp2 = currOp2->getOperand(0).getDefiningOp();
+      // }
+      // Operation *loadOp2 = currOp2;
+      // Operation *ldsRead2 =
+      // firstDotSecondGEMM->getOperand(1).getDefiningOp(); Operation *ldsWrite2
+      // = ldsRead2->getOperand(0).getDefiningOp(); moveAfter(ldsWrite2,
+      // loadOp2); moveAfter(ldsRead2, ldsWrite2);
+
+      // // hoist load of V above softmax
+      // Operation *firstDotSecondGEMM = dotChains[1][0];
+      // // firstDotSecondGEMM->dump();
+      // Operation *currOp = firstDotSecondGEMM->getOperand(1).getDefiningOp();
+      // while (!isa<tt::LoadOp>(currOp)) {
+      //   currOp = currOp->getOperand(0).getDefiningOp();
+      // }
+      // // currOp->dump();
+      // Operation *lastDotFirstGemm = dotChains[0][dotChains[0].size() - 1];
+      // // lastDotFirstGemm->dump();
+      // moveAfter(currOp, dotChains[0][dotChains[0].size() - 1]);
+      // // view slice
+      // Operation *viewSliceOp = currOp->getOperand(0).getDefiningOp();
+      // moveBefore(viewSliceOp, currOp);
+
   }
 
   void runOnOperation() override {
     SmallVector<Operation *> movedOperations;
     ModuleOp m = getOperation();
-
-    moveQTensorOutOfTheLoop(m);
+    static int num2 = 0;
+    if(num2 == 0){
+      moveQTensorOutOfTheLoop(m);
+      num2 += 1;
+    }
     int stages = 4;
-    scheduleSlicedDot(m, stages);
+    bool sinkLDSRd = false;
+    bool sinkLDSWr = false;
+    scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr);
   }
 };
 

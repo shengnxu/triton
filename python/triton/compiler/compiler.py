@@ -126,6 +126,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
     pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
     pm.add_tritongpu_optimize_dot_operands_pass()
     if num_stages == 0 and is_hip() and target["matrix_core_version"] != 0:
+        # pm.add_tritonamdgpu_reorder_instructions_pass()
         pm.add_tritongpu_stream_pipeline_pass()
         pm.add_canonicalizer_pass()
     ws_enabled = False
@@ -148,6 +149,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
         pm.add_licm_pass()
         pm.add_cse_pass()
     else:
+        # pm.add_tritonamdgpu_reorder_instructions_pass()
         if is_hip():
             pm.add_tritongpu_pipeline_pass(
                 num_stages, num_warps, num_ctas, 0)
@@ -164,11 +166,12 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()
     pm.add_tritongpu_ws_fixup_missing_attrs_pass()
-    if is_hip() and num_stages != 0:
-        pm.add_tritonamdgpu_reorder_instructions_pass()
-    else:
-        pm.add_tritongpu_reorder_instructions_pass()
-
+    # if is_hip() and num_stages != 0:
+    #     pm.add_tritonamdgpu_reorder_instructions_pass()
+    # else:
+    #     pm.add_tritongpu_reorder_instructions_pass()
+    # pm.add_tritongpu_pipeline_pass(num_stages, num_warps, num_ctas, 0)
+    pm.add_tritongpu_reorder_instructions_pass()
     pm.add_cse_pass()
     pm.add_symbol_dce_pass()
     if is_cuda and capability // 10 >= 9:

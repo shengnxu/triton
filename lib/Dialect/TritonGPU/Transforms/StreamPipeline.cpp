@@ -276,8 +276,10 @@ LogicalResult LoopPipeliner::checkOpUses() {
     } else
       isCandidate = false;
 
-    if (isCandidate)
+    if (isCandidate){
       validLoads.insert(op);
+      break;
+    }
   }
 
   return validLoads.empty() ? failure() : success();

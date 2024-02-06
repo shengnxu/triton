@@ -54,6 +54,13 @@ public:
       if (lhsId == rhsId)
         lhs->moveAfter(rhs);
     };
+
+    auto moveBefore = [](Operation *lhs, Operation *rhs) {
+      auto lhsId = getWSRoleId(lhs);
+      auto rhsId = getWSRoleId(rhs);
+      if (lhsId == rhsId)
+        lhs->moveBefore(rhs);
+    };
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       if (!willIncreaseRegisterPressure(op))
         return;
@@ -69,6 +76,36 @@ public:
     for (auto &kv : opToMove)
       kv.first->moveBefore(kv.second);
     // Move convert(load) immediately after dependent load
+    m.walk([&](triton::gpu::ConvertLayoutOp op) {
+      for (auto *user : op->getUsers()) {
+        if (auto yieldOp = dyn_cast<scf::YieldOp>(user)) {
+          moveAfter(op, op->getOperand(0).getDefiningOp());
+        }
+      }
+    });
+
+    m.walk([&](triton::DotOp op) {
+      static int numa = 0;
+
+      if (numa == 0) {
+        Operation *ldsRead3 = op->getOperand(0).getDefiningOp();
+        Operation *ldsWrite3 = ldsRead3->getOperand(0).getDefiningOp();
+        Operation *truncf = ldsWrite3->getOperand(0).getDefiningOp();;
+        moveAfter(ldsWrite3, truncf);
+        moveAfter(ldsRead3, ldsWrite3);
+      }
+      numa += 1;
+    });
+
+    // m.walk([&](mlir::arith::AddIOp op) {
+    //   for (auto *user : op->getUsers()) {
+    //     if (auto yieldOp = dyn_cast<scf::YieldOp>(user)) {
+    //       moveBefore(op, yieldOp);
+    //       break;
+    //     }
+    //   }
+    // });
+
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();
       auto dstEncoding = dstType.getEncoding();
@@ -138,3 +175,10 @@ public:
 std::unique_ptr<Pass> mlir::createTritonGPUReorderInstructionsPass() {
   return std::make_unique<TritonGPUReorderInstructionsPass>();
 }
+
+    // m.walk([&](triton::gpu::ConvertLayoutOp op) {
+    //   for (auto *user : op->getUsers()) {
+    //     if (auto yieldOp = dyn_cast<scf::YieldOp>(user)){
+    //       moveAfter(op, op->getOperand(0).getDefiningOp());
+    //     }
+    //   }

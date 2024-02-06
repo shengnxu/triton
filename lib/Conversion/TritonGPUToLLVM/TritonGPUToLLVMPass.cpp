@@ -435,6 +435,15 @@ struct ConvertTritonGPUToLLVM
     ModuleAllocation allocation(mod);
     ModuleMembarAnalysis membarPass(&allocation);
     membarPass.run();
+    // mod.dump();
+    mod.walk([&](mlir::gpu::BarrierOp barrOp) -> void {
+      static int num = 0;
+      if(num == 2){
+        barrOp.erase();
+      }
+      num += 1;
+    });
+    // mod.dump();
 
     /* Get tensorPtrMap before conversion */
     TensorPtrMapT tensorPtrMap;

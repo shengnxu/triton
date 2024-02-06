@@ -419,6 +419,7 @@ struct ConvertTritonGPUROCMToLLVM
     ModuleAllocation allocation(mod);
     ModuleMembarAnalysis membarPass(&allocation);
     membarPass.run();
+    mod.dump();
 
     /* Get tensorPtrMap before conversion */
     TensorPtrMapT tensorPtrMap;

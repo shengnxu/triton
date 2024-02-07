@@ -158,12 +158,6 @@ def gen_kernel_and_configStr_from_config(M, N, K, config, dtype_a, dtype_b, dtyp
     torch_dtype_a = 'fp16'
     torch_dtype_b = 'fp16'
     torch_dtype_c = 'fp16'
-    if dtype_a:
-        torch_dtype_a = tl_to_torch_types[name_to_tl_types[dtype_a]]
-    if dtype_b:
-        torch_dtype_b = tl_to_torch_types[name_to_tl_types[dtype_b]]
-    if dtype_c:
-        torch_dtype_c = tl_to_torch_types[name_to_tl_types[dtype_c]]
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
 
     matmul_def_str = f"""
@@ -172,7 +166,7 @@ def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
     #print(f'config: matmul_kernel_{configStr}', flush=True)
     if warmup:
         matmul_kernel_{configStr}.warmup(
-            {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c},
+            torch.float16, torch.float16, torch.float16,
             M, N, K,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},

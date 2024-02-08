@@ -139,6 +139,11 @@ std::string generate_amdgcn_assembly(llvm::Module *module,
   llvm::legacy::PassManager pass;
   llvm::raw_svector_ostream stream(buffer);
 
+  std::vector<char*> args;
+  args.push_back((char *)("triton"));
+  args.push_back((char *)("--amdgpu-enable-max-ilp-scheduling-strategy=1"));
+  llvm::cl::ParseCommandLineOptions(args.size(), &args[0]);
+
   // emit
   machine->addPassesToEmitFile(pass, stream, nullptr,
                                llvm::CodeGenFileType::AssemblyFile);

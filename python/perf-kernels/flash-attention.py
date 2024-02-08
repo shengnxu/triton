@@ -1118,6 +1118,20 @@ try:
 except BaseException:
     HAS_FLASH = False
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        parser.add_argument("-b", type=int, default=1, help='Batch size')
+        parser.add_argument("-hq", type=int, default=1, help='Number of Q heads')
+        parser.add_argument("-hkv", type=int, default=1, help='Number of K/V heads')
+        parser.add_argument("-nctx_q", type=int, default=128, help='Q sequence length')
+        parser.add_argument("-nctx_kv", type=int, default=128, help='K/V sequence length')
+        parser.add_argument("-layout", type=str, default='bhsd', help='Layout of the input tensors')
+        parser.add_argument("-bench_bhsd", action='store_true', default=True, help='Run a comprehensive, pre-set sweep of bhsd configs')
+        parser.add_argument("-bench_thd", action='store_true', default=True, help='Run a comprehensive sweep of thd configs')
+    )
+    args = parser.parse_args()
+    return args
+
 configs = []
 for mode in ['fwd']:
     for D_HEAD in [128]:
@@ -1282,3 +1296,6 @@ def bench_varlen_flash_attention(
     return total_flops / ms * 1e-9
 
 bench_varlen_flash_attention.run(save_path=".", print_data=True)
+
+def main():
+    args = parse_args()

@@ -39,7 +39,7 @@ class MetaData():
     max_seqlens_q = 0
     max_seqlens_k = 0
     bias = None
-    bias_type = None
+    bias_type = 0
     causal = False
     num_contexts = 0
     varlen = False
@@ -64,9 +64,9 @@ class MetaData():
         assert bias.is_cuda
         assert bias.dim() == 4
         if bias.shape[2:] == (1, seqlen_k):
-            bias_type = "vector"
+            bias_type = 1
         elif bias.shape[2:] == (seqlen_q, seqlen_k):
-            bias_type = "matrix"
+            bias_type = 2
         else:
             raise RuntimeError(
                 "Last 2 dimensions of bias must be (1, seqlen)" " or (seqlen, seqlen)"
@@ -82,37 +82,37 @@ class MetaData():
         self.dropout_p = dropout_p
         self.return_encoded_softmax = return_encoded_softmax
 
-def check_args(q, k, v, o, metadata):
-    assert q.dim() == k.dim() and q.dim() == v.dim()
-    if metadata.varlen:
-        assert q.dim() == 3
-        total_q, nheads_q, head_size = q.shape
-        total_k, nheads_k, _ = k.shape
-        assert metadata.cu_seqlens_q is not None
-        assert metadata.cu_seqlens_k is not None
-        assert len(metadata.cu_seqlens_q) == len(metadata.cu_seqlens_k)
-        # TODO: Remove once bias is supported with varlen
-        assert metadata.bias == None
-        # TODO:Remove once dropout is supported with varlen
-        assert metadata.dropout_p == 0.0
-        assert not metadata.return_encoded_softmax
-        # TODO: Remove once causal masking is supported with varlen
-        assert not metadata.causal
-    else:
-        assert q.dim() == 4
-        batch, nheads_q, seqlen_q, head_size = q.shape
-        _, nheads_k, seqlen_k, _ = k.shape
-        assert metadata.max_seqlens_q > 0 and metadata.max_seqlens_k > 0
-        assert metadata.cu_seqlens_q is None and metadata.cu_seqlens_k is None
-    assert k.shape == v.shape
-    assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
-    # TODO: Change assert if we support qkl f8 and v f16
-    assert q.dtype == k.dtype and q.dtype == v.dtype
-    # TODO: Fix assert to remove is-power-of-2 check once it is handled
-    # TODO: Fix assert to check head size <=256 once supported
-    assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
-    assert o.shape == q.shape
-    assert (nheads_q % nheads_k) == 0
+    def check_args(self, q, k, v, o):
+        assert q.dim() == k.dim() and q.dim() == v.dim()
+        if self.varlen:
+            assert q.dim() == 3
+            total_q, nheads_q, head_size = q.shape
+            total_k, nheads_k, _ = k.shape
+            assert self.cu_seqlens_q is not None
+            assert self.cu_seqlens_k is not None
+            assert len(self.cu_seqlens_q) == len(self.cu_seqlens_k)
+            # TODO: Remove once bias is supported with varlen
+            assert self.bias == None
+            # TODO:Remove once dropout is supported with varlen
+            assert self.dropout_p == 0.0
+            assert not self.return_encoded_softmax
+            # TODO: Remove once causal masking is supported with varlen
+            assert not self.causal
+        else:
+            assert q.dim() == 4
+            batch, nheads_q, seqlen_q, head_size = q.shape
+            _, nheads_k, seqlen_k, _ = k.shape
+            assert self.max_seqlens_q > 0 and self.max_seqlens_k > 0
+            assert self.cu_seqlens_q is None and self.cu_seqlens_k is None
+        assert k.shape == v.shape
+        assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
+        # TODO: Change assert if we support qkl f8 and v f16
+        assert q.dtype == k.dtype and q.dtype == v.dtype
+        # TODO: Fix assert to remove is-power-of-2 check once it is handled
+        # TODO: Fix assert to check head size <=256 once supported
+        assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
+        assert o.shape == q.shape
+        assert (nheads_q % nheads_k) == 0
 
 @triton.jit
 def max_fn(x, y):
@@ -141,9 +141,9 @@ def prepare_bias(bias, batch, nheads, seqlen_q, seqlen_k):
     assert bias.is_cuda
     assert bias.dim() == 4
     if bias.shape[2:] == (1, seqlen_k):
-        bias_type = "vector"
+        bias_type = 1
     elif bias.shape[2:] == (seqlen_q, seqlen_k):
-        bias_type = "matrix"
+        bias_type = 2
     else:
         raise RuntimeError(
             "Last 2 dimensions of bias must be (1, seqlen)" " or (seqlen, seqlen)"
@@ -282,21 +282,21 @@ def _attn_fwd_inner(
     return acc, l_i, m_i
 
 @triton.jit
-def _attn_fwd(
+def attn_fwd(
     Q, K, V, bias, sm_scale, M, Out,
     stride_qz, stride_qh, stride_qm, stride_qk,
     stride_kz, stride_kh, stride_kn, stride_kk,
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     stride_bz, stride_bh, stride_bm, stride_bn,
-    cu_seqlens_q_tensor, cu_seqlens_k_tensor,
+    cu_seqlens_q, cu_seqlens_k,
     dropout_p,
     philox_seed,
     philox_offset_base,
     encoded_softmax,
     max_seqlens_q, max_seqlens_k,
     VARLEN: tl.constexpr,
-    B: tl.constexpr, HQ: tl.constexpr, HK: tl.constexpr,
+    hq, hk,
     STAGE: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -306,27 +306,27 @@ def _attn_fwd(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
-    MQA: tl.constexpr = HQ != HK
+    is_mqa = hq != hk
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
     off_z = tl.program_id(2)
     if VARLEN:
-        cu_seqlens_q_start = tl.load(cu_seqlens_q_tensor + off_z)
-        cu_seqlens_q_end = tl.load(cu_seqlens_q_tensor + off_z + 1)
+        cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)
+        cu_seqlens_q_end = tl.load(cu_seqlens_q + off_z + 1)
         seqlen_q = cu_seqlens_q_end - cu_seqlens_q_start
         # We have a one-size-fits-all grid in id(0). Some seqlens might be too
         # small for all start_m so for those we return early.
         if start_m * BLOCK_M > seqlen_q:
             return
-        cu_seqlens_k_start = tl.load(cu_seqlens_k_tensor + off_z)
-        cu_seqlens_k_end = tl.load(cu_seqlens_k_tensor + off_z + 1)
+        cu_seqlens_k_start = tl.load(cu_seqlens_k + off_z)
+        cu_seqlens_k_end = tl.load(cu_seqlens_k + off_z + 1)
         seqlen_k = cu_seqlens_k_end - cu_seqlens_k_start
     else:
         cu_seqlens_q_start = 0
         cu_seqlens_k_start = 0
         seqlen_q = max_seqlens_q
         seqlen_k = max_seqlens_k
-    off_h_k = off_h_q % HK if MQA else off_h_q
+    off_h_k = off_h_q % hk if is_mqa else off_h_q
     need_padding = False
     extra_tokens_n = 0
     if seqlen_k < BLOCK_N:
@@ -366,10 +366,10 @@ def _attn_fwd(
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
-    if BIAS_TYPE is not None:
-        if BIAS_TYPE == "vector":
+    if BIAS_TYPE != 0:
+        if BIAS_TYPE == 1:
             bias_ptr = bias + off_h_q * stride_bh + offs_n
-        elif BIAS_TYPE == "matrix":
+        elif BIAS_TYPE == 2:
             bias_ptr = tl.make_block_ptr(
                 base=bias + off_h_q * stride_bh,
                 shape=(seqlen_q, seqlen_k),
@@ -466,7 +466,7 @@ def _attn_fwd(
     acc = acc / l_i[:, None]
     if ENABLE_DROPOUT:
         acc = acc / (1 - dropout_p)
-    m_ptrs = M + off_z * HQ * max_seqlens_q + off_h_q * max_seqlens_q + offs_m
+    m_ptrs = M + off_z * hq * max_seqlens_q + off_h_q * max_seqlens_q + offs_m
     # Check for last block_M
     overflow_size = (start_m * BLOCK_M) - seqlen_q
     if overflow_size > 0:
@@ -755,7 +755,7 @@ class _attention(torch.autograd.Function):
     def forward(ctx, q, k, v, o, metadata):
         if o is None:
             o = torch.empty_like(q, dtype=v.dtype)
-        check_args(q, k, v, o, metadata)
+        metadata.check_args(q, k, v, o)
         if metadata.varlen:
             total_q, nheads_q, head_size = q.shape
             total_k, nheads_k, _ = k.shape
@@ -802,13 +802,13 @@ class _attention(torch.autograd.Function):
         philox_seed = 0x1BF52
         philox_offset = 0x1D4B42
 
-        if metadata.bias_type is not None:
+        if metadata.bias_type != 0:
             bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1), 
                             metadata.bias.stride(2), metadata.bias.stride(3))
         else:
             bias_strides = (0,0,0,0)
 
-        _attn_fwd[grid](
+        attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
             metadata.cu_seqlens_q, metadata.cu_seqlens_k, 
@@ -819,7 +819,7 @@ class _attention(torch.autograd.Function):
             max_seqlens_q=metadata.max_seqlens_q, 
             max_seqlens_k=metadata.max_seqlens_k,
             VARLEN=metadata.varlen,
-            B=batch, HQ=nheads_q, HK=nheads_k,
+            hq=nheads_q, hk=nheads_k,
             STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
@@ -929,7 +929,7 @@ attention = _attention.apply
                           ])
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_bias', [True, False])
-@pytest.mark.parametrize('bias_type', ["vector"])
+@pytest.mark.parametrize('bias_type', ["vector", "matrix"])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [512, None]) #dropout needs to be tested vs SPDA reference in torch
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_equal_kseqlen, dtype=torch.float16):
     torch.manual_seed(20)

@@ -47,7 +47,7 @@ class MetaData():
 
     def __init__(self, sm_scale=1.0):
         self.sm_scale = sm_scale
-    
+
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
         self.cu_seqlens_q = cu_seqlens_q
@@ -74,7 +74,7 @@ class MetaData():
 
         self.bias = bias.expand(batch, nheads, seqlen_q, seqlen_k)
         self.bias_type = bias_type
-    
+
     def need_causal(self):
         self.causal = True
 
@@ -326,7 +326,11 @@ def attn_fwd(
         cu_seqlens_k_start = 0
         seqlen_q = max_seqlens_q
         seqlen_k = max_seqlens_k
-    off_h_k = off_h_q % hk if is_mqa else off_h_q
+    #off_h_k = off_h_q % hk if is_mqa else off_h_q
+    if is_mqa:
+        off_h_k = off_h_q % hk
+    else:
+        off_h_k = off_h_q
     need_padding = False
     extra_tokens_n = 0
     if seqlen_k < BLOCK_N:
@@ -803,7 +807,7 @@ class _attention(torch.autograd.Function):
         philox_offset = 0x1D4B42
 
         if metadata.bias_type != 0:
-            bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1), 
+            bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1),
                             metadata.bias.stride(2), metadata.bias.stride(3))
         else:
             bias_strides = (0,0,0,0)
@@ -811,12 +815,12 @@ class _attention(torch.autograd.Function):
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
-            metadata.cu_seqlens_q, metadata.cu_seqlens_k, 
+            metadata.cu_seqlens_q, metadata.cu_seqlens_k,
             dropout_p=metadata.dropout_p,
             philox_seed=philox_seed,
             philox_offset_base=philox_offset,
             encoded_softmax=encoded_softmax,
-            max_seqlens_q=metadata.max_seqlens_q, 
+            max_seqlens_q=metadata.max_seqlens_q,
             max_seqlens_k=metadata.max_seqlens_k,
             VARLEN=metadata.varlen,
             hq=nheads_q, hk=nheads_k,
@@ -974,7 +978,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
 
 def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
-    
+
     # Random sequence lengths. Using N_CTX as kind of max of sum of individual seqs
     max_seqlens = N_CTX // Z
     seqlens_q = torch.randint(1, max_seqlens + 1, (Z,), dtype=torch.int32)
@@ -1182,7 +1186,7 @@ def bench_flash_attention(
         input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
     else:
         bias = None
-        
+
     # Bwd pass only supports causal=True right now
     if mode == 'bwd':
         causal = True

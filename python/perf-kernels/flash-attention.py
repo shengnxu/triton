@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Fused Attention
 ===============
@@ -20,8 +21,11 @@ Not currently supported:
 
 """
 
+import argparse
 import pytest
 import random
+import sys
+import time
 import torch
 
 import triton
@@ -794,7 +798,7 @@ class _attention(torch.autograd.Function):
         else:
             encoded_softmax = None
 
-        stage = 3 if causal else 1
+        stage = 3 if metadata.causal else 1
 
         M = torch.empty((batch, nheads_q, metadata.max_seqlens_q), device=q.device, dtype=torch.float32)
 
@@ -808,6 +812,7 @@ class _attention(torch.autograd.Function):
         else:
             bias_strides = (0,0,0,0)
 
+        start = time.time()
         _attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
@@ -828,7 +833,8 @@ class _attention(torch.autograd.Function):
             RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
             num_stages=1, num_warps=num_warps
         )
-
+        flops = batch * nheads_q * 1024 * 1024 * head_size * 2 * 2 / 1e12
+        print(f"tflops = {flops / (time.time() - start)}")
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
         ctx.sm_scale = metadata.sm_scale
@@ -1001,6 +1007,18 @@ def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
     return q, k, v, input_metadata
 
+def input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
+    torch.manual_seed(20)
+
+    q = torch.randn((Z, HQ, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+    k = torch.randn((Z, HK, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+    v = torch.randn((Z, HK, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+    sm_scale = D_HEAD**-0.5
+    input_metadata = MetaData(sm_scale=sm_scale)
+    input_metadata.max_seqlens_q = N_CTX
+    input_metadata.max_seqlens_k = N_CTX
+
+    return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 8192, 64),
@@ -1111,191 +1129,236 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     torch.testing.assert_close(ref_dk, tri_dk, atol=5e-2, rtol=1e-2)
     torch.testing.assert_close(ref_dq, tri_dq, atol=5e-2, rtol=1e-2)
 
-try:
-    from flash_attn.flash_attn_interface import \
-        flash_attn_qkvpacked_func as flash_attn_func
-    HAS_FLASH = True
-except BaseException:
-    HAS_FLASH = False
+#try:
+    #from flash_attn.flash_attn_interface import \
+        #flash_attn_qkvpacked_func as flash_attn_func
+    #HAS_FLASH = True
+#except BaseException:
+    #HAS_FLASH = False
+HAS_FLASH = False
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        parser.add_argument("-b", type=int, default=1, help='Batch size')
-        parser.add_argument("-hq", type=int, default=1, help='Number of Q heads')
-        parser.add_argument("-hkv", type=int, default=1, help='Number of K/V heads')
-        parser.add_argument("-nctx_q", type=int, default=128, help='Q sequence length')
-        parser.add_argument("-nctx_kv", type=int, default=128, help='K/V sequence length')
-        parser.add_argument("-layout", type=str, default='bhsd', help='Layout of the input tensors')
-        parser.add_argument("-bench_bhsd", action='store_true', default=True, help='Run a comprehensive, pre-set sweep of bhsd configs')
-        parser.add_argument("-bench_thd", action='store_true', default=True, help='Run a comprehensive sweep of thd configs')
+        prog="Provide flash attention configs",
+        allow_abbrev=False,
     )
+
+    parser.add_argument("-b", type=int, default=0, help='Batch size')
+    parser.add_argument("-hq", type=int, default=0, help='Number of Q heads')
+    parser.add_argument("-hkv", type=int, default=0, help='Number of K/V heads')
+    parser.add_argument("-nctx_q", type=int, default=0, help='Q sequence length')
+    parser.add_argument("-nctx_kv", type=int, default=0, help='K/V sequence length')
+    parser.add_argument("-d", type=int, default=0, help='Head size')
+    parser.add_argument("-layout", type=str, default='bhsd', help='Layout of the input tensors')
+    parser.add_argument("-bench_bhsd", action='store_true', help='Run a comprehensive, pre-set sweep of bhsd configs')
+    parser.add_argument("-bench_thd", action='store_true', help='Run a comprehensive sweep of thd configs')
+    parser.add_argument("-bench_custom", action='store_true', help='Run a benchmark of the provided configs')
+    parser.add_argument("-dtype", type=str, default='fp16', help='Data type of the QKV inputs')
     args = parser.parse_args()
     return args
 
-configs = []
-for mode in ['fwd']:
-    for D_HEAD in [128]:
-        if mode == 'bwd' and D_HEAD == 128:
-            continue
-        for causal in [False]:
-            if mode == 'bwd' and causal == False:
+
+def bench_bhsd_set():
+    configs = []
+    for mode in ['fwd']:
+        for D_HEAD in [128]:
+            if mode == 'bwd' and D_HEAD == 128:
                 continue
-            for use_bias in [False, True]:
-                configs.append(triton.testing.Benchmark(
-                    x_names=['BATCH', 'H','N_CTX'],
-                    x_vals=[(16, 16, 1024),
-                            (8, 16, 2048),
-                            (4, 16, 4096),
-                            (2, 16, 8192),
-                            (1, 16, 16384),
-                            (2, 48, 1024),
-                            (2, 48, 2048),
-                            (2, 48, 4096),
-                            (2, 48, 8192),
-                            (2, 48, 16384),
-                            (8, 16, 1989),
-                            (4, 16, 4097),
-                            (2, 16, 8122),
-                            (1, 16, 16281),
-                            (2, 48, 1021),
-                            (2, 48, 2001),
-                            (2, 48, 3996),
-                            (2, 48, 8181),
-                            ],
-                    line_arg='provider',
-                    line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-                    line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-                    styles=[('red', '-'), ('blue', '-')],
-                    ylabel='ms',
-                    plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}-bias={use_bias}',
-                    args={
-                        'D_HEAD': D_HEAD,
-                        'dtype': torch.float16,
-                        'mode': mode,
-                        'causal': causal,
-                        'use_bias' : use_bias})
-                )
-@triton.testing.perf_report(configs)
-def bench_flash_attention(
-    BATCH, H, N_CTX, D_HEAD, use_bias, causal, mode, provider, dtype=torch.float16, device="cuda"
-):
-    assert mode in ["fwd", "bwd"]
-    warmup = 25
-    rep = 100
-    split_kernel = False
-    sm_scale = D_HEAD**-0.5
-    input_metadata = MetaData(sm_scale=sm_scale)
-    input_metadata.max_seqlens_q = N_CTX
-    input_metadata.max_seqlens_k = N_CTX
-    bias_type = "vector"
-    if use_bias:
-        if bias_type == "vector":
-            bias = torch.randn((1, H, 1, N_CTX), dtype=torch.float32, device="cuda")
-        elif bias_type == "matrix":
-            bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
-        input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
-    else:
-        bias = None
+            for causal in [False]:
+                if mode == 'bwd' and causal == False:
+                    continue
+                for use_bias in [False]:
+                    configs.append(triton.testing.Benchmark(
+                        x_names=['BATCH', 'H','N_CTX'],
+                        x_vals=[(4, 16, 16384),
+                                (8, 16, 2048),
+                                (4, 16, 4096),
+                                (2, 16, 8192),
+                                (1, 16, 16384),
+                                (2, 48, 1024),
+                                (2, 48, 2048),
+                                (2, 48, 4096),
+                                (2, 48, 8192),
+                                (2, 48, 16384),
+                                (8, 16, 1989),
+                                (4, 16, 4097),
+                                (2, 16, 8122),
+                                (1, 16, 16281),
+                                (2, 48, 1021),
+                                (2, 48, 2001),
+                                (2, 48, 3996),
+                                (2, 48, 8181),
+                                ],
+                        line_arg='provider',
+                        line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+                        line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+                        styles=[('red', '-'), ('blue', '-')],
+                        ylabel='ms',
+                        plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}-bias={use_bias}',
+                        args={
+                            'D_HEAD': D_HEAD,
+                            'dtype': torch.float16,
+                            'mode': mode,
+                            'causal': causal,
+                            'use_bias' : use_bias})
+                    )
+    @triton.testing.perf_report(configs)
+    def bench_flash_attention(
+        BATCH, H, N_CTX, D_HEAD, use_bias, causal, mode, provider, dtype=torch.float16, device="cuda"
+    ):
+        assert mode in ["fwd", "bwd"]
+        warmup = 25
+        rep = 100
+        split_kernel = False
+        sm_scale = D_HEAD**-0.5
+        input_metadata = MetaData(sm_scale=sm_scale)
+        input_metadata.max_seqlens_q = N_CTX
+        input_metadata.max_seqlens_k = N_CTX
+        bias_type = "vector"
+        if use_bias:
+            if bias_type == "vector":
+                bias = torch.randn((1, H, 1, N_CTX), dtype=torch.float32, device="cuda")
+            elif bias_type == "matrix":
+                bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
+            input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
+        else:
+            bias = None
         
-    # Bwd pass only supports causal=True right now
-    if mode == 'bwd':
-        causal = True
-        split_kernel = True
-    if provider == "triton":
-        q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        o = torch.empty_like(q)
-        if mode == "fwd":
-            q = q.to(torch_dtype)
-            k = k.to(torch_dtype)
-        fn = lambda: attention(q, k, v, o, input_metadata)
+        # Bwd pass only supports causal=True right now
         if mode == 'bwd':
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn(
-            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
-        )
-        fn = lambda: flash_attn_func(qkv, causal=causal)
+            causal = True
+            split_kernel = True
+        if provider == "triton":
+            q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+            k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+            v = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+            o = torch.empty_like(q)
+            if mode == "fwd":
+                q = q.to(torch_dtype)
+                k = k.to(torch_dtype)
+            fn = lambda: attention(q, k, v, o, input_metadata)
+            if mode == 'bwd':
+                o = fn()
+                do = torch.randn_like(o)
+                fn = lambda: o.backward(do, retain_graph=True)
+            ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        if provider == "flash":
+            qkv = torch.randn(
+                (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
+            )
+            fn = lambda: flash_attn_func(qkv, causal=causal)
+            if mode == "bwd":
+                o = fn()
+                do = torch.randn_like(o)
+                fn = lambda: o.backward(do, retain_graph=True)
+            ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * D_HEAD
+        total_flops = 2 * flops_per_matmul
+        if causal:
+            total_flops *= 0.5
         if mode == "bwd":
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * D_HEAD
-    total_flops = 2 * flops_per_matmul
-    if causal:
-        total_flops *= 0.5
-    if mode == "bwd":
-        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-    return total_flops / ms * 1e-9
+            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+        return total_flops / ms * 1e-9
 
-bench_flash_attention.run(save_path=".", print_data=True)
+    bench_flash_attention.run(save_path=".", print_data=True)
 
-configs = []
-for mode in ['fwd']:
-    for D_HEAD in [128]:
-        configs.append(triton.testing.Benchmark(
-            x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
-            x_vals=[(2, 16, 4, 1024),
-                    (8, 16, 2, 2048),
-                    (4, 16, 8, 4096),
-                    (2, 16, 4, 8192),
-                    (2, 16, 8, 16384),
-                    (2, 48, 12, 1024),
-                    (2, 48, 24, 2048),
-                    (2, 48, 8, 4096),
-                    (2, 48, 4, 8192),
-                    (2, 48, 2, 16384),
-                    (2, 64, 32, 1024),
-                    (4, 64, 16, 2048),
-                    (4, 64, 8, 4096),
-                    (4, 64, 32, 8192),
-                    (4, 128, 16, 16384),
-                    ],
-            line_arg='provider',
-            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-            styles=[('red', '-'), ('blue', '-')],
-            ylabel='ms',
-            plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
-            args={
-                'D_HEAD': D_HEAD,
-                'dtype': torch.float16,
-                'mode': mode})
-        )
-@triton.testing.perf_report(configs)
-def bench_varlen_flash_attention(
-    BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
-):
-    assert mode in ["fwd"]
-    warmup = 25
-    rep = 100
-    if provider == "triton":
-        q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
-        tri_out = torch.empty_like(q)
-        fn = lambda: attention(q, k, v, tri_out, input_metadata)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn(
-            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
-        )
-        fn = lambda: flash_attn_func(qkv, causal=causal)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 0
-    for i in range (0, input_metadata.num_contexts):
-        seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
-        seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
-        # x2 for 2 GEMMs
-        flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
-    # x2 for mul and add
-    total_flops = 2 * flops_per_matmul
-    return total_flops / ms * 1e-9
+def bench_thd_set():
+    configs = []
+    for mode in ['fwd']:
+        for D_HEAD in [128]:
+            configs.append(triton.testing.Benchmark(
+                x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
+                x_vals=[(2, 16, 4, 1024),
+                        (8, 16, 2, 2048),
+                        (4, 16, 8, 4096),
+                        (2, 16, 4, 8192),
+                        (2, 16, 8, 16384),
+                        (2, 48, 12, 1024),
+                        (2, 48, 24, 2048),
+                        (2, 48, 8, 4096),
+                        (2, 48, 4, 8192),
+                        (2, 48, 2, 16384),
+                        (2, 64, 32, 1024),
+                        (4, 64, 16, 2048),
+                        (4, 64, 8, 4096),
+                        (4, 64, 32, 8192),
+                        (4, 128, 16, 16384),
+                        ],
+                line_arg='provider',
+                line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+                line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+                styles=[('red', '-'), ('blue', '-')],
+                ylabel='ms',
+                plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
+                args={
+                    'D_HEAD': D_HEAD,
+                    'dtype': torch.float16,
+                    'mode': mode})
+            )
+    @triton.testing.perf_report(configs)
+    def bench_varlen_flash_attention(
+        BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
+    ):
+        assert mode in ["fwd"]
+        warmup = 25
+        rep = 100
+        if provider == "triton":
+            q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
+            tri_out = torch.empty_like(q)
+            fn = lambda: attention(q, k, v, tri_out, input_metadata)
+            ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        if provider == "flash":
+            qkv = torch.randn(
+                (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
+            )
+            fn = lambda: flash_attn_func(qkv, causal=causal)
+            ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        flops_per_matmul = 0
+        for i in range (0, input_metadata.num_contexts):
+            seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
+            seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
+            # x2 for 2 GEMMs
+            flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
+        # x2 for mul and add
+        total_flops = 2 * flops_per_matmul
+        return total_flops / ms * 1e-9
 
-bench_varlen_flash_attention.run(save_path=".", print_data=True)
+    bench_varlen_flash_attention.run(save_path=".", print_data=True)
+
+name_to_torch_types = {
+    'fp16': torch.float16,
+    'fp32': torch.float32,
+    'bf16': torch.bfloat16,
+}
 
 def main():
     args = parse_args()
+    if not args.dtype in name_to_torch_types:
+        raise RuntimeError(
+            "Dtype currently not supported."
+        )
+    dtype = name_to_torch_types[args.dtype]
+
+    if args.bench_bhsd:
+        bench_bhsd_set()
+    elif args.bench_thd:
+        bench_thd_set()
+    elif args.bench_custom:
+        batch, nheads_q, seqlen_q, head_size = args.b, args.hq, args.nctx_q, args.d
+        nheads_kv, seqlen_kv = args.hkv, args.nctx_kv
+        if args.layout == 'bhsd':
+            q, k, v, input_metadata = input_helper(batch, nheads_q, nheads_kv, seqlen_q, head_size, dtype)
+        elif args.layout == 'thd':
+            q, k, v, input_metadata = varlen_input_helper(batch, nheads_q, nheads_kv, seqlen_q, head_size, dtype)
+        else:
+            raise RuntimeError(
+                "Layout not currently supported. Use one of bhsd or thd."
+            )
+        o = torch.empty_like(q)
+        attention(q, k, v, o, input_metadata)
+        tflops = batch * seqlen_q**2 * nheads_q * head_size * 2 * 2
+        print(f"tflops = {tflops}")
+
+
+if __name__=='__main__':
+    sys.exit(main())

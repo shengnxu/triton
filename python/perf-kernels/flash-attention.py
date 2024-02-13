@@ -22,16 +22,34 @@ Not currently supported:
 
 import pytest
 import random
+import sys
 import torch
 
 import triton
 import triton.language as tl
 
-torch_dtype:tl.constexpr = torch.float16
+from enum import Enum
 
+USE_DTYPE = 1
+class Dtype:
+    float16 = 1
+    float8_e5m2fnuz = 2
+    float8_e4m3fnuz = 3
+
+# set intended dtype and scaling factor if fp8
 TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if TORCH_HAS_FP8E5:
+TORCH_HAS_FP8E4 = hasattr(torch, 'float8_e4m3fnuz')
+if USE_DTYPE == Dtype.float16 or (not TORCH_HAS_FP8E5 and not TORCH_HAS_FP8E4):
+    torch_dtype:tl.constexpr = torch.float16
+    fp8_scale = 1.0f
+elif USE_DTYPE == Dtype.float8_e5m2fnuz:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
+    fp8_scale = 57344.0f
+elif USE_DTYPE == Dtype.float8_e4m3fnuz:
+    torch_dtype:tl.constexpr = torch.float8_e4m3fnuz
+    fp8_scale = 448.0f
+else:
+    sys.exit("Specified datatype is not supported")
 
 class MetaData():
     cu_seqlens_q = None
@@ -107,7 +125,7 @@ class MetaData():
         assert k.shape == v.shape
         assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
         # TODO: Change assert if we support qkl f8 and v f16
-        assert q.dtype == k.dtype and q.dtype == v.dtype
+        assert q.dtype == k.dtype and q.dtype == v.dtype, f"Q: {q.dtype}, K: {k.dtype}, V:{v.dtype}"
         # TODO: Fix assert to remove is-power-of-2 check once it is handled
         # TODO: Fix assert to check head size <=256 once supported
         assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
@@ -953,7 +971,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     q = torch.randn((Z, H, seqlen_q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.randn((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    if TORCH_HAS_FP8E5:
+    if USE_TYPE > Dtype.float16:
         q = q.to(torch_dtype)
         k = k.to(torch_dtype)
     o = torch.empty_like(q)

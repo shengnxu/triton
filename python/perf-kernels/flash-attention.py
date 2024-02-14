@@ -109,9 +109,8 @@ class MetaData():
         assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
         # TODO: Change assert if we support qkl f8 and v f16
         assert q.dtype == k.dtype and q.dtype == v.dtype
-        # TODO: Fix assert to remove is-power-of-2 check once it is handled
         # TODO: Fix assert to check head size <=256 once supported
-        assert head_size <= 128 and ((head_size & (head_size-1)) == 0)
+        assert head_size <= 128
         assert o.shape == q.shape
         assert (nheads_q % nheads_k) == 0
 
@@ -208,14 +207,14 @@ def _attn_fwd_inner(
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         if PADDED_BLOCK:
-            k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+            k = tl.load(K_block_ptr, boundary_check=(1,0), padding_option="zero")
         else:
-            k = tl.load(K_block_ptr)
+            k = tl.load(K_block_ptr, boundary_check=(0,), padding_option="zero")
         if PRE_LOAD_V:
             if PADDED_BLOCK:
-                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+                v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
             else:
-                v = tl.load(V_block_ptr)
+                v = tl.load(V_block_ptr, boundary_check=(1,), padding_option="zero")
         # -- compute qk ----
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if STAGE == 2:
@@ -263,7 +262,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         if not PRE_LOAD_V:
             if PADDED_BLOCK:
-                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+                v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
         # -- update m_i and l_i
@@ -295,6 +294,7 @@ def attn_fwd(
     philox_seed,
     philox_offset_base,
     encoded_softmax,
+    unpadded_d,
     max_seqlens_q, max_seqlens_k,
     VARLEN: tl.constexpr,
     hq, hk,
@@ -344,7 +344,7 @@ def attn_fwd(
     q_offset = off_z * stride_qz +  off_h_q * stride_qh + cu_seqlens_q_start * stride_qm
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(seqlen_q, BLOCK_DMODEL),
+        shape=(seqlen_q, unpadded_d),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -353,7 +353,7 @@ def attn_fwd(
     k_offset = off_z * stride_kz + off_h_k * stride_kh + cu_seqlens_k_start * stride_kn
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
-        shape=(BLOCK_DMODEL, seqlen_k),
+        shape=(unpadded_d, seqlen_k),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
@@ -362,7 +362,7 @@ def attn_fwd(
     v_offset = off_z * stride_vz + off_h_k * stride_vh + cu_seqlens_k_start * stride_vk
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
-        shape=(seqlen_k, BLOCK_DMODEL),
+        shape=(seqlen_k, unpadded_d),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -394,7 +394,7 @@ def attn_fwd(
     # don't work as expected with `exp` in the loop
     qk_scale = sm_scale * 1.44269504089
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
-    q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+    q = tl.load(Q_block_ptr, boundary_check=(0,1), padding_option="zero")
     q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
@@ -485,13 +485,13 @@ def attn_fwd(
     o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
     O_block_ptr = tl.make_block_ptr(
         base=Out + o_offset,
-        shape=(seqlen_q, BLOCK_DMODEL),
+        shape=(seqlen_q, unpadded_d),
         strides=(stride_om, stride_on),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
+    tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))# Don't exceed shape, makes sure padding isn't put in output.
 
 @triton.jit
 def _attn_bwd_preprocess(O, DO,  #
@@ -777,6 +777,18 @@ class _attention(torch.autograd.Function):
             v_strides = (v.stride(0), v.stride(1), v.stride(2), v.stride(3))
             o_strides = (o.stride(0), o.stride(1), o.stride(2), o.stride(3))
 
+        # Get closest power of 2 over or equal to 32.
+        unpadded_head_dims = {32, 64, 128}
+        if head_size not in unpadded_head_dims:
+            padded_d_model = None
+            for i in unpadded_head_dims:
+                if i > head_size:
+                    padded_d_model = i
+                    break
+            assert padded_d_model is not None
+        else:
+            padded_d_model = head_size
+
         # We've derived these previously from tuning the kernel
         # TODO: Add autotuning
         BLOCK_M = 256
@@ -821,12 +833,13 @@ class _attention(torch.autograd.Function):
             philox_seed=philox_seed,
             philox_offset_base=philox_offset,
             encoded_softmax=encoded_softmax,
+            unpadded_d=head_size,
             max_seqlens_q=metadata.max_seqlens_q,
             max_seqlens_k=metadata.max_seqlens_k,
             VARLEN=metadata.varlen,
             hq=nheads_q, hk=nheads_k,
             STAGE=stage,
-            BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
+            BLOCK_M=BLOCK_M, BLOCK_DMODEL=padded_d_model, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
             BIAS_TYPE=metadata.bias_type,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
@@ -931,6 +944,10 @@ attention = _attention.apply
                           (4, 16, 8080, 64),
                           (1, 16, 16384, 64),
                           (4, 48, 127, 64),
+                          (4, 4, 128, 33),
+                          (4, 4, 65, 65),
+                          (4, 4, 113, 90),
+                          (4, 4, 113, 1),
                           ])
 @pytest.mark.parametrize('causal', [False, True])
 @pytest.mark.parametrize('use_bias', [False, True])

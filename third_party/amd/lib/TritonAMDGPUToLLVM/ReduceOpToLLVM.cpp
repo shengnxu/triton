@@ -171,11 +171,15 @@ private:
             triton::ReduceOp op) const {
     // TODO[shuhaoj]: change hard code style of numThreads. Hide async_agent
     // attr.
+#ifndef USE_ROCM
     if (getWSAgentId(op)) {
       barSync(rewriter, op, getAgentIds(op).front(), 128);
     } else {
       barrier();
     }
+#else
+  barrier();
+#endif
   }
 
   // Check if the reduction can use a redux op and return the kind.

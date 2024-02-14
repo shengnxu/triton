@@ -474,6 +474,22 @@ gentbl_cc_library(
 )
 
 gentbl_cc_library(
+    name = "triton_conversion_amdgpu_to_llvm_passes_inc_gen",
+    tbl_outs = [
+        (
+            [
+                "--gen-pass-decls",
+                "--name=TritonAMDGPUToLLVM",
+            ],
+            "include/triton/Conversion/TritonAMDGPUToLLVM/Passes.h.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "include/triton/Conversion/TritonAMDGPUToLLVM/Passes.td",
+    deps = ["td_files"],
+)
+
+gentbl_cc_library(
     name = "triton_conversion_triton_gpu_to_llvm_passes_inc_gen",
     tbl_outs = [
         (
@@ -536,6 +552,30 @@ cc_library(
         ":TritonDialects",
         ":TritonGPUToLLVM",
         ":triton_conversion_nvgpu_to_llvm_passes_inc_gen",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:LLVMDialect",
+        "@llvm-project//mlir:NVVMDialect",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:Transforms",
+    ],
+)
+
+cc_library(
+    name = "TritonAMDGPUToLLVM",
+    srcs = glob([
+        "lib/Conversion/TritonAMDGPUToLLVM/*.cpp",
+    ]),
+    hdrs = glob([
+        "include/triton/Conversion/TritonAMDGPUToLLVM/*.h",
+    ]),
+    copts = _no_unused_variable,
+    includes = ["include"],
+    deps = [
+        ":TritonAnalysis",
+        ":TritonDialects",
+        ":TritonGPUToLLVM",
+        ":triton_conversion_amdgpu_to_llvm_passes_inc_gen",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:LLVMDialect",
         "@llvm-project//mlir:NVVMDialect",
@@ -829,6 +869,7 @@ cc_library(
     includes = ["include"],
     deps = [
         ":NVGPUToLLVM",
+        ":TritonAMDGPUToLLVM",
         ":TritonGPUToLLVM",
         ":TritonTmaMetadata",
         ":TritonTransforms",

@@ -481,11 +481,11 @@ gentbl_cc_library(
                 "--gen-pass-decls",
                 "--name=TritonAMDGPUToLLVM",
             ],
-            "include/triton/Conversion/TritonAMDGPUToLLVM/Passes.h.inc",
+            "third_party/amd/include/TritonAMDGPUToLLVM/Passes.h.inc",
         ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "include/triton/Conversion/TritonAMDGPUToLLVM/Passes.td",
+    td_file = "third_party/amd/include/TritonAMDGPUToLLVM/Passes.td",
     deps = ["td_files"],
 )
 
@@ -564,13 +564,19 @@ cc_library(
 cc_library(
     name = "TritonAMDGPUToLLVM",
     srcs = glob([
-        "lib/Conversion/TritonAMDGPUToLLVM/*.cpp",
+        "third_party/amd/lib/TritonAMDGPUToLLVM/*.cpp",
+        "third_party/amd/lib/TritonAMDGPUToLLVM/ConvertLayoutOpToLLVM/*.cpp",
+        "third_party/amd/lib/TritonAMDGPUToLLVM/DotOpToLLVM/*.cpp",
     ]),
     hdrs = glob([
-        "include/triton/Conversion/TritonAMDGPUToLLVM/*.h",
+        "third_party/amd/include/TritonAMDGPUToLLVM/*.h",
+        "third_party/amd/include/*.h",
+        "third_party/amd/lib/*.h",
+        "third_party/amd/lib/TritonAMDGPUToLLVM/*.h",
     ]),
     copts = _no_unused_variable,
-    includes = ["include"],
+    includes = ["include",
+		"third_party/amd/include"],
     deps = [
         ":TritonAnalysis",
         ":TritonDialects",

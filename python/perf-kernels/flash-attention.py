@@ -97,8 +97,6 @@ class MetaData():
             # TODO:Remove once dropout is supported with varlen
             assert self.dropout_p == 0.0
             assert not self.return_encoded_softmax
-            # TODO: Remove once causal masking is supported with varlen
-            assert not self.causal
         else:
             assert q.dim() == 4
             batch, nheads_q, seqlen_q, head_size = q.shape
@@ -137,6 +135,17 @@ def dropout_mask(philox_seed, philox_offset, dropout_p, m, n, stride):
     rng_keep = rng_output > dropout_p
     return rng_keep
 
+@triton.jit
+def compute_blocked_softmax(qk, m, l):
+    m_internal = tl.maximum(m, tl.max(qk, 1))
+    qk = qk - m_internal[:, None]
+    if l is not None:
+        p = tl.math.exp2(qk - l)
+    else
+        p = tl.math.exp2(qk)
+    return m_internal, p
+
+
 # Only needed for testing
 def prepare_bias(bias, batch, nheads, seqlen_q, seqlen_k):
     assert bias.is_cuda
@@ -156,15 +165,17 @@ def _attn_fwd_inner(
     acc, l_i, m_i, q,
     K_block_ptr, V_block_ptr,
     start_m,
-    seqlen_k,
+    actual_seqlen_k,
     dropout_p,
     philox_seed,
     batch_philox_offset,
     encoded_softmax_block_ptr,
+    BLOCK_MIN: tl.constexpr,
+    BLOCK_MAX: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    STAGE: tl.constexpr,
     OFFS_M: tl.constexpr,
     OFFS_N: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
@@ -174,37 +185,9 @@ def _attn_fwd_inner(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
-    # range of values handled by this stage
-    if STAGE == 1: # "Solid" blocks of Causal masks
-        lo, hi = 0, min(seqlen_k, start_m * BLOCK_M)
-    elif STAGE == 2: # "Semi-solid", or "Transition" block of Causal mask
-        # Must use BLOCK_M, because the starting position of semi-solid block
-        # is determined by start_m * BLOCK_M
-        lo, hi = start_m * BLOCK_M, min(seqlen_k, start_m * BLOCK_M + BLOCK_M)
-        lo = tl.multiple_of(lo, BLOCK_M)
-        K_block_ptr = tl.advance(K_block_ptr, (0, lo))
-        V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
-        if RETURN_ENCODED_SOFTMAX:
-            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, lo))
-    # So here, we are computing the elements for that last irregular block.
-    # In the loop,  we will mask the elements of BLOCK_N that do not exist.
-    elif PADDED_BLOCK:
-        lo, hi = seqlen_k, seqlen_k + BLOCK_N
-        lo = tl.multiple_of(lo, BLOCK_N)
-        K_block_ptr = tl.advance(K_block_ptr, (0, lo))
-        V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
-        if bias_ptr is not None:
-            if bias_ptr.type.element_ty.is_block():
-                bias_ptr = tl.advance(bias_ptr, (0, lo))
-            else:
-                bias_ptr += lo
-    # causal = False
-    else:
-        lo, hi = 0, seqlen_k
     # loop over k, v and update accumulator
-    for start_n in range(lo, hi, BLOCK_N):
-        if STAGE == 1 or STAGE == 3:
-            start_n = tl.multiple_of(start_n, BLOCK_N)
+    for start_n in range(BLOCK_MAX, BLOCK_MIN, -BLOCK_N):
+        start_n = tl.multiple_of(start_n, BLOCK_N)
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         if PADDED_BLOCK:
@@ -218,9 +201,6 @@ def _attn_fwd_inner(
                 v = tl.load(V_block_ptr)
         # -- compute qk ----
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        if STAGE == 2:
-            mask = OFFS_M[:, None] >= (start_n + OFFS_N[None, :])
-            qk = tl.where(mask, qk, float("-inf"))
         qk += tl.dot(q, k)
         if bias_ptr is not None:
             if PADDED_BLOCK:
@@ -242,17 +222,15 @@ def _attn_fwd_inner(
             size_n = start_n + OFFS_N[None,:]
             mask = size_n < boundary_m[:,None]
             qk = tl.where(mask, qk, float("-inf"))
-        m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        qk = qk - m_ij[:, None]
-        p = tl.math.exp2(qk)
+        if IS_CAUSAL:
+            mask = OFFS_M[:, None] >= (start_n + OFFS_N[None, :])
+            qk = tl.where(mask, qk, float("-inf"))
+        m_ij, p = compute_blocked_softmax(qk, m_i, None)
         # CAVEAT: Must update l_ij before applying dropout
         l_ij = tl.sum(p, 1)
-        # Note about the conflicts of Flash attention algorithm and PyTorch's CUDA implementation
-        # PyTorch needs to return softmax(qk) (dropout mask encoded in sign bits)
-        # While Flash attention paper compute the dropout AFTER exp2(qk- m_ij)
         if ENABLE_DROPOUT:
-            philox_offset = batch_philox_offset + start_m * BLOCK_M * seqlen_k + start_n
-            keep = dropout_mask(philox_seed, philox_offset, dropout_p, BLOCK_M, BLOCK_N, seqlen_k)
+            philox_offset = batch_philox_offset + start_m * BLOCK_M * actual_seqlen_k + start_n
+            keep = dropout_mask(philox_seed, philox_offset, dropout_p, BLOCK_M, BLOCK_N, actual_seqlen_k)
             if RETURN_ENCODED_SOFTMAX:
                 tl.store(encoded_softmax_block_ptr, tl.where(keep, p, -p).to(encoded_softmax_block_ptr.type.element_ty))
             p = tl.where(keep, p, 0.0)
@@ -280,7 +258,7 @@ def _attn_fwd_inner(
                 bias_ptr += BLOCK_N
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i
+    return acc, l_i, m_i, K_block_ptr, V_block_ptr, encoded_softmax_block_ptr, bias_ptr
 
 @triton.jit
 def attn_fwd(
@@ -298,7 +276,7 @@ def attn_fwd(
     max_seqlens_q, max_seqlens_k,
     VARLEN: tl.constexpr,
     hq, hk,
-    STAGE: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -327,6 +305,46 @@ def attn_fwd(
         cu_seqlens_k_start = 0
         seqlen_q = max_seqlens_q
         seqlen_k = max_seqlens_k
+
+    # Now we compute whether we need to exit early due to causal masking.
+    # This is because for seqlen_q > seqlen_k, N rows of the attn scores
+    # are completely masked, resulting in 0s written to the output, and
+    # inf written to LSE. We don't need to do any GEMMs in this case.
+    n_block_max = triton.cdiv(seqlen_k, BLOCK_N)
+    if (IS_CAUSAL):
+        # If seqlen_q == seqlen_k, the attn scores are a square matrix.
+        # If seqlen_q != seqlen_k, attn scores are rectangular which means
+        # the causal mask boundary starts at either the top edge
+        # (seqlen_q < seqlen_k) or left edge.
+        seqlen_block_max = triton.cdiv(
+            (start_m + 1) * BLOCK_M + seqlen_k - seqlen_q,
+            BLOCK_N
+        )
+        # This is what adjusts the block_max for the current WG, only
+        # if IS_CAUSAL. Otherwise we want to always iterate through all N blocks
+        n_block_max = min(n_block_max, seqlen_block_max)
+        # This means this WG owns rows of attn scores that are all masked by
+        # the causal mask. We exit early.
+        if n_block_max <= 0:
+            o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
+            O_block_ptr = tl.make_block_ptr(
+                base=Out + o_offset,
+                shape=(seqlen_q, BLOCK_DMODEL),
+                strides=(stride_om, stride_on),
+                offsets=(start_m * BLOCK_M, 0),
+                block_shape=(BLOCK_M, BLOCK_DMODEL),
+                order=(1, 0)
+            )
+            acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=Out.type.element_ty)
+            tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
+            m_ptrs = M + off_z * hq * max_seqlens_q + off_h_q * max_seqlens_q + offs_m
+            # We store inf, not -inf because in the bwd pass, we subtract this
+            # from qk which makes it -inf, such that exp(qk - inf) = 0 for these masked blocks.
+            m = tl.full([BLOCK_M], value=float("inf"), dtype=tl.float32)
+            tl.store(m_ptrs, m)
+            # TODO: Should dropout and return encoded softmax be handled here too?
+            return
+
     off_h_k = off_h_q % hk if is_mqa else off_h_q
     need_padding = False
     extra_tokens_n = 0
@@ -376,6 +394,7 @@ def attn_fwd(
                 shape=(seqlen_q, seqlen_k),
                 strides=(stride_bm, stride_bn),
                 offsets=(start_m * BLOCK_M, 0),
+                BLOCK_MIN = BLOCK_MIN 
                 block_shape=(BLOCK_M, BLOCK_N),
                 order=(1, 0),
             )
@@ -413,51 +432,40 @@ def attn_fwd(
                 )
     else:
         encoded_softmax_block_ptr = 0
-    if STAGE & 1:
-        # equal to N_CTX if N_CTX is already a multiple of block_M
+    
+    block_max = (n_block_max + 1) * BLOCK_N
+    padded_block = extra_tokens_n != 0
+    if IS_CAUSAL or padded_block:
+        # We iterate backwards as this is the easiest to determine when to
+        # do masking for OOB and causality.
+        block_min = block_max - (triton.cdiv(BLOCK_M, BLOCK_N) * BLOCK_N)
         seqlen_aligned = seqlen_k - extra_tokens_n
-        if seqlen_k >= BLOCK_N:
-            acc, l_i, m_i = _attn_fwd_inner(
-                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m, seqlen_aligned,
-                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-                BLOCK_M, BLOCK_DMODEL, BLOCK_N,
-                4 - STAGE, offs_m, offs_n,
-                PRE_LOAD_V,
-                False, seqlen_aligned,
-                bias_ptr,
-                ENABLE_DROPOUT,
-                RETURN_ENCODED_SOFTMAX
-            )
-        tl.debug_barrier()
-        if need_padding:
-            if seqlen_k < BLOCK_N:
-                seqlen_aligned = 0
-            acc, l_i, m_i = _attn_fwd_inner(
-                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m, seqlen_aligned,
-                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-                BLOCK_M, BLOCK_DMODEL, BLOCK_N,
-                4 - STAGE, offs_m, offs_n,
-                PRE_LOAD_V,
-                True, seqlen_k,
-                bias_ptr,
-                ENABLE_DROPOUT,
-                RETURN_ENCODED_SOFTMAX
-            )
-    # stage 2: on-band
-    if STAGE & 2:
-        # barrier makes it easier for compielr to schedule the
-        # two loops independently
-        tl.debug_barrier()
-        acc, l_i, m_i = _attn_fwd_inner(
+        acc, l_i, m_i, K_block_ptr, V_block_ptr, encoded_softmax_block_ptr, bias_ptr = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
             start_m, seqlen_k,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+            block_min, block_max, IS_CAUSAL,
             BLOCK_M, BLOCK_DMODEL, BLOCK_N,
-            2, offs_m, offs_n,
+            offs_m, offs_n,
             PRE_LOAD_V,
-            False, seqlen_aligned,
+            padded_block, seqlen_aligned,
+            bias_ptr,
+            ENABLE_DROPOUT,
+            RETURN_ENCODED_SOFTMAX
+        )
+    tl.debug_barrier()
+    if block_min > 0: 
+        block_max = block_min
+        block_min = 0
+        acc, l_i, m_i, _, _, _, _ = _attn_fwd_inner(
+            acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+            start_m, seqlen_k,
+            dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+            block_min, block_max, IS_CAUSAL,
+            BLOCK_M, BLOCK_DMODEL, BLOCK_N,
+            offs_m, offs_n,
+            PRE_LOAD_V,
+            False, None,
             bias_ptr,
             ENABLE_DROPOUT,
             RETURN_ENCODED_SOFTMAX
@@ -819,9 +827,9 @@ class _attention(torch.autograd.Function):
             encoded_softmax=encoded_softmax,
             max_seqlens_q=metadata.max_seqlens_q, 
             max_seqlens_k=metadata.max_seqlens_k,
+            IS_CAUSAL=metadata.causal,
             VARLEN=metadata.varlen,
             hq=nheads_q, hk=nheads_k,
-            STAGE=stage,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
             PRE_LOAD_V=pre_load_v,
             BIAS_TYPE=metadata.bias_type,
@@ -1024,7 +1032,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
                           (4, 16, 8192, 128),
                           (32, 48, 8192, 128)
                           ])
-@pytest.mark.parametrize('causal', [False])
+@pytest.mark.parametrize('causal', [True, False])
 def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     q, k, v, input_metadata = varlen_input_helper(Z, H, H, N_CTX, D_HEAD, dtype)
     tri_out = torch.empty_like(q)

@@ -2390,8 +2390,10 @@ def test_generic_reduction(device):
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
 def test_permute(dtype_str, shape, perm, num_ctas, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
-    if is_hip():
-        pytest.skip("test_permute is not supported in HIP")
+
+    if dtype_str == 'float32' and shape[0] == 128:
+        if is_hip():
+            pytest.skip('test_permute[1-float32-shape5-perm5] requires too much shared memory for current AMD GPUs')
 
     # triton kernel
     @triton.jit

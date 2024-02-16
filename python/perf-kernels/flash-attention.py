@@ -1155,6 +1155,10 @@ def parse_args():
     parser.add_argument("-bench_custom", action='store_true', help='Run a benchmark of the provided configs')
     parser.add_argument("-dtype", type=str, default='fp16', help='Data type of the QKV inputs')
     args = parser.parse_args()
+
+    # some checks
+    if args.nctx_q != args.nctx_kv:
+        sys.exit("Currently only supports same sequence length for Q and K/V")
     return args
 
 
@@ -1355,9 +1359,10 @@ def main():
                 "Layout not currently supported. Use one of bhsd or thd."
             )
         o = torch.empty_like(q)
-        attention(q, k, v, o, input_metadata)
-        tflops = batch * seqlen_q**2 * nheads_q * head_size * 2 * 2
-        print(f"tflops = {tflops}")
+        for _ in range(args.runs):
+            attention(q, k, v, o, input_metadata)
+        numOps = batch * seqlen_q**2 * nheads_q * head_size * 2 * 2 * args.runs
+        print(f"numOps = {numOps}")
 
 
 if __name__=='__main__':

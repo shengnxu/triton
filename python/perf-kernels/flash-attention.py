@@ -40,7 +40,6 @@ class MetaData():
     max_seqlens_q = 0
     max_seqlens_k = 0
     bias = None
-    bias_type = 0
     causal = False
     num_contexts = 0
     varlen = False
@@ -64,17 +63,9 @@ class MetaData():
     def need_bias(self, bias, batch, nheads, seqlen_q, seqlen_k):
         assert bias.is_cuda
         assert bias.dim() == 4
-        if bias.shape[2:] == (1, seqlen_k):
-            bias_type = 1
-        elif bias.shape[2:] == (seqlen_q, seqlen_k):
-            bias_type = 2
-        else:
-            raise RuntimeError(
-                "Last 2 dimensions of bias must be (1, seqlen)" " or (seqlen, seqlen)"
-            )
-
-        self.bias = bias.expand(batch, nheads, seqlen_q, seqlen_k)
-        self.bias_type = bias_type
+        assert bias.shape[0] == 1
+        assert bias.shape[2:] == (seqlen_q, seqlen_k):
+        self.bias = bias
     
     def need_causal(self):
         self.causal = True
@@ -145,21 +136,6 @@ def compute_blocked_softmax(qk, m, l):
         p = tl.math.exp2(qk)
     return m_internal, p
 
-
-# Only needed for testing
-def prepare_bias(bias, batch, nheads, seqlen_q, seqlen_k):
-    assert bias.is_cuda
-    assert bias.dim() == 4
-    if bias.shape[2:] == (1, seqlen_k):
-        bias_type = 1
-    elif bias.shape[2:] == (seqlen_q, seqlen_k):
-        bias_type = 2
-    else:
-        raise RuntimeError(
-            "Last 2 dimensions of bias must be (1, seqlen)" " or (seqlen, seqlen)"
-        )
-    return bias.expand(batch, nheads, seqlen_q, seqlen_k), bias_type
-
 @triton.jit
 def _attn_fwd_inner(
     acc, l_i, m_i, q,
@@ -204,20 +180,16 @@ def _attn_fwd_inner(
         qk += tl.dot(q, k)
         if bias_ptr is not None:
             if PADDED_BLOCK:
-                if bias_ptr.type.element_ty.is_block():
-                    bias = tl.load(bias_ptr,boundary_check=(1,), padding_option="zero")
-                else:
-                    size_n = start_n + OFFS_N
-                    boundary_n = tl.full([BLOCK_N], TOTAL_TOKENS, dtype=tl.float32)
-                    bias_padding = tl.full([BLOCK_N], 0, dtype=tl.float32)
-                    bias = tl.load(bias_ptr, mask=size_n < boundary_n, other=bias_padding)
+                bias = tl.load(bias_ptr, boundary_check(1,), padding_option="zero")
             else:
                 bias = tl.load(bias_ptr)
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += (bias * 1.44269504089)
-        if PADDED_BLOCK:
+        # We start from end of seqlen_k so only the first iteration would need
+        # to be checked for padding if it is not a multiple of block_n
+        if PADDED_BLOCK and start_n == BLOCK_MAX:
             boundary_m = tl.full([BLOCK_M], TOTAL_TOKENS, dtype=tl.float32)
             size_n = start_n + OFFS_N[None,:]
             mask = size_n < boundary_m[:,None]
@@ -252,10 +224,7 @@ def _attn_fwd_inner(
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         if bias_ptr is not None:
-            if bias_ptr.type.element_ty.is_block():
-                bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
-            else:
-                bias_ptr += BLOCK_N
+            bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
     return acc, l_i, m_i, K_block_ptr, V_block_ptr, encoded_softmax_block_ptr, bias_ptr
@@ -310,18 +279,20 @@ def attn_fwd(
     # This is because for seqlen_q > seqlen_k, N rows of the attn scores
     # are completely masked, resulting in 0s written to the output, and
     # inf written to LSE. We don't need to do any GEMMs in this case.
+    # This block of code determines what N is, and if this WG is operating
+    # on those N rows.
     n_block_max = triton.cdiv(seqlen_k, BLOCK_N)
     if (IS_CAUSAL):
         # If seqlen_q == seqlen_k, the attn scores are a square matrix.
         # If seqlen_q != seqlen_k, attn scores are rectangular which means
-        # the causal mask boundary starts at either the top edge
-        # (seqlen_q < seqlen_k) or left edge.
+        # the causal mask boundary is bottom left aligned, and ends at either
+        # the top edge (seqlen_q < seqlen_k) or left edge.
         seqlen_block_max = triton.cdiv(
             (start_m + 1) * BLOCK_M + seqlen_k - seqlen_q,
             BLOCK_N
         )
         # This is what adjusts the block_max for the current WG, only
-        # if IS_CAUSAL. Otherwise we want to always iterate through all N blocks
+        # if IS_CAUSAL. Otherwise we want to always iterate through all blocks
         n_block_max = min(n_block_max, seqlen_block_max)
         # This means this WG owns rows of attn scores that are all masked by
         # the causal mask. We exit early.
@@ -336,9 +307,10 @@ def attn_fwd(
                 order=(1, 0)
             )
             acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=Out.type.element_ty)
+            # We still need to write 0s to the result
             tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
             m_ptrs = M + off_z * hq * max_seqlens_q + off_h_q * max_seqlens_q + offs_m
-            # We store inf, not -inf because in the bwd pass, we subtract this
+            # We store inf to LSE, not -inf because in the bwd pass, we subtract this
             # from qk which makes it -inf, such that exp(qk - inf) = 0 for these masked blocks.
             m = tl.full([BLOCK_M], value=float("inf"), dtype=tl.float32)
             tl.store(m_ptrs, m)
@@ -386,18 +358,15 @@ def attn_fwd(
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     if BIAS_TYPE != 0:
-        if BIAS_TYPE == 1:
-            bias_ptr = bias + off_h_q * stride_bh + offs_n
-        elif BIAS_TYPE == 2:
-            bias_ptr = tl.make_block_ptr(
-                base=bias + off_h_q * stride_bh,
-                shape=(seqlen_q, seqlen_k),
-                strides=(stride_bm, stride_bn),
-                offsets=(start_m * BLOCK_M, 0),
-                BLOCK_MIN = BLOCK_MIN 
-                block_shape=(BLOCK_M, BLOCK_N),
-                order=(1, 0),
-            )
+        bias_ptr = tl.make_block_ptr(
+            base=bias + off_h_q * stride_bh,
+            shape=(seqlen_q, seqlen_k),
+            strides=(stride_bm, stride_bn),
+            offsets=(start_m * BLOCK_M, 0),
+            BLOCK_MIN = BLOCK_MIN 
+            block_shape=(BLOCK_M, BLOCK_N),
+            order=(1, 0),
+        )
     else:
         bias_ptr = None
     # initialize pointer to m and l
@@ -938,7 +907,6 @@ attention = _attention.apply
                           ])
 @pytest.mark.parametrize('causal', [False, True])
 @pytest.mark.parametrize('use_bias', [False, True])
-@pytest.mark.parametrize('bias_type', ["vector", "matrix"])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [512, None]) #dropout needs to be tested vs SPDA reference in torch
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_equal_kseqlen, dtype=torch.float16):
     # TODO: using bias causes coredump for certain configs and must be fixed.
@@ -959,10 +927,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
     if causal:
         input_metadata.need_causal()
     if use_bias:
-        if bias_type == "vector":
-            bias = torch.randn((1, H, 1, seqlen_k), dtype=torch.float32, device="cuda")
-        elif bias_type == "matrix":
-            bias = torch.randn((1, H, seqlen_q, seqlen_k), dtype=torch.float32, device="cuda")
+        bias = torch.randn((1, H, seqlen_q, seqlen_k), dtype=torch.float32, device="cuda")
         input_metadata.need_bias(bias, Z, H, seqlen_q, seqlen_k)
     else:
         bias = None
@@ -1298,4 +1263,3 @@ def bench_varlen_flash_attention(
     return total_flops / ms * 1e-9
 
 bench_varlen_flash_attention.run(save_path=".", print_data=True)
-

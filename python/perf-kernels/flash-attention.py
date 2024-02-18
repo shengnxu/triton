@@ -41,13 +41,13 @@ TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 TORCH_HAS_FP8E4 = hasattr(torch, 'float8_e4m3fnuz')
 if USE_DTYPE == Dtype.float16 or (not TORCH_HAS_FP8E5 and not TORCH_HAS_FP8E4):
     torch_dtype:tl.constexpr = torch.float16
-    fp8_scale = 1.0f
+    fp8_scale = 1.0
 elif USE_DTYPE == Dtype.float8_e5m2fnuz:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
-    fp8_scale = 57344.0f
+    fp8_scale = 57344.0
 elif USE_DTYPE == Dtype.float8_e4m3fnuz:
     torch_dtype:tl.constexpr = torch.float8_e4m3fnuz
-    fp8_scale = 448.0f
+    fp8_scale = 448.0
 else:
     sys.exit("Specified datatype is not supported")
 
@@ -65,6 +65,11 @@ class MetaData():
 
     def __init__(self, sm_scale=1.0):
         self.sm_scale = sm_scale
+    
+    def set_fp8_scale(self, q_scale, k_scale, v_scale):
+        self.q_scale = q_scale
+        self.k_scale = k_scale
+        self.v_scale = v_scale
     
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
@@ -301,7 +306,8 @@ def _attn_fwd_inner(
 
 @triton.jit
 def attn_fwd(
-    Q, K, V, bias, sm_scale, M, Out,
+    Q, K, V, bias, sm_scale, 
+    q_scale, k_scale, v_scale, M, Out,
     stride_qz, stride_qh, stride_qm, stride_qk,
     stride_kz, stride_kh, stride_kn, stride_kk,
     stride_vz, stride_vh, stride_vk, stride_vn,
@@ -827,7 +833,8 @@ class _attention(torch.autograd.Function):
             bias_strides = (0,0,0,0)
 
         attn_fwd[grid](
-            q, k, v, metadata.bias, metadata.sm_scale, M, o,
+            q, k, v, metadata.bias, metadata.sm_scale,
+            metadata.q_scale, metadata.k_scale, metadata.v_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
             metadata.cu_seqlens_q, metadata.cu_seqlens_k, 
             dropout_p=metadata.dropout_p,
@@ -949,6 +956,7 @@ attention = _attention.apply
 @pytest.mark.parametrize('use_bias', [True, False])
 @pytest.mark.parametrize('bias_type', ["vector", "matrix"])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [512, None]) #dropout needs to be tested vs SPDA reference in torch
+@pytest.mark.parametrize('dtype', [torch.float16, torch.float8_e5m2fnuz, torch.float8_e4m3fnuz])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_equal_kseqlen, dtype=torch.float16):
     torch.manual_seed(20)
     if qseqlen_not_equal_kseqlen is not None:
@@ -968,25 +976,52 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_eq
         input_metadata.need_bias(bias, Z, H, seqlen_q, seqlen_k)
     else:
         bias = None
+    # TODO: should qkv be generated in fp32 and convert to intended format?
     q = torch.randn((Z, H, seqlen_q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.randn((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    if USE_TYPE > Dtype.float16:
-        q = q.to(torch_dtype)
-        k = k.to(torch_dtype)
     o = torch.empty_like(q)
+
+    # fp8 scaling
+    if USE_DTYPE != Dtype.float16:
+        q_scale = fp8_scale / q.amax().float()
+        k_scale = fp8_scale / k.amax().float()
+        v_scale = fp8_scale / v.amax().float()
+        assert q_scale.dtype == torch.float and k_scale.dtype == torch.float and v_scale.dtype == torch.float, \
+            f"q,k,v scaling factor should be fp32 but it is {q_scale.dtype}"
+        input_metadata.set_fp8_scale(q_scale, k_scale, v_scale)
 
     # triton implementation
     tri_out, _ = attention(q, k, v, o, input_metadata)
     # reference implementation
     M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
+    if USE_DTYPE != Dtype.float16:  # scale q,k
+        q *= q_scale
+        k *= k_scale
     scores = torch.einsum('bhqd,bhkd->bhqk', q, k).float() * sm_scale
+    if USE_DTYPE != Dtype.float16:  # descale q,k
+        scores /= q_scale
+        scores /= k_scale
     if causal:
         scores[:, :, M == 0] = float("-inf")
     if use_bias:
         scores += input_metadata.bias
-    p = torch.softmax(scores.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v)
+    # TODO: why is here a half(), is it for fp16 matmul?
+    p = torch.softmax(scores.float(), dim=-1)
+    if USE_DTYPE != Dtype.float16:  # scale p, v
+        s_scale = fp8_scale / p.amax().float()
+        assert s_scale.dtype == torch.float, f"s scaling factor should be fp32 but it is {s_scale.dtype}"
+        p *= s_scale
+        v *= v_scale
+    else:
+        p = p.half()
+    ref_out = torch.matmul(p, v).float()
+    if USE_DTYPE != Dtype.float16:  # descale p, v
+        ref_out /= s_scale
+        ref_out /= v_scale
+    # TODO: why do I need to scale O here according to nv doc
+
+
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
 

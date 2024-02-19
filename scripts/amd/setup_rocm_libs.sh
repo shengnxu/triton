@@ -2,18 +2,30 @@
 
 set -ex
 
+# Check if ROCM_VERSION argument is provided
+if [[ -z "$1" ]]; then
+    echo "ROCM_VERSION argument not provided setting to default."
+    exit 1
+fi
+
+ROCM_VERSION="$1"
+
 # Set ROCM_HOME if not set
 if [[ -z "${ROCM_HOME}" ]]; then
     export ROCM_HOME=/opt/rocm
 fi
+
+# Extract major and minor version numbers
+MAJOR_VERSION=$(echo "${ROCM_VERSION}" | cut -d '.' -f 1)
+MINOR_VERSION=$(echo "${ROCM_VERSION}" | cut -d '.' -f 2)
 
 # Check TRITON_ROCM_DIR is set
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
   export TRITON_ROCM_DIR=python/triton/third_party/rocm
 fi
 
-# Create triton lib directory
-mkdir -p $TRITON_ROCM_DIR/lib
+# Remove current libhsa included to avoid confusion
+rm $TRITON_ROCM_DIR/lib/hsa/libhsa-runtime*
 
 LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
@@ -30,10 +42,17 @@ do
     cp $lib $TRITON_ROCM_DIR/lib/
 done
 
-# Required ROCm libraries - dynamically find so numbers
+# Required ROCm libraries
+if [[ "${MAJOR_VERSION}" == "6" ]]; then
+    libamdhip="libamdhip64.so.6"
+else
+    libamdhip="libamdhip64.so.5"
+fi
+
+# Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
+    "${libamdhip}"
     "libhsa-runtime64.so.1"
-    "libamdhip64.so.5"
     "libamd_comgr.so.2"
     "libdrm.so.2"
     "libdrm_amdgpu.so.1"

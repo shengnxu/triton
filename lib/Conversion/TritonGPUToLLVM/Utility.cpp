@@ -256,17 +256,19 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  // rewriter.create<scf::IfOp>(loc, pred,
-  //   [&](OpBuilder& builder, Location loc) {
-  //     store(val, ptr);
-  //     builder.create<scf::YieldOp>(loc);
-  //   },
-  //   [&](OpBuilder& builder, Location loc) {
-  //     store(val, ptr);
-  //     builder.create<scf::YieldOp>(loc);
-  //   }
-  //   );
-  store(val, ptr);
+  // store(val, ptr);
+
+  auto ty = val.getType();
+
+  auto val_ty = vec_ty(ty, 1);
+  Value vec_val = undef(val_ty);
+  vec_val = insert_element(val_ty, vec_val, val, i32_val(0));
+
+  auto vec_ty = vec_ty(i1_ty, 1);
+  Value vec_pred = undef(vec_ty);
+  vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
+
+  rewriter.create<LLVM::MaskedStoreOp>(loc, vec_val, ptr, vec_pred, 0);
   return val;
 #else
   MLIRContext *ctx = rewriter.getContext();
@@ -285,7 +287,29 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                  Value pred) {
 #if USE_ROCM
-  return load(ptr);
+  auto ptrTy = ptr.getType().cast<LLVMPointerType>();
+  assert(ptrTy.getAddressSpace() == 3 && "Invalid addr space for loadShared");
+  auto elemTy = ptrTy.getElementType();
+
+  SmallVector<Type> vts;
+  vts.push_back(elemTy);
+  // auto vec_type = vec_ty(Type, 1);
+  // Value vec_ts = undef(vec_type);
+  // vec_ts = insert_element(vec_type, vec_ts, elemTy, i32_val(0));
+
+  auto vec_ty = vec_ty(i1_ty, 1);
+  Value vec_pred = undef(vec_ty);
+  vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
+
+  auto v_ty = vec_ty(i1_ty, 1);
+  Value vec_p = undef(v_ty);
+  vec_p = insert_element(v_ty, vec_p, int_val(1, 0), i32_val(0));
+
+
+
+  return rewriter.create<LLVM::MaskedLoadOp>(loc, vts, ptr, vec_pred, vec_p, 0);
+
+  // return load(ptr);
   // auto loaded = rewriter.create<scf::IfOp>(loc, pred,
   //   [&](OpBuilder& builder, Location loc) {
   //     auto loadVal = load(ptr);

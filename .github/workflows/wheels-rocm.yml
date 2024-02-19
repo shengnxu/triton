@@ -15,9 +15,6 @@ jobs:
       DOCKER_IMAGE: ${{ format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) }}
       PY_VERS: ${{ matrix.python }}
       ROCM_VERSION: ${{ matrix.rocm_version }}
-    paths:
-      - .github/release-pinned-commit.txt
-      - .github/release-version.txt
 
     steps:
       - uses: actions/checkout@v3

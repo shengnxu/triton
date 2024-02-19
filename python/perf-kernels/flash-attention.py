@@ -169,6 +169,7 @@ def _attn_fwd_inner(
     PRE_LOAD_V: tl.constexpr,
     PADDED_BLOCK: tl.constexpr,
     TOTAL_TOKENS: tl.constexpr,
+    PADDED_HEAD: tl.constexpr,
     bias_ptr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
@@ -207,14 +208,26 @@ def _attn_fwd_inner(
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         if PADDED_BLOCK:
-            k = tl.load(K_block_ptr, boundary_check=(1,0), padding_option="zero")
+            if PADDED_HEAD:
+                k = tl.load(K_block_ptr, boundary_check=(1,0), padding_option="zero")
+            else:
+                k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
         else:
-            k = tl.load(K_block_ptr, boundary_check=(0,), padding_option="zero")
+            if PADDED_HEAD:
+                k = tl.load(K_block_ptr, boundary_check=(0,), padding_option="zero")
+            else:
+                k = tl.load(K_block_ptr)
         if PRE_LOAD_V:
             if PADDED_BLOCK:
-                v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
+                if PADDED_HEAD:
+                    v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
+                else:
+                    v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
-                v = tl.load(V_block_ptr, boundary_check=(1,), padding_option="zero")
+                if PADDED_HEAD:
+                    v = tl.load(V_block_ptr, boundary_check=(1,), padding_option="zero")
+                else:
+                    v = tl.load(V_block_ptr)
         # -- compute qk ----
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if STAGE == 2:
@@ -262,7 +275,10 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         if not PRE_LOAD_V:
             if PADDED_BLOCK:
-                v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
+                if PADDED_HEAD:
+                    v = tl.load(V_block_ptr, boundary_check=(0,1), padding_option="zero")
+                else:
+                    v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
         # -- update m_i and l_i
@@ -294,7 +310,7 @@ def attn_fwd(
     philox_seed,
     philox_offset_base,
     encoded_softmax,
-    unpadded_d,
+    actual_block_dmodel,
     max_seqlens_q, max_seqlens_k,
     VARLEN: tl.constexpr,
     hq, hk,
@@ -311,6 +327,7 @@ def attn_fwd(
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
     off_z = tl.program_id(2)
+    padded_head = (actual_block_dmodel == BLOCK_DMODEL)
     if VARLEN:
         cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)
         cu_seqlens_q_end = tl.load(cu_seqlens_q + off_z + 1)
@@ -344,7 +361,7 @@ def attn_fwd(
     q_offset = off_z * stride_qz +  off_h_q * stride_qh + cu_seqlens_q_start * stride_qm
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(seqlen_q, unpadded_d),
+        shape=(seqlen_q, actual_block_dmodel),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -353,7 +370,7 @@ def attn_fwd(
     k_offset = off_z * stride_kz + off_h_k * stride_kh + cu_seqlens_k_start * stride_kn
     K_block_ptr = tl.make_block_ptr(
         base=K + k_offset,
-        shape=(unpadded_d, seqlen_k),
+        shape=(actual_block_dmodel, seqlen_k),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
@@ -362,7 +379,7 @@ def attn_fwd(
     v_offset = off_z * stride_vz + off_h_k * stride_vh + cu_seqlens_k_start * stride_vk
     V_block_ptr = tl.make_block_ptr(
         base=V + v_offset,
-        shape=(seqlen_k, unpadded_d),
+        shape=(seqlen_k, actual_block_dmodel),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -394,7 +411,10 @@ def attn_fwd(
     # don't work as expected with `exp` in the loop
     qk_scale = sm_scale * 1.44269504089
     # load q: it will stay in SRAM throughout on NV GPUs but in VGPRs on AMD GPUs
-    q = tl.load(Q_block_ptr, boundary_check=(0,1), padding_option="zero")
+    if actual_block_dmodel == BLOCK_DMODEL:#padded_head:
+        q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+    else:
+        q = tl.load(Q_block_ptr, boundary_check=(0,1), padding_option="zero")
     q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
@@ -429,6 +449,7 @@ def attn_fwd(
                 4 - STAGE, offs_m, offs_n,
                 PRE_LOAD_V,
                 False, seqlen_aligned,
+                padded_head,
                 bias_ptr,
                 ENABLE_DROPOUT,
                 RETURN_ENCODED_SOFTMAX
@@ -445,6 +466,7 @@ def attn_fwd(
                 4 - STAGE, offs_m, offs_n,
                 PRE_LOAD_V,
                 True, seqlen_k,
+                padded_head,
                 bias_ptr,
                 ENABLE_DROPOUT,
                 RETURN_ENCODED_SOFTMAX
@@ -462,6 +484,7 @@ def attn_fwd(
             2, offs_m, offs_n,
             PRE_LOAD_V,
             False, seqlen_aligned,
+            padded_head,
             bias_ptr,
             ENABLE_DROPOUT,
             RETURN_ENCODED_SOFTMAX
@@ -485,7 +508,7 @@ def attn_fwd(
     o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
     O_block_ptr = tl.make_block_ptr(
         base=Out + o_offset,
-        shape=(seqlen_q, unpadded_d),
+        shape=(seqlen_q, actual_block_dmodel),
         strides=(stride_om, stride_on),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
@@ -833,7 +856,7 @@ class _attention(torch.autograd.Function):
             philox_seed=philox_seed,
             philox_offset_base=philox_offset,
             encoded_softmax=encoded_softmax,
-            unpadded_d=head_size,
+            actual_block_dmodel=head_size,
             max_seqlens_q=metadata.max_seqlens_q,
             max_seqlens_k=metadata.max_seqlens_k,
             VARLEN=metadata.varlen,

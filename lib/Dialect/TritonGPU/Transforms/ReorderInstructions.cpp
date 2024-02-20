@@ -22,6 +22,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
 
 using namespace mlir;
+using llvm::outs;
 
 static inline bool
 willIncreaseRegisterPressure(triton::gpu::ConvertLayoutOp op) {
@@ -48,6 +49,7 @@ public:
     // Sink conversions into loops when they will increase
     // register pressure
     DenseMap<Operation *, Operation *> opToMove;
+    DenseMap<Operation *, SmallVector<Operation *>> loadCvtCvtChains;
     auto moveAfter = [](Operation *lhs, Operation *rhs) {
       auto lhsId = getWSRoleId(lhs);
       auto rhsId = getWSRoleId(rhs);
@@ -69,6 +71,7 @@ public:
     for (auto &kv : opToMove)
       kv.first->moveBefore(kv.second);
     // Move convert(load) immediately after dependent load
+    SmallVector<Operation *> loads;
     m.walk([&](triton::gpu::ConvertLayoutOp op) {
       auto dstType = op.getResult().getType().cast<RankedTensorType>();
       auto dstEncoding = dstType.getEncoding();
@@ -88,8 +91,36 @@ public:
       Operation *argOp = op.getOperand().getDefiningOp();
       if (!argOp)
         return;
-      moveAfter(op, argOp);
+      // // outs() << "op: " << op->getName() << "\n";
+      // // outs() << "argOp: " << argOp->getName() << "\n";
+      if (isa<triton::LoadOp>(argOp)) {
+        if (!loadCvtCvtChains.contains(argOp)) {
+          SmallVector<Operation *> vec = {argOp, op};
+          loadCvtCvtChains[argOp] = vec;
+          loads.push_back(argOp);
+          // outs() << "vec size: " << loadCvtCvtChains[argOp].size() << "\n";
+        }
+      } else {
+        for (auto &kv : loadCvtCvtChains) {
+          auto &vec = kv.second;
+          // outs() << "argOp exist? " << (std::find(vec.begin(), vec.end(), argOp) != vec.end()) << "\n";
+          // outs() << "op exist? " << (std::find(vec.begin(), vec.end(), op) != vec.end()) << "\n";
+          if (std::find(vec.begin(), vec.end(), argOp) != vec.end() && std::find(vec.begin(), vec.end(), op) == vec.end()) {
+            // outs() << "pushing!!!\n";
+            kv.second.push_back(op);
+          }
+          // outs() << "vec size: " << vec.size() << "\n";
+        }
+      }
+      // moveAfter(op, argOp);
     });
+    // outs() << "loadCvtCvtChains.size() = " << loadCvtCvtChains.size() << "\n";
+    // outs() << "loads.size() = " << loads.size() << "\n";
+    // outs() << "loadCvtCvtChains[loads[0]].size() = " << loadCvtCvtChains[loads[0]].size() << "\n";
+    // outs() << "loadCvtCvtChains[loads[1]].size() = " << loadCvtCvtChains[loads[1]].size() << "\n";
+    for (int i = 0; i < loadCvtCvtChains[loads[0]].size(); i++) 
+      moveAfter(loadCvtCvtChains[loads[1]][i], loadCvtCvtChains[loads[0]][i]);
+    
     // Move transpositions just after their definition
     opToMove.clear();
     m.walk([&](triton::TransOp op) {

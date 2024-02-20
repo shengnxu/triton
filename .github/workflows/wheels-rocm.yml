@@ -52,6 +52,8 @@ jobs:
           mkdir -p "artifacts/"
           TRITON_ROCM_DIR=/triton/python/triton/third_party/rocm
 
+          docker system prune -a --force
+          
           container_name=$(docker run \
             --tty \
             --detach \

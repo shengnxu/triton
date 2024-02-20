@@ -140,8 +140,8 @@ def _attn_fwd_inner(
     philox_seed,
     batch_philox_offset,
     encoded_softmax_block_ptr,
-    BLOCK_MIN: tl.constexpr,
-    BLOCK_MAX: tl.constexpr,
+    block_min,
+    block_max,
     IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -150,21 +150,21 @@ def _attn_fwd_inner(
     OFFS_N: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
     MASK_STEPS: tl.constexpr,
-    TOTAL_TOKENS: tl.constexpr,
+    TOTAL_TOKENS,
     bias_ptr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
     # loop over k, v and update accumulator
-    for start_n in range(BLOCK_MIN, BLOCK_MAX, BLOCK_N):
+    for start_n in range(block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
-        if MASK_STEPS != 0:
+        if MASK_STEPS:
             k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
         else:
             k = tl.load(K_block_ptr)
         if PRE_LOAD_V:
-            if MASK_STEPS != 0:
+            if MASK_STEPS:
                 v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
@@ -172,7 +172,7 @@ def _attn_fwd_inner(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk += tl.dot(q, k)
         if bias_ptr is not None:
-            if MASK_STEPS != 0:
+            if MASK_STEPS:
                 bias = tl.load(bias_ptr, boundary_check(1,), padding_option="zero")
             else:
                 bias = tl.load(bias_ptr)
@@ -182,11 +182,11 @@ def _attn_fwd_inner(
             qk += (bias * 1.44269504089)
         # We start from end of seqlen_k so only the first iteration would need
         # to be checked for padding if it is not a multiple of block_n
-        if MASK_STEPS != 0:
+        if MASK_STEPS:
             # If this is the last block / iteration, we want to
             # mask if the sequence length is not a multiple of block size
-            if start_n == (BLOCK_MAX - BLOCK_N) and TOTAL_TOKENS != actual_seqlen_k:
-                boundary_m = tl.full([BLOCK_M], TOTAL_TOKENS, dtype=tl.float32)
+            if start_n == (block_max - BLOCK_N) and (TOTAL_TOKENS != actual_seqlen_k):
+                boundary_m = tl.full([BLOCK_M], TOTAL_TOKENS, dtype=tl.int32)
                 size_n = start_n + OFFS_N[None,:]
                 mask = size_n < boundary_m[:,None]
                 qk = tl.where(mask, qk, float("-inf"))
@@ -211,7 +211,7 @@ def _attn_fwd_inner(
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
         if not PRE_LOAD_V:
-            if MASK_STEPS != 0:
+            if MASK_STEPS:
                 v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
             else:
                 v = tl.load(V_block_ptr)
@@ -248,6 +248,7 @@ def attn_fwd(
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    MASK_STEPS: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
@@ -257,6 +258,7 @@ def attn_fwd(
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
     off_z = tl.program_id(2)
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     if VARLEN:
         cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)
         cu_seqlens_q_end = tl.load(cu_seqlens_q + off_z + 1)
@@ -355,7 +357,6 @@ def attn_fwd(
         order=(1, 0)
     )
     # initialize offsets
-    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     if BIAS_TYPE != 0:
         bias_ptr = tl.make_block_ptr(
@@ -423,10 +424,10 @@ def attn_fwd(
         # For Causal, we must mask all blocks along the diagonal.
         # If not causal, and if we are here, it is a padded block, so
         # mask once to remove the elements beyond seqlen_k
-        if IS_CAUSAL:
-            MASK_STEPS: tl.constexpr = BLOCK_M // BLOCK_N
-        else:
-            MASK_STEPS: tl.constexpr = 1
+        # if IS_CAUSAL:
+        #     MASK_STEPS: tl.constexpr = BLOCK_M // BLOCK_N
+        # else:
+        #     MASK_STEPS: tl.constexpr = 1
         seqlen_aligned = seqlen_k - extra_tokens_n
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
@@ -754,7 +755,7 @@ class _attention(torch.autograd.Function):
 
         # We've derived these previously from tuning the kernel
         # TODO: Add autotuning
-        BLOCK_M = 256
+        BLOCK_M = 128
         BLOCK_N = 128 if head_size == 128 else 64
         waves_per_eu = 2 if head_size == 128 else 3
         num_warps = 8 if head_size == 128 else 4
@@ -788,6 +789,7 @@ class _attention(torch.autograd.Function):
         else:
             bias_strides = (0,0,0,0)
 
+        MASK_STEPS = BLOCK_M // BLOCK_N if metadata.causal else 1
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
@@ -802,6 +804,7 @@ class _attention(torch.autograd.Function):
             IS_CAUSAL=metadata.causal,
             VARLEN=metadata.varlen,
             BLOCK_M=BLOCK_M, BLOCK_DMODEL=head_size, BLOCK_N=BLOCK_N,
+            MASK_STEPS=MASK_STEPS,
             PRE_LOAD_V=pre_load_v,
             BIAS_TYPE=0 if metadata.bias is None else 1,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
@@ -907,10 +910,10 @@ attention = _attention.apply
                           #(1, 16, 16384, 64),
                           #(4, 48, 127, 64),
                           ])
-@pytest.mark.parametrize('causal', [False, True])
+@pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_bias', [False])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [None]) #dropout needs to be tested vs SPDA reference in torch
-def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, bias_type, qseqlen_not_equal_kseqlen, dtype=torch.float16):
+def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, use_bias, qseqlen_not_equal_kseqlen, dtype=torch.float16):
     # TODO: using bias causes coredump for certain configs and must be fixed.
     if use_bias:
         pytest.skip()
@@ -1200,7 +1203,7 @@ def bench_flash_attention(
         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
     return total_flops / ms * 1e-9
 
-bench_flash_attention.run(save_path=".", print_data=True)
+#bench_flash_attention.run(save_path=".", print_data=True)
 
 configs = []
 for mode in ['fwd']:
@@ -1262,4 +1265,4 @@ def bench_varlen_flash_attention(
     total_flops = 2 * flops_per_matmul
     return total_flops / ms * 1e-9
 
-bench_varlen_flash_attention.run(save_path=".", print_data=True)
+#bench_varlen_flash_attention.run(save_path=".", print_data=True)

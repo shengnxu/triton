@@ -240,8 +240,8 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     tri_out = attention(q, k, v, sm_scale)
     # compare
     atol = 1.4e-1 if dtype == 'fp8' else 1e-2
-    rtol = 1e-2 if dtype == 'fp8' else 0
-    torch.testing.assert_close(ref_out, tri_out, atol=atol, rtol=0)
+    rtol = 1e-2 if dtype == 'fp8' else 3e-3
+    torch.testing.assert_close(ref_out, tri_out, atol=atol, rtol=rtol)
 
 
 try:

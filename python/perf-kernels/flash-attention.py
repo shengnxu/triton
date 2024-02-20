@@ -157,7 +157,6 @@ def _attn_fwd_inner(
 ):
     # loop over k, v and update accumulator
     for start_n in range(BLOCK_MIN, BLOCK_MAX, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         if MASK_STEPS != 0:
@@ -227,7 +226,7 @@ def _attn_fwd_inner(
             bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i, K_block_ptr, V_block_ptr, encoded_softmax_block_ptr
+    return acc, l_i, m_i 
 
 @triton.jit
 def attn_fwd(
@@ -403,7 +402,7 @@ def attn_fwd(
     block_min = 0
     block_max = n_full_blocks * BLOCK_N
     if n_full_blocks > 0: 
-        acc, l_i, m_i, K_block_ptr, V_block_ptr, encoded_softmax_block_ptr = _attn_fwd_inner(
+        acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
             start_m, seqlen_k,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
@@ -429,7 +428,7 @@ def attn_fwd(
         else:
             MASK_STEPS: tl.constexpr = 1
         seqlen_aligned = seqlen_k - extra_tokens_n
-        acc, l_i, m_i, _, _, _ = _attn_fwd_inner(
+        acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
             start_m, seqlen_k,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,

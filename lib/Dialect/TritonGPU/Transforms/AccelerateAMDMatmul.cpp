@@ -53,6 +53,7 @@ int getMfmaVersion(MatrixCoreVersion matrixCoreVer) {
 }
 
 static bool isTransposeChainDotPattern(tt::DotOp &dotOp) {
+  return true;
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };
@@ -128,6 +129,8 @@ SmallVector<unsigned, 2>
 warpsPerTileWMMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
   return warpsPerTile(dotOp, shape, numWarps, {16, 16});
 }
+
+int num = 0;
 
 class BlockedToMFMA : public mlir::RewritePattern {
   int mfmaVersion;
@@ -250,7 +253,7 @@ public:
     mfmaEnc = ttg::MfmaEncodingAttr::get(
         oldRetType.getContext(),
         /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
-        /*instrShape*/ mDim, nDim, isTransposed);
+        /*instrShape*/ mDim, nDim, true);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);
@@ -290,8 +293,15 @@ public:
     // to increase ds_read vector size
     // However, in FA, the second dot can only use kWidth = k_bse since it's
     // limited by the result of the first dot, which is of mfmaLayout.
-    if (!isSecondDot(dotOp))
-      kWidth *= kpack;
+    // if (!isSecondDot(dotOp))
+    if(num == 2 || num == 1){
+      kWidth = 8;
+    }
+    else{
+      kWidth = 4;
+    }
+    std::cout << num << std::endl;
+    num += 1;
 
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),

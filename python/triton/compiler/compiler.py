@@ -124,6 +124,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
     # if optimize_epilogue:
     pm.add_tritongpu_optimize_epilogue_pass()
     pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
+    pm.add_cse_pass()
     pm.add_tritongpu_optimize_dot_operands_pass()
     if num_stages == 0 and is_hip() and target["matrix_core_version"] != 0:
         pm.add_tritongpu_stream_pipeline_pass()
@@ -170,6 +171,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
         pm.add_tritongpu_reorder_instructions_pass()
 
     pm.add_cse_pass()
+    pm.add_tritonamdgpu_reorder_instructions_pass()
     pm.add_symbol_dce_pass()
     if is_cuda and capability // 10 >= 9:
         pm.add_tritongpu_fence_insertion_pass()

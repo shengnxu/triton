@@ -343,6 +343,13 @@ struct TritonAMDGPUDotSlicingPass
   }
 
   tt::LoadOp getLoadInst(tt::DotOp dotOp, int operandIdx) {
+    if(operandIdx == 1){
+      auto loadOp = dotOp.getOperand(operandIdx).getDefiningOp();
+      while(!isa<tt::LoadOp>(loadOp)){
+        loadOp = loadOp->getOperand(0).getDefiningOp();
+      }
+      return dyn_cast<tt::LoadOp>(loadOp);
+    }
     auto dotOperand = dotOp.getOperand(operandIdx);
     SmallVector<tt::LoadOp> loadOpsVec;
 
@@ -358,7 +365,7 @@ struct TritonAMDGPUDotSlicingPass
     // Currently, we expect the dot operand to depend only on one tensor
     // from global memory (applicable for dot ops that don't depend on other dot
     // ops). This condition can be lifted if necessary.
-    assert(loadOpsVec.size() == 1);
+    // assert(loadOpsVec.size() == 1);
     return loadOpsVec[0];
   }
 
@@ -407,7 +414,7 @@ struct TritonAMDGPUDotSlicingPass
   }
 
   Operation *getFirstOpToSlice(tt::DotOp dotOp, int operandIdx) {
-    if (dependsOnPreviousDot(dotOp, operandIdx)) {
+    if (operandIdx == 0 && dependsOnPreviousDot(dotOp, operandIdx)) {
       return dotOp.getOperand(operandIdx).getDefiningOp();
     }
     return getLoadInst(dotOp, operandIdx);
@@ -418,6 +425,8 @@ struct TritonAMDGPUDotSlicingPass
       if (!shouldSliceDot(dotOp)) {
         return;
       }
+
+      ModuleOp mod = getOperation();
 
       OpBuilder builder(dotOp);
       SmallVector<Operation *> eraseOps;

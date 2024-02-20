@@ -111,6 +111,8 @@ warpsPerTileV3(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
       slices.end())
     return {(unsigned)numWarps, 1};
 
+  return {(unsigned)numWarps, 1};
+
   // For MMAv3, the smallest indivisible unit of warp shape is (4, 1).
   SmallVector<unsigned, 2> ret = {4, 1};
   SmallVector<int64_t, 2> shapePerWarp = {16, instrShape[1]};

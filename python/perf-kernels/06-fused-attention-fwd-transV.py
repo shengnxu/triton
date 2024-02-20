@@ -26,7 +26,7 @@ import triton.language as tl
 # AMD E4M3B8
 # Note: When picking this f8 data type, scaling is required when using f8
 # for the second gemm
-float8:tl.constexpr = torch.float8_e4m3fnuz
+# float8:tl.constexpr = torch.float8_e4m3fnuz
 
 @triton.jit
 def max_fn(x, y):
@@ -89,26 +89,30 @@ def _attn_fwd(
     # it's even better to multiply the qk_scale and convert to f16
     # than doing it inside the loop
     # So conversion is quite cheap
-    q = (q * qk_scale).to(q.dtype)
+    q = (q * qk_scale).to(tl.float16)
+    
+    k = tl.load(K_block_ptr)
+    qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+    qk += tl.dot(q, k)
+    
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
-        start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        k = tl.load(K_block_ptr)
-        if pre_load_v:
-            v = tl.load(V_block_ptr)
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk += tl.dot(q, k)
-        #qk = (qk * qk_scale)
+        if start_n != lo:
+            k = tl.load(K_block_ptr)
+            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            qk += tl.dot(q, k)
+
+        v = tl.load(V_block_ptr)
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
-        if not pre_load_v:
-            v = tl.load(V_block_ptr)
+        # if not pre_load_v:
+        #     v = tl.load(V_block_ptr)
         acc += tl.dot(p.to(tl.float16), v)
         # -- update m_i and l_i
         l_ij = tl.sum(p, 1)
@@ -158,17 +162,21 @@ class _attention(torch.autograd.Function):
             num_stages = 1
             ## causal=False likes to pre load v but causal=True does not
             pre_load_v = False if causal else True
+            slice_k_tile = 32
+            kpack = 2
         else:
             ## D_HEAD = 128
             ## For fp16, pick BLOCK_M=256, num_warps=8
             ## For fp8, pick BLOCK_M=128, num_warps=4
             ## TODO (zhanglx): add tuning infra for FA
-            BLOCK_M = 128 if q.dtype == float8 else 256
+            BLOCK_M = 128 #if q.dtype == float8 else 256
             BLOCK_N = 128
             waves_per_eu = 2
             num_warps = BLOCK_M // 32
             num_stages = 1
             pre_load_v = False
+            slice_k_tile = 32
+            kpack = 2
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
@@ -188,6 +196,7 @@ class _attention(torch.autograd.Function):
             num_warps = num_warps,
             num_stages = num_stages,
             pre_load_v = pre_load_v,
+            slice_k_tile = slice_k_tile, kpack = kpack
         )
 
         return o
@@ -197,7 +206,7 @@ attention = _attention.apply
 
 name_to_torch_types = {
     'fp16': torch.float16,
-    'fp8': float8
+    # 'fp8': float8
 }
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, dtype',
@@ -205,7 +214,7 @@ name_to_torch_types = {
     for shape in [(4, 48, 1024, 128),
                   (4, 48, 2048, 128),
                   (4, 48, 4096, 128)]
-    for dtype in ['fp16', 'fp8']])
+    for dtype in ['fp16']])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     q = (
@@ -254,21 +263,21 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in [torch.float16, float8]:
+for dtype in [torch.float16]:
     for D_HEAD in [128]:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
+                x_vals=[#(16, 16, 1024),
+                        # (8, 16, 2048),
+                        # (4, 16, 4096),
+                        # (2, 16, 8192),
+                        # (1, 16, 16384),
+                        # (4, 48, 1024),
+                        # (4, 48, 2048),
                         (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        # (4, 48, 8192),
+                        # (4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'],

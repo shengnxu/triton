@@ -6,7 +6,7 @@ on: push
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.python }}-manylinux_x86_64
-    runs-on: ubuntu-latest
+    runs-on: rocm
     strategy:
       matrix:
         python: ["cp37", "cp38", "cp39", "cp310", "cp311"]
@@ -98,7 +98,7 @@ jobs:
 
   upload_pypi:
     needs: build_wheels
-    runs-on: ubuntu-latest
+    runs-on: rocm
     # upload to PyPI on every tag starting with 'v'
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/pytorch-triton-rocm-v')
     # alternatively, to publish when a GitHub Release is created, use the following rule:

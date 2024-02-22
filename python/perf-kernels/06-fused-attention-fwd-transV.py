@@ -13,6 +13,7 @@ Extra Credits:
 
 import pytest
 import torch
+import math
 import sys
 
 import triton
@@ -30,23 +31,39 @@ from enum import Enum
 # for the second gemm
 # float8:tl.constexpr = torch.float8_e4m3fnuz
 
+# should use e4m3 for forward pass and e5m2 for backward pass
 USE_DTYPE = 2
 class Dtype:
-    float16 = 1
-    float8_e5m2fnuz = 2
-    float8_e4m3fnuz = 3
+    float16         = 1
+    float8_e4m3fnuz = 2
+    float8_e4m3fn   = 3
+    float8_e5m2fnuz = 4
+    float8_e5m2     = 5
 # set intended dtype and scaling factor if fp8
-TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-TORCH_HAS_FP8E4 = hasattr(torch, 'float8_e4m3fnuz')
-if USE_DTYPE == Dtype.float16 or (not TORCH_HAS_FP8E5 and not TORCH_HAS_FP8E4):
+TORCH_HAS_FP8E4FNUZ = hasattr(torch, 'float8_e4m3fnuz')
+TORCH_HAS_FP8E4FN = hasattr(torch, 'float8_e4m3fn')
+TORCH_HAS_FP8E5FNUZ = hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2')
+fp8_max_repr_val_dict = {}
+if TORCH_HAS_FP8E4FNUZ:
+    fp8_max_repr_val_dict[torch.float8_e4m3fnuz] = 240.0 
+if TORCH_HAS_FP8E4FN:
+    fp8_max_repr_val_dict[torch.float8_e4m3fn] = 448.0 
+if TORCH_HAS_FP8E5FNUZ:
+    fp8_max_repr_val_dict[torch.float8_e5m2fnuz] = 57344.0 
+if TORCH_HAS_FP8E5:
+    fp8_max_repr_val_dict[torch.float8_e5m2] = 57344.0 
+
+if USE_DTYPE == Dtype.float16:
     torch_dtype:tl.constexpr = torch.float16
-    fp8_scale = 1.0
-elif USE_DTYPE == Dtype.float8_e5m2fnuz:
-    float8:tl.constexpr = torch.float8_e5m2fnuz
-    fp8_scale = 57344.0
 elif USE_DTYPE == Dtype.float8_e4m3fnuz:
     float8:tl.constexpr = torch.float8_e4m3fnuz
-    fp8_scale = 448.0
+elif USE_DTYPE == Dtype.float8_e4m3fn:
+    float8:tl.constexpr = torch.float8_e4m3fn
+elif USE_DTYPE == Dtype.float8_e5m2fnuz:
+    float8:tl.constexpr = torch.float8_e5m2fnuz
+elif USE_DTYPE == Dtype.float8_e5m2:
+    float8:tl.constexpr = torch.float8_e5m2
 else:
     sys.exit("Specified datatype is not supported")
 
@@ -57,8 +74,10 @@ def max_fn(x, y):
 
 @triton.jit
 def _attn_fwd(
-    # Q, K, V, sm_scale, M, Out,
-    Q, K, V, sm_scale, q_scale, k_scale, v_scale, M, Out,
+    Q, K, V,
+    sm_scale, q_scale, k_scale, v_scale, s_scale, o_scale,
+    s_scale_global, o_scale_global,
+    M, Out,
     stride_qz, stride_qh, stride_qm, stride_qk,
     stride_kz, stride_kh, stride_kn, stride_kk,
     stride_vz, stride_vh, stride_vn, stride_vk,
@@ -116,63 +135,52 @@ def _attn_fwd(
     # if use_fp8, attention_scale (qk_scale) should be done after 1st gemm
     if not use_fp8:
         q = (q * qk_scale).to(q.dtype)
+    else:
+        descale_s = qk_scale / q_scale / k_scale
+        # descale_s = qk_scale 
+    s_scale_local = 0.0
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
         k = tl.load(K_block_ptr)
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-
-        ##### Scale + Dot + Descale #####
-        # Scale
-        if use_fp8:
-            k = (k * k_scale).to(k.dtype)
         if pre_load_v:
             v = tl.load(V_block_ptr)
-            if use_fp8:
-                v = (v * v_scale).to(v.dtype)
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            
+        ##### Dot + Descale #####
         # Dot
-        qk += tl.dot(q, k)
+        s = tl.dot(q, k)
         # Descale
-        if use_fp8:  # descale qk
-            qk = qk * qk_scale / q_scale / k_scale
-        #################################
-
+        if use_fp8:  # descale s
+            s *= descale_s
+        #########################
+        qk += s
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
-        # TODO: here is amax_s for next iteration
-        # we calculate for current iter for 1st one but for next iter
-        # use reduce kernel or atomic (entire tensor rather than each group)
-        if use_fp8:
-            s_scale0 = 1.0
-            s_scaleN = 1.0
-            if start_n == lo:
-                s_scale0 = fp8_scale / tl.max(tl.max(p, 1), 0)
-            else:
-                s_scaleN = fp8_scale / tl.max(tl.max(p, 1), 0)
+        s_scale_local = tl.maximum(s_scale_local, tl.max(tl.max(p, 1), 0))
+        # print("p:", p)
+        # TODO: calculate tensor_level amax for s_scale, i.e. s_scale1 = atomic(p.amax())
+        # if use_fp8:
+        #     s_scale_next = fp8_max_repr_val * tl.max(tl.max(p, 1), 0)
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
         if not pre_load_v:
             v = tl.load(V_block_ptr)
-            if use_fp8:
-                v = (v * v_scale).to(v.dtype)
 
         ##### Scale + Dot + Descale #####
         # Scale
-        if use_fp8:  # scale p and v
-            s_scale = s_scale0 if start_n == lo else s_scaleN
-            p = (p * s_scale).to(v.dtype)
-            v = (v * v_scale).to(v.dtype)
+        if use_fp8:
+            # TODO: choose which s_scale to use if s_scale1 is computed above
+            p = (p * s_scale).to(q.dtype)
         # Dot
         acc += tl.dot(p, v)
         # Descale
-        if use_fp8:  # descale p & acc
-            s_scale = s_scale0 if start_n == lo else s_scaleN
-            p = p / s_scale
-            acc = acc / s_scale / v_scale
+        if use_fp8:
+            p = p.to(tl.float32) / s_scale
         #################################
 
         # -- update m_i and l_i
@@ -182,7 +190,14 @@ def _attn_fwd(
         m_i = m_ij
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+    if use_fp8:
+        acc /= (s_scale * v_scale)
     acc = acc / l_i[:, None]
+    tl.atomic_max(s_scale_global, s_scale_local)
+    tl.atomic_max(o_scale_global, tl.max(acc))
+    # scale O
+    if use_fp8:
+        acc = (acc.to(tl.float32) * o_scale).to(q.dtype)
     # write back O
     O_block_ptr = tl.make_block_ptr(
         base=Out + qkv_offset,
@@ -201,7 +216,7 @@ empty = torch.empty(128, device="cuda")
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, sm_scale, q_scale, k_scale, v_scale):
+    def forward(ctx, q, k, v, sm_scale, q_scale, k_scale, v_scale, s_scale, o_scale):
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-2]
         assert Lq == Lk and Lk == Lv
@@ -213,6 +228,7 @@ class _attention(torch.autograd.Function):
             num_stages = 4 if Lk <= 64 else 3
             num_warps = 4 if Lk <= 64 else 8
 
+        print("Lk:", Lk)
         ## hardcoded best perf_configs for MI250
         if Lk == 64:
             ## D_HEAD = 64
@@ -239,9 +255,14 @@ class _attention(torch.autograd.Function):
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
+        s_scale_global = torch.zeros((1), dtype=torch.float32, device=q.device)
+        o_scale_global = torch.zeros((1), dtype=torch.float32, device=q.device)
 
         _attn_fwd[grid](
-            q, k, v, sm_scale, q_scale, k_scale, v_scale, M, o,
+            q, k, v, 
+            sm_scale, q_scale, k_scale, v_scale, s_scale, o_scale,
+            s_scale_global, o_scale_global,
+            M, o,
             q.stride(0), q.stride(1), q.stride(2), q.stride(3),
             k.stride(0), k.stride(1), k.stride(2), k.stride(3),
             v.stride(0), v.stride(1), v.stride(2), v.stride(3),
@@ -257,7 +278,8 @@ class _attention(torch.autograd.Function):
             pre_load_v = pre_load_v,
             use_fp8=use_fp8,
         )
-
+        print("s_scale_global:", s_scale_global.item())
+        print("o_scale_global:", o_scale_global.item())
         return o
 
 
@@ -268,14 +290,27 @@ name_to_torch_types = {
     'fp8': float8
 }
 
+def _tensor_amax(tensor: torch.Tensor) -> float:
+    return tensor.abs().float().amax().item()
+
+def _quantization_factor(fp8_max_repr_val: float, tensor_amax: float) -> float:
+    ret = fp8_max_repr_val / tensor_amax
+    ret = math.pow(2, math.floor(math.log2(ret)))
+    return ret
+
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, dtype',
 [ (*shape, dtype)
-    for shape in [(4, 48, 1024, 128),
+    for shape in [
+                  (4, 48, 1024, 128),
                   (4, 48, 2048, 128),
-                  (4, 48, 4096, 128)]
+                  (4, 48, 4096, 128),
+                  ]
     for dtype in ['fp8']])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
+    torch_dtype = name_to_torch_types[dtype]
+    fp8_max_repr_val = fp8_max_repr_val_dict[torch_dtype]
+
     q = (
         torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda")
         .normal_(mean=0., std=0.5)
@@ -293,19 +328,41 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     )
     sm_scale = 0.5
     dout = torch.randn_like(q, dtype=torch.float16)
+
     # reference implementation
     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
     p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
-    p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v.transpose(2,3))
+    p = torch.softmax(p.float(), dim=-1)
+    ref_out = torch.matmul(p.half(), v.transpose(2,3).half())
+    
     # triton implementation
-    q_scale = fp8_scale * (q.float().amax()).item()
-    k_scale = fp8_scale * (k.float().amax()).item()
-    v_scale = fp8_scale * (v.float().amax()).item()
-    q = q.to(name_to_torch_types[dtype])
-    k = k.to(name_to_torch_types[dtype])
-    v = v.to(name_to_torch_types[dtype])
-    tri_out = attention(q, k, v, sm_scale, q_scale, k_scale, v_scale)
+    s_scale = _quantization_factor(fp8_max_repr_val, 1.0)
+    o_scale = _quantization_factor(fp8_max_repr_val, _tensor_amax(ref_out))
+    q_scale = _quantization_factor(fp8_max_repr_val, _tensor_amax(q))
+    k_scale = _quantization_factor(fp8_max_repr_val, _tensor_amax(k))
+    v_scale = _quantization_factor(fp8_max_repr_val, _tensor_amax(v))
+    # s_scale = fp8_max_repr_val / 1.0
+    # o_scale = fp8_max_repr_val / _tensor_amax(ref_out)
+    # q_scale = fp8_max_repr_val / _tensor_amax(q)
+    # k_scale = fp8_max_repr_val / _tensor_amax(k)
+    # v_scale = fp8_max_repr_val / _tensor_amax(v)
+    print("fp8_max_repr_val:", fp8_max_repr_val)
+    print("_tensor_amax(s):", _tensor_amax(p), "_tensor_amax(o):", _tensor_amax(ref_out), "_tensor_amax(q):", _tensor_amax(q), "_tensor_amax(k):", _tensor_amax(k), "_tensor_amax(v):", _tensor_amax(v))
+    print("s_scale:", s_scale, "o_scale:", o_scale, "q_scale:", q_scale, "k_scale:", k_scale, "v_scale:", v_scale)
+    # scale and cast qkv to fp8
+    q = (q.float() * q_scale).to(torch_dtype)
+    k = (k.float() * k_scale).to(torch_dtype)
+    v = (v.float() * v_scale).to(torch_dtype)
+    # q = q.to(torch_dtype)
+    # k = k.to(torch_dtype)
+    # v = v.to(torch_dtype)
+    assert torch.sum(torch.isnan(q)) == 0, "There is Nan in q"
+    assert torch.sum(torch.isnan(k)) == 0, "There is Nan in k"
+    assert torch.sum(torch.isnan(v)) == 0, "There is Nan in v"
+    tri_out = attention(q, k, v, sm_scale, q_scale, k_scale, v_scale, s_scale, o_scale)
+    assert torch.sum(torch.isnan(tri_out)) == 0, \
+        f"There is {torch.sum(torch.isnan(tri_out))}/{torch.numel(tri_out)} Nan in output"
+    tri_out = tri_out.float() / o_scale
     # compare
     atol = 1.4e-1 if dtype == 'fp8' else 1e-2
     rtol = 1e-2 if dtype == 'fp8' else 0
@@ -357,21 +414,27 @@ for dtype in [float8]:
 
 @triton.testing.perf_report(configs)
 def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, device="cuda"):
-    warmup = 25
-    rep = 100
-    q = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda", requires_grad=True)
-    k = torch.randn((BATCH, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda", requires_grad=True)
-    v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=torch.float16, device="cuda", requires_grad=True)
-    # use .item() because only python float, rather than pytorch float tensor can be recoginized as fp32 in triton
-    q_scale = fp8_scale / (q.float().amax()).item()
-    k_scale = fp8_scale / (k.float().amax()).item()
-    v_scale = fp8_scale / (v.float().amax()).item()
+    warmup = 0
+    rep = 1
+    q = torch.ones((BATCH, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda", requires_grad=True)
+    k = torch.ones((BATCH, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda", requires_grad=True)
+    v = torch.ones((BATCH, H, D_HEAD, N_CTX), dtype=torch.float16, device="cuda", requires_grad=True)
     sm_scale = 1.3
-    # TODO: scale qkv here first and then type casting
-    q = q.to(dtype)
-    k = k.to(dtype)
-    v = v.to(dtype)
-    fn = lambda: attention(q, k, v, sm_scale, q_scale, k_scale, v_scale)
+    # pseudo s_scale & o_scale
+    p = torch.matmul(q.half(), k.transpose(2, 3).half()) * sm_scale
+    p = torch.softmax(p.float(), dim=-1)
+    ref_out = torch.matmul(p.half(), v.transpose(2,3).half())
+    s_scale = p.abs().float().amax().item()
+    o_scale = ref_out.abs().float().amax().item()
+    # use .item() because only python float, rather than pytorch float tensor can be recoginized as fp32 in triton
+    q_scale = fp8_max_repr_val / q.abs().float().amax().item()
+    k_scale = fp8_max_repr_val / k.abs().float().amax().item()
+    v_scale = fp8_max_repr_val / v.abs().float().amax().item()
+    # scale and cast qkv to fp8
+    q = (q.float() * q_scale).to(dtype)
+    k = (k.float() * k_scale).to(dtype)
+    # v = (v.float() * v_scale).to(dtype)
+    fn = lambda: attention(q, k, v, sm_scale, q_scale, k_scale, v_scale, s_scale, o_scale)
     ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     flops_per_matmul = 2. * BATCH * H * N_CTX * N_CTX * D_HEAD
     total_flops = 2 * flops_per_matmul

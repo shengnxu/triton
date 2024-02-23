@@ -111,7 +111,9 @@ def _attn_fwd(
     if not use_fp8:
         q = (q * qk_scale).to(q.dtype)
     else:
-        descale_s = qk_scale / q_scale / k_scale
+        qk_descale = qk_scale / q_scale / k_scale
+        p_descale = 1 / s_scale
+        acc_descale = 1 / s_scale / v_scale
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
@@ -128,7 +130,7 @@ def _attn_fwd(
         qk += tl.dot(q, k)
         # Descale
         if use_fp8:  # descale s
-            qk *= descale_s
+            qk *= qk_descale
         #########################
         # qk += s
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -153,7 +155,7 @@ def _attn_fwd(
         acc += tl.dot(p, v)
         # Descale
         if use_fp8:
-            p = p.to(tl.float32) / s_scale
+            p = p.to(tl.float32) * p_descale
         #################################
 
         # -- update m_i and l_i
@@ -165,7 +167,7 @@ def _attn_fwd(
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
     # descale acc out of loop to be more efficient and correct
     if use_fp8:
-        acc /= (s_scale * v_scale)
+        acc *= acc_descale
     acc = acc / l_i[:, None]
     # scale O
     if use_fp8:

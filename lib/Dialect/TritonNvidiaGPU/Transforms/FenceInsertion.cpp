@@ -40,7 +40,7 @@ public:
     // Only insert fences for compute capability 9.0
     if (computeCapability < 90)
       return;
-    if (::triton::tools::getBoolEnv("DISABLE_MMA_V3"))
+    if (mlir::triton::tools::getBoolEnv("DISABLE_MMA_V3"))
       return;
     ModuleOp mod = getOperation();
     mod.walk([&](Operation *op) {
@@ -91,7 +91,7 @@ private:
       // suport ForOp only
       if (auto forOp = dyn_cast<scf::ForOp>(argOwner)) {
         // prologue
-        auto iterOperands = forOp.getIterOperands();
+        auto iterOperands = forOp.getInitArgs();
         if (argNum == 0)
           return false;
         if (dependOnSharedEncOperand(iterOperands[argNum - 1]))

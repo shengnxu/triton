@@ -55,6 +55,7 @@ class Package(NamedTuple):
     lib_flag: str
     syspath_var_name: str
 
+
 # pybind11
 
 
@@ -62,6 +63,7 @@ def get_pybind11_package_info():
     name = "pybind11-2.11.1"
     url = "https://github.com/pybind/pybind11/archive/refs/tags/v2.11.1.tar.gz"
     return Package("pybind11", name, url, "PYBIND11_INCLUDE_DIR", "", "PYBIND11_SYSPATH")
+
 
 # llvm
 
@@ -73,23 +75,22 @@ def get_llvm_package_info():
     if arch == 'aarch64':
         arch = 'arm64'
     if system == "Darwin":
-        system_suffix = "apple-darwin"
         arch = platform.machine()
+        if arch == "x86_64":
+            arch = "x64"
+        system_suffix = f"macos-{arch}"
     elif system == "Linux":
+        # TODO: arm64
         vglibc = tuple(map(int, platform.libc_ver()[1].split('.')))
         vglibc = vglibc[0] * 100 + vglibc[1]
-        linux_suffix = 'ubuntu-18.04' if vglibc > 217 else 'centos-7'
-        system_suffix = f"linux-gnu-{linux_suffix}"
+        system_suffix = 'ubuntu-x64' if vglibc > 217 else 'centos-x64'
     else:
         return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
-    use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
-    release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    name = f'llvm+mlir-17.0.0-{arch}-{system_suffix}-{release_suffix}'
-    version = "llvm-17.0.0-c5dede880d17"
-    url = f"https://github.com/ptillet/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
-    # FIXME: remove the following once github.com/ptillet/triton-llvm-releases has arm64 llvm releases
-    if arch == 'arm64' and 'linux' in system_suffix:
-        url = f"https://github.com/acollins3/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
+    # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
+    # release_suffix = "assert" if use_assert_enabled_llvm else "release"
+    rev = "49af6502"
+    name = f"llvm-{rev}-{system_suffix}"
+    url = f"https://tritonlang.blob.core.windows.net/llvm-builds/{name}.tar.gz"
     return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
 
 
@@ -122,10 +123,13 @@ def get_thirdparty_packages(triton_cache_path):
             thirdparty_cmake_args.append(f"-D{p.lib_flag}={package_dir}/lib")
     return thirdparty_cmake_args
 
+
 # ---- package data ---
 
 
-def download_and_copy(src_path, version, url_func):
+def download_and_copy(src_path, variable, version, url_func):
+    if variable in os.environ:
+        return
     base_dir = os.path.dirname(__file__)
     arch = platform.machine()
     if arch == "x86_64":
@@ -151,7 +155,7 @@ def download_and_copy(src_path, version, url_func):
             src_path = os.path.join(temp_dir, src_path)
             os.makedirs(os.path.split(dst_path)[0], exist_ok=True)
             shutil.copy(src_path, dst_path)
-    return dst_suffix
+
 
 # ---- cmake extension ----
 
@@ -170,18 +174,21 @@ def get_cmake_dir():
 
 
 class CMakeClean(clean):
+
     def initialize_options(self):
         clean.initialize_options(self)
         self.build_temp = get_cmake_dir()
 
 
 class CMakeBuildPy(build_py):
+
     def run(self) -> None:
         self.run_command('build_ext')
         return super().run()
 
 
 class CMakeExtension(Extension):
+
     def __init__(self, name, path, sourcedir=""):
         Extension.__init__(self, name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
@@ -204,7 +211,8 @@ class CMakeBuild(build_ext):
         try:
             out = subprocess.check_output(["cmake", "--version"])
         except OSError:
-            raise RuntimeError("CMake must be installed to build the following extensions: " + ", ".join(e.name for e in self.extensions))
+            raise RuntimeError("CMake must be installed to build the following extensions: " +
+                               ", ".join(e.name for e in self.extensions))
 
         match = re.search(r"version\s*(?P<major>\d+)\.(?P<minor>\d+)([\d.]+)?", out.decode())
         cmake_major, cmake_minor = int(match.group("major")), int(match.group("minor"))
@@ -231,8 +239,10 @@ class CMakeBuild(build_ext):
         # python directories
         python_include_dir = sysconfig.get_path("platinclude")
         cmake_args = [
-            "-G", "Ninja",  # Ninja is much faster than make
-            "-DCMAKE_MAKE_PROGRAM=" + ninja_dir,  # Pass explicit path to ninja otherwise cmake may cache a temporary path
+            "-G",
+            "Ninja",  # Ninja is much faster than make
+            "-DCMAKE_MAKE_PROGRAM=" +
+            ninja_dir,  # Pass explicit path to ninja otherwise cmake may cache a temporary path
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             "-DLLVM_ENABLE_WERROR=ON",
             "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + extdir,
@@ -266,12 +276,28 @@ class CMakeBuild(build_ext):
             build_args += ['-j' + max_jobs]
 
         if check_env_flag("TRITON_BUILD_WITH_CLANG_LLD"):
-            cmake_args += ["-DCMAKE_C_COMPILER=clang",
-                           "-DCMAKE_CXX_COMPILER=clang++",
-                           "-DCMAKE_LINKER=lld",
-                           "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
-                           "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
-                           "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld"]
+            cmake_args += [
+                "-DCMAKE_C_COMPILER=clang",
+                "-DCMAKE_CXX_COMPILER=clang++",
+                "-DCMAKE_LINKER=lld",
+                "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld",
+                "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
+                "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
+            ]
+
+        # Note that asan doesn't work with binaries that use the GPU, so this is
+        # only useful for tools like triton-opt that don't run code on the GPU.
+        #
+        # I tried and gave up getting msan to work.  It seems that libstdc++'s
+        # std::string does not play nicely with clang's msan (I didn't try
+        # gcc's).  I was unable to configure clang to ignore the error, and I
+        # also wasn't able to get libc++ to work, but that doesn't mean it's
+        # impossible. :)
+        if check_env_flag("TRITON_BUILD_WITH_ASAN"):
+            cmake_args += [
+                "-DCMAKE_C_FLAGS=-fsanitize=address",
+                "-DCMAKE_CXX_FLAGS=-fsanitize=address",
+            ]
 
         if check_env_flag("TRITON_BUILD_WITH_CCACHE"):
             cmake_args += [
@@ -285,9 +311,27 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
 
 
-download_and_copy(src_path='bin/ptxas', version='12.1.105', url_func=lambda arch, version: f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvcc-{version}-0.tar.bz2")
-download_and_copy(src_path='bin/cuobjdump', version='12.1.111', url_func=lambda arch, version: f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-cuobjdump-{version}-0.tar.bz2")
-download_and_copy(src_path='bin/nvdisasm', version='12.1.105', url_func=lambda arch, version: f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvdisasm-{version}-0.tar.bz2")
+download_and_copy(
+    src_path="bin/ptxas",
+    variable="TRITON_PTXAS_PATH",
+    version="12.1.105",
+    url_func=lambda arch, version:
+    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvcc-{version}-0.tar.bz2",
+)
+download_and_copy(
+    src_path="bin/cuobjdump",
+    variable="TRITON_CUOBJDUMP_PATH",
+    version="12.1.111",
+    url_func=lambda arch, version:
+    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-cuobjdump-{version}-0.tar.bz2",
+)
+download_and_copy(
+    src_path="bin/nvdisasm",
+    variable="TRITON_NVDISASM_PATH",
+    version="12.1.105",
+    url_func=lambda arch, version:
+    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvdisasm-{version}-0.tar.bz2",
+)
 
 setup(
     name="triton",
@@ -311,9 +355,7 @@ setup(
         "triton/tools",
     ],
     long_description_content_type="text/markdown",
-    install_requires=[
-        "filelock"
-    ],
+    install_requires=["filelock"],
     include_package_data=True,
     ext_modules=[CMakeExtension("triton", "triton/_C/")],
     cmdclass={"build_ext": CMakeBuild, "build_py": CMakeBuildPy, "clean": CMakeClean},

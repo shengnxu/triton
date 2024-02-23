@@ -38,19 +38,6 @@ namespace ttng = ::mlir::triton::nvidia_gpu;
 
 typedef DenseMap<Operation *, triton::MakeTensorPtrOp> TensorPtrMapT;
 
-namespace mlir {
-namespace LLVM {
-
-// Helper function for using printf in LLVM conversion.
-void vprintf(StringRef msg, ValueRange args,
-             ConversionPatternRewriter &rewriter);
-
-void vprintf_array(Value thread, ArrayRef<Value> arr, std::string info,
-                   std::string elem_repr, ConversionPatternRewriter &builder);
-
-} // namespace LLVM
-} // namespace mlir
-
 // FuncOpConversion/FuncOpConversionBase is borrowed from
 // https://github.com/llvm/llvm-project/blob/fae656b2dd80246c3c6f01e9c77c49560368752c/mlir/lib/Conversion/FuncToLLVM/FuncToLLVM.cpp#L276
 // since it is not exposed on header files in mlir v14
@@ -146,7 +133,8 @@ protected:
     }
     auto newFuncOp = rewriter.create<LLVM::LLVMFuncOp>(
         funcOp.getLoc(), funcOp.getName(), llvmType, linkage,
-        /*dsoLocal*/ false, LLVM::CConv::C, attributes);
+        /*dsoLocal*/ false, LLVM::CConv::C, /*comdat=*/SymbolRefAttr{},
+        attributes);
     rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
                                 newFuncOp.end());
     if (failed(rewriter.convertRegionTypes(&newFuncOp.getBody(), *typeConverter,
@@ -192,10 +180,16 @@ public:
   // Key: {layout, shape, withCTAOffset}
   struct IndexCacheInfo {
     DenseMap<IndexCacheKeyT, SmallVector<Value>, CacheKeyDenseMapInfo>
-        *baseIndexCache;
+        *baseIndexCache = nullptr;
     DenseMap<IndexCacheKeyT, SmallVector<SmallVector<Value>>,
-             CacheKeyDenseMapInfo> *indexCache;
-    OpBuilder::InsertPoint *indexInsertPoint;
+             CacheKeyDenseMapInfo> *indexCache = nullptr;
+    OpBuilder::InsertPoint *indexInsertPoint = nullptr;
+  };
+
+  struct PrintFormatting
+  {
+    Value formatStrValue;
+    size_t formatStrSize;
   };
 
   explicit ConvertTritonGPUOpToLLVMPatternBase(
@@ -361,8 +355,13 @@ public:
     unsigned numElemsPerSwizzlingRow =
         swizzlingByteWidth * 8 / resElemTy.getIntOrFloatBitWidth();
     Value numElemsPerSwizzlingRowVal = i32_val(numElemsPerSwizzlingRow);
-    unsigned leadingDimOffset =
-        numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+    unsigned leadingDimOffset;
+    if (outOrder.size() == 2) {
+      leadingDimOffset = numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+    } else {
+      leadingDimOffset = numElemsPerSwizzlingRow;
+    }
+
     Value leadingDimOffsetVal = i32_val(leadingDimOffset);
     // Return values
     DenseMap<unsigned, Value> ret;
@@ -374,9 +373,15 @@ public:
       // Extract multi dimensional index for current element
       auto idx = srcIndices[elemIdx];
       Value idxCol = idx[outOrder[0]]; // contiguous dimension
-      Value idxRow = idx[outOrder[1]]; // discontiguous dimension
+      Value idxRow, strideRow;
+      if (outOrder.size() == 2) {
+        idxRow = idx[outOrder[1]]; // discontiguous dimension
+        strideRow = srcStrides[outOrder[1]];
+      } else {
+        idxRow = i32_val(0);
+        strideRow = i32_val(0);
+      }
       Value strideCol = srcStrides[outOrder[0]];
-      Value strideRow = srcStrides[outOrder[1]];
       // compute phase = (row // perPhase) % maxPhase
       Value phase = urem(udiv(idxRow, i32_val(perPhase)), i32_val(maxPhase));
       // extract dynamic/static offset for immediate offsetting
@@ -428,10 +433,16 @@ public:
       offset = add(offset, add(rowOff, mul(colOff, strideCol)));
       Value currPtr = gep(dstPtrTy, dstPtrBase, offset);
       // compute immediate offset
-      Value immedateOff =
-          add(mul(i32_val(immedateOffRow), srcStrides[outOrder[1]]),
-              i32_val(immedateOffCol));
-      ret[elemIdx] = gep(dstPtrTy, currPtr, immedateOff);
+      Value immediateOff;
+      if (outOrder.size() == 2) {
+        immediateOff =
+            add(mul(i32_val(immedateOffRow), srcStrides[outOrder[1]]),
+                i32_val(immedateOffCol));
+      } else {
+        immediateOff = i32_val(immedateOffCol);
+      }
+
+      ret[elemIdx] = gep(dstPtrTy, currPtr, immediateOff);
     }
     return ret;
   }
@@ -494,7 +505,7 @@ public:
                                 ConversionPatternRewriter &rewriter) const {
     auto srcTy = src.getType().cast<RankedTensorType>();
     auto srcShape = srcTy.getShape();
-    assert(srcShape.size() == 2 &&
+    assert((srcShape.size() == 1 || srcShape.size() == 2) &&
            "Unexpected rank of storeDistributedToShared");
     auto dstTy = dst.getType().cast<RankedTensorType>();
     auto srcDistributedLayout = srcTy.getEncoding();
@@ -520,8 +531,12 @@ public:
     auto wordTy = vec_ty(elemTy, minVec);
     Value word;
 
-    SmallVector<Value> srcStrides = {dstStrides[0], dstStrides[1]};
-    SmallVector<Value> offsetVals = {i32_val(0), i32_val(0)};
+    SmallVector<Value> srcStrides;
+    SmallVector<Value> offsetVals;
+    for (int i = 0; i < srcShape.size(); i++) {
+      srcStrides.push_back(dstStrides[i]);
+      offsetVals.push_back(i32_val(0));
+    }
     SharedMemoryObject smemObj(smemBase, srcStrides, offsetVals);
 
     DenseMap<unsigned, Value> sharedPtrs =
@@ -757,17 +772,22 @@ public:
   void emitMfmaOffsetForCTA(const MfmaEncodingAttr &mfmaLayout,
                             SmallVector<SmallVector<unsigned>> &offsets,
                             unsigned ctaOffsetX, unsigned ctaOffsetY) const {
-    auto nonKDim = mfmaLayout.getNonKDim();
+    auto mDim = mfmaLayout.getMDim();
+    auto nDim = mfmaLayout.getNDim();
+    assert((mDim == nDim && (mDim == 32 || mDim == 16 || mDim == 4)) ||
+           (mDim == 64 && nDim == 4) || (mDim == 4 && nDim == 64));
     // MFMA output tile consists of repeated "dot operand B" layout groups along
     // row axis. This variable defines number of these groups.
-    const unsigned numGroups = (nonKDim == 32 ? 4 : 1);
+    DenseMap<int, int> groups{{4, 1}, {16, 1}, {32, 4}};
+    unsigned numGroups = groups.at(std::min(mDim, nDim));
+
     const unsigned elemsPerThreadPerGroup = 4;
     auto warpSize = getWarpSize(mfmaLayout);
     assert(warpSize == 64);
     auto shapePerCta = getShapePerCTATile(mfmaLayout);
     for (unsigned block = 0; block < numGroups; block++) {
       unsigned rowOrColOffset =
-          block * elemsPerThreadPerGroup * warpSize / nonKDim;
+          block * elemsPerThreadPerGroup * warpSize / std::min(mDim, nDim);
       for (unsigned elem = 0; elem < elemsPerThreadPerGroup; elem++) {
         if (mfmaLayout.getIsTransposed()) {
           offsets.push_back(
@@ -813,7 +833,7 @@ public:
             emitIndicesForDistributedLayout(loc, b, slice, type, withCTAOffset);
       } else {
         llvm_unreachable(
-            "emitIndices for layouts other than blocked & slice not "
+            "emitIndices for layouts other than blocked, mma, and slice not "
             "implemented yet");
       }
       if (cache) {
@@ -1174,30 +1194,38 @@ private:
     assert(_warpsPerCTA.size() == 2);
     SmallVector<Value> warpsPerCTA = {i32_val(_warpsPerCTA[0]),
                                       i32_val(_warpsPerCTA[1])};
-    int nonKDim = mfmaLayout.getNonKDim();
+    unsigned mDim = mfmaLayout.getMDim();
+    unsigned nDim = mfmaLayout.getNDim();
+    assert((mDim == nDim && (mDim == 32 || mDim == 16 || mDim == 4)) ||
+           (mDim == 64 && nDim == 4) || (mDim == 4 && nDim == 64));
 
     Value threadId = getThreadId(rewriter, loc);
     Value warpSize = i32_val(triton::gpu::getWarpSize(mfmaLayout));
-    Value laneId = urem(threadId, warpSize);
+    Value effectiveWarpSize = warpSize;
+    if (mDim == 4 && nDim == 4) {
+      const int uniqueValuesPerWarp = 4;
+      effectiveWarpSize = i32_val(uniqueValuesPerWarp);
+    }
+    Value laneId = urem(threadId, effectiveWarpSize);
 
     Value warpId = udiv(threadId, warpSize);
     Value warpId0 =
-        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / nonKDim));
+        urem(urem(warpId, warpsPerCTA[0]), i32_val(shape[0] / mDim));
     Value warpId1 = urem(urem(udiv(warpId, warpsPerCTA[0]), warpsPerCTA[1]),
-                         i32_val(shape[1] / nonKDim));
+                         i32_val(shape[1] / nDim));
 
-    Value offWarp0 = mul(warpId0, i32_val(nonKDim));
-    Value offWarp1 = mul(warpId1, i32_val(nonKDim));
+    Value offWarp0 = mul(warpId0, i32_val(mDim));
+    Value offWarp1 = mul(warpId1, i32_val(nDim));
 
     SmallVector<Value> multiDimBase(2);
     if (mfmaLayout.getIsTransposed()) {
       multiDimBase[1] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp1);
-      multiDimBase[0] = add(urem(laneId, i32_val(nonKDim)), offWarp0);
+          add(mul(i32_val(4), udiv(laneId, i32_val(mDim))), offWarp1);
+      multiDimBase[0] = add(urem(laneId, i32_val(nDim)), offWarp0);
     } else {
       multiDimBase[0] =
-          add(mul(i32_val(4), udiv(laneId, i32_val(nonKDim))), offWarp0);
-      multiDimBase[1] = add(urem(laneId, i32_val(nonKDim)), offWarp1);
+          add(mul(i32_val(4), udiv(laneId, i32_val(nDim))), offWarp0);
+      multiDimBase[1] = add(urem(laneId, i32_val(nDim)), offWarp1);
     }
     return multiDimBase;
   }
@@ -1211,10 +1239,15 @@ private:
     auto warpsPerCTA = mfmaLayout.getWarpsPerCTA();
 
     SmallVector<unsigned> numWarpsPerDim(2);
+    unsigned mDim = mfmaLayout.getMDim();
+    unsigned nDim = mfmaLayout.getNDim();
+    assert((mDim == nDim && (mDim == 32 || mDim == 16 || mDim == 4)) ||
+           (mDim == 64 && nDim == 4) || (mDim == 4 && nDim == 64));
+    unsigned tileShape[] = {mDim, nDim};
     for (unsigned d = 0; d < 2; ++d) {
       unsigned inPerCTA = std::min<unsigned>(tensorShape[d], shapePerCTA[d]);
       unsigned inPerWarp = ceil<unsigned>(inPerCTA, warpsPerCTA[d]);
-      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, mfmaLayout.getNonKDim());
+      numWarpsPerDim[d] = ceil<unsigned>(inPerWarp, tileShape[d]);
     }
 
     for (unsigned i = 0; i < numWarpsPerDim[0]; ++i) {
@@ -1303,15 +1336,31 @@ private:
   }
 
 protected:
+  // Returns a Value for the format string, which you can reuse.
+  PrintFormatting llPrintfHIP(mlir::Location loc, mlir::ModuleOp moduleOp, StringRef msg,
+                   ValueRange args, ConversionPatternRewriter &rewriter,
+                   bool stderr = false) const {
+    assert(!msg.empty() && "printf with empty string not supported");
+    PrintFormatting formatting;
+    llvm::SmallString<32> msgNewline(msg);
+    msgNewline.push_back('\n');
+    msgNewline.push_back('\0');
+    formatting.formatStrValue =
+        LLVM::addStringToModule(loc, rewriter, "printfFormat_", msgNewline);
+    formatting.formatStrSize = msgNewline.size_in_bytes();
+    llPrintfHIP(loc, moduleOp, formatting, args, rewriter, stderr);
+    return formatting;
+  }
+
   // The code is borrowed from https://reviews.llvm.org/D110448
   // from GPUPrintfOpToHIPLowering::matchAndRewrite().
-  void llPrintfHIP(mlir::Location loc, mlir::ModuleOp moduleOp, StringRef msg,
+  void llPrintfHIP(mlir::Location loc, mlir::ModuleOp moduleOp, PrintFormatting formatting,
                    ValueRange args, ConversionPatternRewriter &rewriter,
                    bool stderr = false) const {
 
     auto typeConverter = getTypeConverter();
     mlir::Type llvmI8 = typeConverter->convertType(rewriter.getI8Type());
-    mlir::Type i8Ptr = typeConverter->getPointerType(llvmI8);
+    auto ptrType = LLVM::LLVMPointerType::get(rewriter.getContext());
     mlir::Type llvmI32 = typeConverter->convertType(rewriter.getI32Type());
     mlir::Type llvmI64 = typeConverter->convertType(rewriter.getI64Type());
 
@@ -1333,7 +1382,7 @@ protected:
         moduleOp, loc, rewriter, "__ockl_printf_append_string_n",
         LLVM::LLVMFunctionType::get(
             llvmI64,
-            {llvmI64, i8Ptr, /*length (bytes)*/ llvmI64, /*isLast*/ llvmI32}));
+            {llvmI64, {ptrType}, /*length (bytes)*/ llvmI64, /*isLast*/ llvmI32}));
 
     /// Start the printf hostcall
     Value zeroI64 = rewriter.create<LLVM::ConstantOp>(loc, llvmI64, 0);
@@ -1344,19 +1393,11 @@ protected:
     // Get a unique global name for the format.
     SmallString<16> stringConstName = getUniqueFormatGlobalName(moduleOp);
 
-    SmallString<32> formatString(msg);
-    formatString.push_back('\n'); // Triton adds CR for each print.
-    formatString.push_back('\0'); // Null terminate for C
-    size_t formatStringSize = formatString.size_in_bytes();
-
-    Value prefixString =
-        LLVM::addStringToModule(loc, rewriter, "printfFormat_", formatString);
-
     auto prefixPtrType = ocklAppendStringN.getArgumentTypes()[1];
-    prefixString = bitcast(prefixString, prefixPtrType);
+    Value prefixString = bitcast(formatting.formatStrValue, prefixPtrType);
 
     Value stringLen =
-        rewriter.create<LLVM::ConstantOp>(loc, llvmI64, formatStringSize);
+        rewriter.create<LLVM::ConstantOp>(loc, llvmI64, formatting.formatStrSize);
 
     Value oneI32 = rewriter.create<LLVM::ConstantOp>(loc, llvmI32, 1);
     Value zeroI32 = rewriter.create<LLVM::ConstantOp>(loc, llvmI32, 0);
@@ -1382,12 +1423,11 @@ protected:
         Value arg = args[i];
         if (auto floatType = arg.getType().dyn_cast<FloatType>()) {
           if (!floatType.isF64())
-            arg = rewriter.create<LLVM::FPExtOp>(
-                loc, typeConverter->convertType(rewriter.getF64Type()), arg);
-          arg = rewriter.create<LLVM::BitcastOp>(loc, llvmI64, arg);
+            arg = fpext(typeConverter->convertType(rewriter.getF64Type()), arg);
+          arg = bitcast(arg, llvmI64);
         }
         if (arg.getType().getIntOrFloatBitWidth() != 64)
-          arg = rewriter.create<LLVM::ZExtOp>(loc, llvmI64, arg);
+           arg = zext(llvmI64, arg);
 
         arguments.push_back(arg);
       }
@@ -1398,7 +1438,7 @@ protected:
 
       auto isLast = (bound == nArgs) ? oneI32 : zeroI32;
       arguments.push_back(isLast);
-      auto call = rewriter.create<LLVM::CallOp>(loc, ocklAppendArgs, arguments);
+      auto call = call(ocklAppendArgs, arguments);
       printfDesc = call.getResult();
     }
   }

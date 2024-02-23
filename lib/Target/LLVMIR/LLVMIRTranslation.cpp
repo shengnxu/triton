@@ -199,6 +199,14 @@ static void amendLLVMFunc(llvm::Function *func, const NVVMMetadata &metadata,
         func->addFnAttr("amdgpu-waves-per-eu", std::to_string(wavesPerEU));
       func->addFnAttr("denormal-fp-math-f32", "preserve-sign");
       func->addFnAttr("amdgpu-unsafe-fp-atomics", "true");
+      for (unsigned I = 0; I < func->arg_size(); ++I) {
+        Argument &Arg = *func->getArg(I);
+        // Check for incompatible attributes.
+        if (Arg.hasByRefAttr() || Arg.hasNestAttr())
+          break;
+
+        Arg.addAttr(llvm::Attribute::InReg);
+      }
     } break;
     }
   }
@@ -288,7 +296,7 @@ static std::map<std::string, std::string> getExternLibs(mlir::ModuleOp module) {
   if (!funcs.empty()) {
     static const std::string libdevice = "libdevice";
     // first search for environmental path
-    std::string env_path = ::triton::tools::getenv("TRITON_LIBDEVICE_PATH");
+    std::string env_path = mlir::triton::tools::getenv("TRITON_LIBDEVICE_PATH");
     if (!env_path.empty()) {
       externLibs.try_emplace(libdevice, env_path);
       return externLibs;
@@ -450,7 +458,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
       /*shouldPrintBeforePass=*/nullptr,
       /*shouldPrintAfterPass=*/
       [](mlir::Pass *pass, mlir::Operation *) {
-        return ::triton::tools::getBoolEnv("MLIR_ENABLE_DUMP");
+        return mlir::triton::tools::getBoolEnv("MLIR_ENABLE_DUMP");
       },
       /*printModuleScope=*/false,
       /*printAfterOnlyOnChange=*/true,
@@ -472,7 +480,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
   pm.addPass(mlir::createConvertSCFToCFPass());
   pm.addPass(createConvertControlFlowToLLVMPass());
 #endif
-  if (!::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO"))
+  if (!mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO"))
     pm.addPass(mlir::createLLVMDIScopePass());
 
   if (failed(pm.run(module))) {
@@ -486,7 +494,7 @@ translateTritonGPUToLLVMIR(llvm::LLVMContext *llvmContext,
     return nullptr;
   }
 
-  if (::triton::tools::getBoolEnv("LLVM_IR_ENABLE_DUMP")) {
+  if (mlir::triton::tools::getBoolEnv("LLVM_IR_ENABLE_DUMP")) {
     std::string mod_string;
     std::unique_ptr<llvm::raw_string_ostream> ir_ss(
         new llvm::raw_string_ostream(mod_string));

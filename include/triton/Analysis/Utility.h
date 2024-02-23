@@ -54,6 +54,8 @@ public:
 
   SmallVector<unsigned> getScratchConfig();
 
+  SmallVector<unsigned> getOrderWithAxisAtBeginning();
+
   unsigned getScratchSizeInBytes();
 
   bool isSupportedLayout();
@@ -124,7 +126,7 @@ bool maybeSharedAllocationOp(Operation *op);
 bool maybeAliasOp(Operation *op);
 
 #ifdef USE_ROCM
-bool supportMFMA(triton::DotOp op);
+bool supportWMMA(triton::DotOp op);
 #endif
 
 bool supportMMA(triton::DotOp op, int version);
@@ -133,9 +135,9 @@ bool supportMMA(Value value, int version);
 
 bool isSingleValue(Value value);
 
-bool isMmaToDotShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy);
+bool isMmaToDotShortcut(RankedTensorType srcTy, RankedTensorType dstTy);
 
-bool isMmaToMmaShortcut(RankedTensorType &srcTy, RankedTensorType &dstTy);
+bool isMmaToMmaShortcut(RankedTensorType srcTy, RankedTensorType dstTy);
 
 // Return true if the src and dst layout match.
 bool matchMmaV3AndDotOperandLayout(RankedTensorType srcTy,

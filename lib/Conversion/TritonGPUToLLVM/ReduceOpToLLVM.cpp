@@ -419,16 +419,15 @@ private:
         getMultiDimWarpId(helper, warpId, loc, rewriter);
     Value warpIdAxis = multiDimWarpId[axis];
 
-    if (!helper.isReductionOnLayoutFastAxis()) {
-      std::reverse(order.begin(), order.end());
-    }
+    auto smemOrder = helper.getOrderWithAxisAtBeginning();
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
       SmallVector<Value> acc = it.second;
 
       SmallVector<Value> writeIdx = indices[key];
       writeIdx[axis] = warpIdAxis;
-      Value writeOffset = linearize(rewriter, loc, writeIdx, smemShape, order);
+      Value writeOffset =
+          linearize(rewriter, loc, writeIdx, smemShape, smemOrder);
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
         auto elemPtrTy = getElementPtrType(op, i);
         Value writePtr = gep(elemPtrTy, smemBases[i], writeOffset);
@@ -450,7 +449,8 @@ private:
     Location loc = op.getLoc();
 
     Value threadId = getThreadId(rewriter, loc);
-    Value warpSize = i32_val(32);
+    unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
+    Value warpSize = i32_val(wavefront_size);
     Value laneId = urem(threadId, warpSize);
     Value zero = i32_val(0);
 
@@ -482,8 +482,6 @@ private:
           icmp_eq(laneIdModSizeInterWarps, zero);
       Value pred = and_(threadIsNeeded, laneIdModSizeInterWarpsIsZero);
 
-      auto srcLayout = helper.getSrcLayout();
-      unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
 
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
 #if USE_ROCM
@@ -513,10 +511,7 @@ private:
     Location loc = op.getLoc();
     auto srcLayout = helper.getSrcLayout();
     auto axis = op.getAxis();
-    auto order = getOrder(srcLayout);
-    if (!helper.isReductionOnLayoutFastAxis()) {
-      std::reverse(order.begin(), order.end());
-    }
+    auto smemOrder = helper.getOrderWithAxisAtBeginning();
     SmallVector<Value> results(op.getNumOperands());
     for (unsigned i = 0; i < op.getNumOperands(); ++i) {
       if (auto resultTy =
@@ -532,7 +527,7 @@ private:
           SmallVector<Value> readIdx = resultIndices[j];
           readIdx.insert(readIdx.begin() + op.getAxis(), i32_val(0));
           Value readOffset =
-              linearize(rewriter, loc, readIdx, smemShape, order);
+              linearize(rewriter, loc, readIdx, smemShape, smemOrder);
           Value readPtr =
               gep(getElementPtrType(op, i), smemBases[i], readOffset);
           resultVals[j] = load(readPtr);

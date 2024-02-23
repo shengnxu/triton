@@ -48,6 +48,18 @@ def max_fn(x, y):
     return tl.math.max(x, y)
 
 
+# @triton.autotune(
+#    configs=[
+#        triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=4),
+#        triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'pre_load_v': False}, num_stages=1, num_warps=8),
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': True}, num_stages=1, num_warps=4), # d64-False
+#        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
+#        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 3, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
+#    ],
+#    key=['Z', 'H', 'N_CTX', 'BLOCK_DMODEL'],
+# )
+
 @triton.jit
 def _attn_fwd(
     Q, K, V,
@@ -362,12 +374,15 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in ['fp16', 'float8_e4m3fnuz', 'float8_e5m2', 'float8_e5m2fnuz']:
+for dtype in ['fp16', 'float8_e4m3fnuz']:
+# for dtype in ['float8_e4m3fnuz']:
     for D_HEAD in [128]:
+    # for D_HEAD in [64, 128]:  # Phantom Config
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
+                x_vals=[
+                        (16, 16, 1024),
                         (8, 16, 2048),
                         (4, 16, 4096),
                         (2, 16, 8192),
@@ -377,6 +392,15 @@ for dtype in ['fp16', 'float8_e4m3fnuz', 'float8_e5m2', 'float8_e5m2fnuz']:
                         (4, 48, 4096),
                         (4, 48, 8192),
                         (4, 48, 16384),
+                        # Phantom Config
+                        # (8, 4, 2048),
+                        # (16, 4, 2048),
+                        # (32, 4, 2048),
+                        # (64, 4, 2048),
+                        # (8, 4, 4096),
+                        # (16, 4, 4096),
+                        # (32, 4, 4096),
+                        # (64, 4, 4096),
                         ],
                 line_arg='provider',
                 line_vals=['triton'],
@@ -403,7 +427,8 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, devi
     v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=torch.float16, device="cuda", requires_grad=True)
     sm_scale = 1.3
     if use_fp8:
-        # pseudo s_scale & o_scale
+        # pseudo s_scale & o_scale. 
+        # can't calculate them from reference pytorch code, otherwise taking too much memory
         s_scale = fp8_max_repr_val / 1.0
         o_scale = fp8_max_repr_val / 1.0
         # s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
@@ -422,6 +447,7 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, devi
     ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     flops_per_matmul = 2. * BATCH * H * N_CTX * N_CTX * D_HEAD
     total_flops = 2 * flops_per_matmul
+    # print(_attn_fwd.get_best_config())
     return total_flops / ms * 1e-9
 
 

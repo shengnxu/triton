@@ -198,6 +198,18 @@ bool ReduceOpHelper::isSupportedLayout() {
   return false;
 }
 
+StringRef ReduceOpHelper::getLoadDefaultValue() const {
+    if (isa<arith::AddIOp>(op) or isa<arith::OrIOp>(op) or isa<arith::XOrIOp>(op))
+      return "zero";
+    else if (isa<arith::AndIOp>(op))
+      return "one";
+    else if (isa<arith::MinSIOp>(op) or isa<arith::MinUIOp>(op))
+      return "max";
+    else if (isa<arith::MaxSIOp>(op) or isa<arith::MaxUIOp>(op))
+      return "min";
+    return "max";
+}
+
 unsigned ScanLoweringHelper::getAxisNumElementsPerThread() {
   return getEncoding().getSizePerThread()[getAxis()];
 }

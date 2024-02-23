@@ -256,19 +256,19 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  // store(val, ptr);
+  store(val, ptr);
 
-  auto ty = val.getType();
+  // auto ty = val.getType();
 
-  auto val_ty = vec_ty(ty, 1);
-  Value vec_val = undef(val_ty);
-  vec_val = insert_element(val_ty, vec_val, val, i32_val(0));
+  // auto val_ty = vec_ty(ty, 1);
+  // Value vec_val = undef(val_ty);
+  // vec_val = insert_element(val_ty, vec_val, val, i32_val(0));
 
-  auto vec_ty = vec_ty(i1_ty, 1);
-  Value vec_pred = undef(vec_ty);
-  vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
+  // auto vec_ty = vec_ty(i1_ty, 1);
+  // Value vec_pred = undef(vec_ty);
+  // vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
 
-  rewriter.create<LLVM::MaskedStoreOp>(loc, vec_val, ptr, vec_pred, 0);
+  // rewriter.create<LLVM::MaskedStoreOp>(loc, vec_val, ptr, vec_pred, 4);
   return val;
 #else
   MLIRContext *ctx = rewriter.getContext();
@@ -284,46 +284,57 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 #endif
 }
 
+template<class T>
+T getVal(const std::string& val) {
+  return T(0);
+  if (val == "max") {
+    return std::numeric_limits<T>::max();
+  } else if (val == "min") {
+    return std::numeric_limits<T>::min();
+  } else if (val == "zero") {
+    return T(0);
+  } else if (val == "one") {
+    return T(1);
+  }
+  return T(0);
+}
+
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
-                 Value pred) {
+                 Value pred, StringRef val1) {
 #if USE_ROCM
+  return load(ptr);
   auto ptrTy = ptr.getType().cast<LLVMPointerType>();
   assert(ptrTy.getAddressSpace() == 3 && "Invalid addr space for loadShared");
   auto elemTy = ptrTy.getElementType();
 
-  SmallVector<Type> vts;
-  vts.push_back(elemTy);
-  // auto vec_type = vec_ty(Type, 1);
-  // Value vec_ts = undef(vec_type);
-  // vec_ts = insert_element(vec_type, vec_ts, elemTy, i32_val(0));
+  std::string val = std::string(val1);
+  auto loaded = rewriter.create<scf::IfOp>(loc, pred,
+    [&](OpBuilder& builder, Location loc) {
+      auto loadVal = load(elemTy, ptr);
+      builder.create<scf::YieldOp>(loc, ValueRange(loadVal));
+    },
+    [&](OpBuilder& builder, Location loc) {
+      Value initVal;
+      if (elemTy.isF16()) {
+        float fVal = getVal<float>(val);
+        initVal = f16_val(fVal);
+      } else if (elemTy.isInteger(32)) {
+        int ival = getVal<int>(val);
+        initVal = i32_val(ival);
+      } else if (elemTy.isInteger(64)) {
+        int64_t i64Val = getVal<int64_t>(val);
+        initVal = int_val(64, i64Val);
+      } else if (elemTy.isF64()) {
+        double dVal = getVal<double>(val);
+        initVal = f64_val(dVal);
+      } else {
+        float fVal = getVal<float>(val);
+        initVal = f32_val(fVal);
+      }
+      builder.create<mlir::scf::YieldOp>(loc, ValueRange({initVal}));
+    });
+  return loaded->getResult(0);
 
-  auto vec_ty = vec_ty(i1_ty, 1);
-  Value vec_pred = undef(vec_ty);
-  vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
-
-  auto v_ty = vec_ty(i1_ty, 1);
-  Value vec_p = undef(v_ty);
-  vec_p = insert_element(v_ty, vec_p, int_val(1, 0), i32_val(0));
-
-
-
-  return rewriter.create<LLVM::MaskedLoadOp>(loc, vts, ptr, vec_pred, vec_p, 0);
-
-  // return load(ptr);
-  // auto loaded = rewriter.create<scf::IfOp>(loc, pred,
-  //   [&](OpBuilder& builder, Location loc) {
-  //     auto loadVal = load(ptr);
-  //     // auto loadVal = builder.create<LLVM::LoadOp>(loc, ptr);
-  //     builder.create<scf::YieldOp>(loc, ValueRange(loadVal));
-  //   },
-  //   [&](OpBuilder& builder, Location loc) {
-  //     // Value zeroConst;
-  //     auto loadVal = f32_val(0.0);
-  //     // auto loadVal = load(ptr);
-  //     builder.create<mlir::scf::YieldOp>(loc, ValueRange({loadVal}));
-  //   }
-  //   );
-  // return loaded->getResult(0);
 #else
   MLIRContext *ctx = rewriter.getContext();
   auto ptrTy = ptr.getType().cast<LLVMPointerType>();

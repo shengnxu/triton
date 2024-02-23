@@ -340,7 +340,7 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred);
 
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
-                 Value pred);
+                 Value pred, StringRef val);
 
 Value shflSync(Location loc, ConversionPatternRewriter &rewriter, Value val,
                int i);

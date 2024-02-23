@@ -447,6 +447,7 @@ private:
     unsigned elems = product<unsigned>(smemShape);
     unsigned sizeInterWarps = helper.getInterWarpSizeWithUniqueData();
     Location loc = op.getLoc();
+    StringRef loadDefaultVal = helper.getLoadDefaultValue();
 
     Value threadId = getThreadId(rewriter, loc);
     unsigned wavefront_size = triton::gpu::getWarpSize(srcLayout);
@@ -466,7 +467,7 @@ private:
       for (unsigned i = 0; i < op.getNumOperands(); ++i) {
         auto elemPtrTy = getElementPtrType(op, i);
         Value readPtr = gep(elemPtrTy, smemBases[i], readOffset);
-        acc[i] = loadShared(rewriter, loc, readPtr, threadIsNeeded);
+        acc[i] = loadShared(rewriter, loc, readPtr, threadIsNeeded, loadDefaultVal);
       }
       warpReduce(rewriter, loc, acc, op, sizeInterWarps, 1 /* interleave */);
       // only the first thread in each sizeInterWarps is writing

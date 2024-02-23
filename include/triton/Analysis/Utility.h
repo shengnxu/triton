@@ -62,6 +62,8 @@ public:
 
   bool isReduceWithinCTA();
 
+  StringRef getLoadDefaultValue() const;
+
   unsigned getAxis() { return axis; }
 
 private:

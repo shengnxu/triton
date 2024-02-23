@@ -1549,8 +1549,8 @@ def get_reduced_dtype(dtype_str, op):
 def test_reduce1d(op, dtype_str, shape, num_ctas, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
 
-    if is_hip():
-        pytest.skip("test_reduce1d not supported on HIP")
+    # if is_hip():
+    #     pytest.skip("test_reduce1d not supported on HIP")
 
     # triton kernel
     @triton.jit
@@ -1643,8 +1643,8 @@ reduce_configs3 = [(op, 'float32', shape, axis)
 def test_reduce(op, dtype_str, shape, axis, num_ctas, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
 
-    if is_hip():
-        pytest.skip("test_reduce2d not supported on HIP")
+    # if is_hip():
+    #     pytest.skip("test_reduce2d not supported on HIP")
     # triton kernel
 
     @triton.jit

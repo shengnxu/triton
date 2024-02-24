@@ -9,7 +9,7 @@ on:
 
 jobs:
   Integration-Tests:
-    runs-on: "arc-runner-set-gpu"
+    runs-on: "arc-runner-set"
 
     container:
       image: ubuntu:22.04

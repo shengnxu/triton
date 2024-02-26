@@ -571,7 +571,6 @@ class _attention(torch.autograd.Function):
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H, split_k)
 
-        num_warps = 4
         split_size = (Mk + split_k - 1) // split_k
         use_seq_len = seq_len is not None
 
@@ -601,7 +600,7 @@ class _attention(torch.autograd.Function):
             BLOCK_DMODEL=Lk,
             BOUNDS_CHECKS_N=(split_size % BLOCK_N) > 0 or use_seq_len,
             USE_SEQ_LEN=use_seq_len,
-            num_warps=num_warps,
+            num_warps=1,
             num_stages=1,
             PACKED_PER_VAL=PACKED_PER_VAL,
             N_GROUPS=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1,

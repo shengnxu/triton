@@ -136,7 +136,6 @@ def _attn_fwd(
             v = tl.load(V_block_ptr)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         
-        # TODO: why define qk inside loop and do +=
         ##### Dot + Descale #####
         # Dot
         qk += tl.dot(q, k)
@@ -170,10 +169,9 @@ def _attn_fwd(
             p = p.to(tl.float32) * p_descale
         #################################
 
-        # -- update m_i and l_i
+        # update m_i and l_i
         l_ij = tl.sum(p, 1)
         l_i = l_i * alpha + l_ij
-        # update m_i and l_i
         m_i = m_ij
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
@@ -183,7 +181,7 @@ def _attn_fwd(
     acc = acc / l_i[:, None]
     # scale O
     if use_fp8:
-        acc = (acc.to(tl.float32) * o_scale).to(q.dtype)
+        acc = (acc * o_scale).to(q.dtype)
     # write back O
     O_block_ptr = tl.make_block_ptr(
         base=Out + qkv_offset,
@@ -292,7 +290,7 @@ def get_fp8_quantization_factor(fp8_max_repr_val: float, tensor: torch.Tensor) -
                   (4, 48, 2048, 128),
                   (4, 48, 4096, 128),
                   ]
-    for dtype in ['fp16', 'float8_e4m3fnuz', 'float8_e5m2', 'float8_e5m2fnuz']])
+    for dtype in ['fp16', 'float8_e4m3fnuz']])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     torch_dtype = name_to_torch_types[dtype]

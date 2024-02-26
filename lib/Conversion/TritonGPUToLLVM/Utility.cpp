@@ -256,19 +256,19 @@ Value linearize(ConversionPatternRewriter &rewriter, Location loc,
 Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                   Value val, Value pred) {
 #if USE_ROCM
-  store(val, ptr);
+  // store(val, ptr);
 
-  // auto ty = val.getType();
+  auto ty = val.getType();
 
-  // auto val_ty = vec_ty(ty, 1);
-  // Value vec_val = undef(val_ty);
-  // vec_val = insert_element(val_ty, vec_val, val, i32_val(0));
+  auto val_ty = vec_ty(ty, 1);
+  Value vec_val = undef(val_ty);
+  vec_val = insert_element(val_ty, vec_val, val, i32_val(0));
 
-  // auto vec_ty = vec_ty(i1_ty, 1);
-  // Value vec_pred = undef(vec_ty);
-  // vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
+  auto vec_ty = vec_ty(i1_ty, 1);
+  Value vec_pred = undef(vec_ty);
+  vec_pred = insert_element(vec_ty, vec_pred, pred, i32_val(0));
 
-  // rewriter.create<LLVM::MaskedStoreOp>(loc, vec_val, ptr, vec_pred, 4);
+  rewriter.create<LLVM::MaskedStoreOp>(loc, vec_val, ptr, vec_pred, 4);
   return val;
 #else
   MLIRContext *ctx = rewriter.getContext();
@@ -286,11 +286,12 @@ Value storeShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
 
 template<class T>
 T getVal(const std::string& val) {
-  return T(0);
   if (val == "max") {
-    return std::numeric_limits<T>::max();
+    return T(100000);
+    // return std::numeric_limits<T>::max();
   } else if (val == "min") {
-    return std::numeric_limits<T>::min();
+    return T(-100000);
+    // return std::numeric_limits<T>::min();
   } else if (val == "zero") {
     return T(0);
   } else if (val == "one") {
@@ -302,7 +303,7 @@ T getVal(const std::string& val) {
 Value loadShared(ConversionPatternRewriter &rewriter, Location loc, Value ptr,
                  Value pred, StringRef val1) {
 #if USE_ROCM
-  return load(ptr);
+  // return load(ptr);
   auto ptrTy = ptr.getType().cast<LLVMPointerType>();
   assert(ptrTy.getAddressSpace() == 3 && "Invalid addr space for loadShared");
   auto elemTy = ptrTy.getElementType();

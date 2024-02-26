@@ -122,7 +122,6 @@ private:
     unsigned srcElems = getTotalElemsPerThread(types[0]);
     SmallVector<SmallVector<Value>> srcValues(srcElems);
     llvm::outs() << "srcElems = " << srcElems << "\n";
-    llvm::outs() << "op = " << op << "\n";
     llvm::outs() << "getNumOperands = " << op.getNumOperands() << "\n";
     for (unsigned i = 0; i < op.getNumOperands(); ++i) {
       auto values = getTypeConverter()->unpackLLElements(loc, operands[i],
@@ -143,7 +142,6 @@ private:
     unsigned elems = product<unsigned>(smemShape);
     // indices will store the index of the op operands in descending order
     // of their bitwidths
-    llvm::outs() << "numOperands = " << op.getNumOperands() << "\n";
     std::vector<unsigned> indices(op.getNumOperands());
     std::iota(indices.begin(), indices.end(), 0);
     std::sort(indices.begin(), indices.end(), [&](unsigned i, unsigned j) {
@@ -320,10 +318,8 @@ private:
                     ConversionPatternRewriter &rewriter) const {
     triton::ReduceOp op = helper.getOperation();
     unsigned sizeIntraWarps = helper.getIntraWarpSizeWithUniqueData();
-    llvm::outs() << "sizeInraWarps = " << sizeIntraWarps << "\n";
     unsigned threadOffsetOnReductionAxis =
         helper.getThreadOffsetOnReductionAxis();
-    llvm::outs() << "threadOffsetOnReductionAxis = " << threadOffsetOnReductionAxis << "\n";
     for (auto it : accs) {
       const SmallVector<unsigned> &key = it.first;
       SmallVector<Value> &acc = accs[key];

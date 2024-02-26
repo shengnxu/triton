@@ -62,7 +62,7 @@ public:
 
   bool isReduceWithinCTA();
 
-  StringRef getLoadDefaultValue() const;
+  StringRef getLoadDefaultValue();
 
   unsigned getAxis() { return axis; }
 

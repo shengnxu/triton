@@ -52,26 +52,51 @@ int getMfmaVersion(MatrixCoreVersion matrixCoreVer) {
   return 0;
 }
 
-SmallVector<unsigned, 2>
-warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
-             SmallVector<int64_t, 2> shapePerWarp) {
-  // TODO: needs to be updated with appropriate shapePerWarp etc.
+static bool isTransposeChainDotPattern(tt::DotOp &dotOp) {
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };
   mlir::ForwardSliceOptions fwdOpt;
   fwdOpt.filter = filter;
+  mlir::SetVector<mlir::Operation*> fwdSlices;
+  mlir::getForwardSlice(static_cast<mlir::Operation*>(dotOp), &fwdSlices, fwdOpt);
+  for (Operation *op : fwdSlices) {
+    // ensure output of the first dot is the operand 0 of the second dot
+    if (isa<tt::DotOp>(op) && (op != dotOp)) {
+      auto dOp = dyn_cast<tt::DotOp>(op);
+      auto oper0 = dOp.getOperand(0).getDefiningOp();
+      if(std::find(fwdSlices.begin(), fwdSlices.end(), oper0) != fwdSlices.end()) {
+        return true;
+      }
+    }
+  }
+
   mlir::BackwardSliceOptions bwdOpt;
   bwdOpt.omitBlockArguments = true;
   bwdOpt.filter = filter;
-  auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
-  for (Operation *op : slices)
-    if (isa<tt::DotOp>(op) && (op != dotOp))
-      return {(unsigned)numWarps, 1};
+  mlir::SetVector<mlir::Operation*> bwdSlices;
+  // search backward of the operand 0 of the dot 
+  mlir::Operation* oper0 = dotOp.getOperand(0).getDefiningOp();
+  mlir::getBackwardSlice(oper0, &bwdSlices, bwdOpt);
+  for (Operation *op : bwdSlices) {
+    if (isa<tt::DotOp>(op) && (op != dotOp)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+SmallVector<unsigned, 2>
+warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
+             SmallVector<int64_t, 2> shapePerWarp) {
+  // TODO: needs to be updated with appropriate shapePerWarp etc.
+  if (isTransposeChainDotPattern(dotOp)) {
+    return {(unsigned)numWarps, 1};
+  }
 
   SmallVector<int64_t, 2> tensorShape = {shape[0], shape[1]};
   SmallVector<unsigned, 2> ret = {1, 1};
-
   do {
     if (ret[0] * ret[1] >= numWarps)
       break;
@@ -106,27 +131,22 @@ warpsPerTileWMMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
 
 class BlockedToMFMA : public mlir::RewritePattern {
   int mfmaVersion;
+  int kpack;
   int enforcedNonKDim;
 
 public:
-  BlockedToMFMA(mlir::MLIRContext *context, int mfmaVersion, int nonKDim)
+  BlockedToMFMA(mlir::MLIRContext *context, int mfmaVersion, int nonKDim,
+                int kpack)
       : mlir::RewritePattern(tt::DotOp::getOperationName(), 2, context),
-        mfmaVersion(mfmaVersion), enforcedNonKDim(nonKDim) {}
+        mfmaVersion(mfmaVersion), enforcedNonKDim(nonKDim), kpack(kpack) {}
 
-  bool isChainDot(tt::DotOp &dotOp) const {
-    auto filter = [&dotOp](Operation *op) {
-      return op->getParentRegion() == dotOp->getParentRegion();
-    };
-    mlir::ForwardSliceOptions fwdOpt;
-    fwdOpt.filter = filter;
-    mlir::BackwardSliceOptions bwdOpt;
-    bwdOpt.omitBlockArguments = true;
-    bwdOpt.filter = filter;
-    auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
-    for (Operation *op : slices) {
-      if (isa<tt::DotOp>(op) && (op != dotOp))
-        return true;
-    }
+  bool isSecondDot(tt::DotOp &dotOp) const {
+    SetVector<Operation *> slices;
+    mlir::getBackwardSlice(dotOp.getResult(), &slices);
+    if (llvm::find_if(slices, [](Operation *op) {
+          return isa<tt::DotOp>(op);
+        }) != slices.end())
+      return true;
     return false;
   }
 
@@ -202,9 +222,6 @@ public:
         !oldRetType.getEncoding().isa<ttg::BlockedEncodingAttr>())
       return failure();
 
-    if (!supportMFMA(dotOp))
-      return failure();
-
     auto CTALayout = ttg::getCTALayout(oldRetType.getEncoding());
     assert(CTALayout.getCTAsPerCGA().size() == 2);
     assert(CTALayout.getCTAsPerCGA()[0] == 1);
@@ -229,7 +246,7 @@ public:
     auto warpsPerTile =
         warpsPerTileMFMA(dotOp, retShape, numWarps, {mDim, nDim});
 
-    bool isTransposed = isChainDot(dotOp);
+    bool isTransposed = isTransposeChainDotPattern(dotOp);
     mfmaEnc = ttg::MfmaEncodingAttr::get(
         oldRetType.getContext(),
         /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
@@ -253,8 +270,8 @@ public:
                          .cast<ttg::BlockedEncodingAttr>()
                          .getOrder();
 
-    // kWidth is a number of consecutive elements per one instruction per one
-    // thread
+    // kWidth is initialized as k_base, which is the number of elements hold by
+    // one thread per mfma instruction
     auto kWidth = -1;
     // in mfma 32x32 case argument matrix groups elements in 2 groups
     // in mfma 16x16 case argument matrix groups elements in 4 groups
@@ -268,6 +285,14 @@ public:
     if (mDim == 4 && nDim == 64 || mDim == 64 && nDim == 4)
       kWidth = kDim;
     assert(kWidth != -1);
+
+    // We want to extend kWidth by kpack (kpack=1 means no extension)
+    // to increase ds_read vector size
+    // However, in FA, the second dot can only use kWidth = k_bse since it's
+    // limited by the result of the first dot, which is of mfmaLayout.
+    if (!isSecondDot(dotOp))
+      kWidth *= kpack;
+
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
         ttg::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc, kWidth));
@@ -362,11 +387,11 @@ class TritonAMDGPUAccelerateMatmulPass
           TritonAMDGPUAccelerateMatmulPass> {
 public:
   TritonAMDGPUAccelerateMatmulPass() = default;
-  TritonAMDGPUAccelerateMatmulPass(StringRef archGen,
-                                   int matrixInstructionSize,
-                                   bool enableWmmaTransform) {
+  TritonAMDGPUAccelerateMatmulPass(StringRef archGen, int matrixInstructionSize,
+                                   int kpack, bool enableWmmaTransform) {
     this->archGenerationName = archGen.data();
     this->matrixInstructionSize = matrixInstructionSize;
+    this->kpack = kpack;
     this->enableWmmaTransform = enableWmmaTransform;
   }
   void runOnOperation() override {
@@ -379,7 +404,7 @@ public:
         MatrixCoreVersion::CDNA_MFMA2 == matrixCoreVer ||
         MatrixCoreVersion::CDNA_MFMA3 == matrixCoreVer) {
       patterns.add<::BlockedToMFMA>(context, getMfmaVersion(matrixCoreVer),
-                                    matrixInstructionSize);
+                                    matrixInstructionSize, kpack);
     } else if (MatrixCoreVersion::RDNA_WMMA == matrixCoreVer &&
                enableWmmaTransform) {
       patterns.add<::BlockedToWMMA>(context);
@@ -390,10 +415,9 @@ public:
   }
 };
 
-std::unique_ptr<Pass>
-mlir::createTritonAMDGPUAccelerateMatmulPass(std::string archGen,
-                                             int matrixInstructionSize,
-                                             bool enableWmmaTransform) {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUAccelerateMatmulPass(
+    std::string archGen, int matrixInstructionSize, int kpack,
+    bool enableWmmaTransform) {
   return std::make_unique<TritonAMDGPUAccelerateMatmulPass>(
-      archGen, matrixInstructionSize, enableWmmaTransform);
+      archGen, matrixInstructionSize, kpack, enableWmmaTransform);
 }

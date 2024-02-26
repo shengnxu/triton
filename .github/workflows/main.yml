@@ -9,11 +9,11 @@ on:
 
 jobs:
   Integration-Tests:
-    runs-on: "arc-test-runner"
+    runs-on: "arc-test-gpu-runner-docker"
 
     container:
-      image: ubuntu:22.04
-      options: --user root
+      image: rocm/rocm-terminal:latest
+      options: --device=/dev/kfd --device=/dev/dri --security-opt seccomp=unconfined --group-add video --user root
 
     steps:
       - name: Checkout

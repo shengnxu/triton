@@ -42,7 +42,6 @@ jobs:
           python3 -m pip install --no-build-isolation -vvv '.[tests]'
   Integration-Tests-AMD:
     if: (github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    needs: Runner-Preparation
     timeout-minutes: 30
 
     runs-on: ${{ matrix.runner }}

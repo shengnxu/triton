@@ -15,55 +15,135 @@ jobs:
       image: rocm/rocm-terminal:latest
       options: --device=/dev/kfd --device=/dev/dri --security-opt seccomp=unconfined --group-add video --user root
 
-    steps:
+       steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Clear cache
         run: |
           rm -rf ~/.triton
-
       - name: Update PATH
         run: |
           echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
-
-      - name: Prerequisite
+      - name: Check pre-commit
         run: |
-          apt update
-          apt install -y libpython3-dev python3-pip git wget
-          # get rocm related utilities
-          wget https://repo.radeon.com/amdgpu-install/5.5/ubuntu/jammy/amdgpu-install_5.5.50500-1_all.deb
-          apt-get install -y ./amdgpu-install_5.5.50500-1_all.deb
-          amdgpu-install -y --usecase=rocm --no-dkms
-          # remove unused packages to free some disk space
-          cp /opt/rocm/llvm/bin/ld.lld .
-          apt purge -y rocblas rocm-llvm
-          mkdir -p /opt/rocm/llvm/bin
-          mv ld.lld /opt/rocm/llvm/bin/ld.lld
-          # install pytorch
-          pip3 install torch==2.0.1 --index-url https://download.pytorch.org/whl/rocm5.4.2
-          # uninstall system triton to eliminate conflicts with testing version
-          pip3 uninstall -y pytorch-triton-rocm
-
+          python3 -m pip install --upgrade pre-commit
+          python3 -m pre_commit run --all-files --verbose
       - name: Install Triton
         run: |
+          export TRITON_CODEGEN_TRITON_SHARED=1
+          git submodule update --init --recursive
           cd python
-          pip3 install ninja
-          # Install in system, because need to override system triton. Otherwise lit tests will use wrong version
-          DEBUG=TRUE TRITON_USE_ROCM=TRUE TRITON_USE_ASSERT_ENABLED_LLVM=TRUE python3 -m pip install --no-build-isolation -vvv -e .
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cmake==3.24
+          python3 -m pip install ninja
+          python3 -m pip uninstall -y triton
+          python3 setup.py build
+          python3 -m pip install --no-build-isolation -vvv '.[tests]'
+  Integration-Tests-AMD:
+    if: (github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: Runner-Preparation
+    timeout-minutes: 30
 
-      - name: Run lit tests
-        run: |
-          python3 -m pip install lit
-          cd python
-          LIT_TEST_DIR="build/$(ls build | grep -i cmake)/test"
-          if [ ! -d "${LIT_TEST_DIR}" ]; then
-            echo "Could not find '${LIT_TEST_DIR}'" ; exit -1
-          fi
-          lit -v "${LIT_TEST_DIR}"
+    runs-on: ${{ matrix.runner }}
 
-      - name: Run CXX unittests
+    strategy:
+      matrix:
+        runner: ["arc-test-gpu-runner-docker"]
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v3
+        if: ${{ github.event_name == 'issue_comment' }}
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          submodules: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        if: ${{ github.event_name != 'issue_comment' }}
+        with:
+          submodules: 'true'
+
+      - name: Set ROCM ENV
+        run: |
+          echo "BACKEND=ROCM" >> "${GITHUB_ENV}"
+      - name: Clear cache
+        run: |
+          rm -rf ~/.triton
+      - name: Update PATH
+        run: |
+          echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
+      - name: Install Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ninja wheel pytest pytest-xdist numpy lit autopep8 flake8 isort
+          python3 -m pip install scipy>=1.7.1
+          python3 -m pip install cmake==3.24
+          python3 -m pip install torch==1.13.1 --index-url https://download.pytorch.org/whl/rocm5.2 # important for detecting ROCM!
+      - name: Check pre-commit
+        run: |
+          python3 -m pip install --upgrade pre-commit
+          python3 -m pre_commit run --all-files --verbose
+      - name: Install Triton on ROCM
         run: |
           cd python
-          cd "build/$(ls build | grep -i cmake)"
-          ctest
+          python3 -m pip install .
+      - name: Run python tests on ROCM
+        run: |
+          python3 -m pytest -n 32 --capture=tee-sys -rfs --verbose "python/test/unit/language/test_core.py" -k "not test_flip"
+  Integration-Tests-Intel:
+    needs: Runner-Preparation
+    timeout-minutes: 30
+    if: false && ((github.event_name == 'workflow_dispatch') || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-optional)}}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set XPU ENV
+        if: ${{(matrix.runner[0] == 'self-hosted') && (matrix.runner[1] == 'arc770')}}
+        run: |
+          echo "BACKEND=XPU" >> "${GITHUB_ENV}"
+      - name: Clear cache
+        run: |
+          rm -rf ~/.triton
+      - name: Update PATH
+        run: |
+          echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
+      - name: Check pre-commit arc770
+        if: ${{ matrix.runner != 'macos-10.15' && (matrix.runner[1] == 'arc770') }}
+        run: |
+          source ${HOME}/triton_vars.sh
+          source ${HOME}/miniconda3/bin/activate
+          conda activate triton-xpu-ci
+          python3 -m pip install --upgrade pre-commit
+          python3 -m pre_commit run --all-files
+      - name: Install Triton on XPU
+        if: ${{ env.BACKEND == 'XPU'}}
+        run: |
+          source ${HOME}/triton_vars.sh
+          source ${HOME}/miniconda3/bin/activate
+          conda activate triton-xpu-ci
+          git submodule update --init --recursive
+          cd python
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cmake==3.24
+          export TRITON_CODEGEN_INTEL_XPU_BACKEND=1
+          python3 -m pip uninstall -y triton
+          python3 setup.py build
+          python3 -m pip install --no-build-isolation -vvv '.[tests]'
+      - name: Run python tests on XPU
+        if: ${{ env.BACKEND == 'XPU'}}
+        run: |
+          source ${HOME}/triton_vars.sh
+          source ${HOME}/miniconda3/bin/activate
+          conda activate triton-xpu-ci
+          cd python/test/backend/third_party_backends
+          python3 -m pytest --capture=tee-sys -rfs --verbose --backend xpu

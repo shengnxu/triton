@@ -7,10 +7,9 @@ DEVICES="--device=/dev/kfd --device=/dev/dri"
 
 MEMORY="--ipc=host --shm-size 16G"
 
-VOLUMES="-v $HOME/dockerx:/dockerx -v /data:/data"
+VOLUMES="-v $(pwd):/root/$(basename $(pwd))"
 
-# WORK_DIR='/root/$(basename $(pwd))'
-WORK_DIR="/dockerx/$(basename $(pwd))"
+WORK_DIR="/root/$(basename $(pwd))"
 
 IMAGE_NAME=rocm/pytorch-nightly:latest
 # IMAGE_NAME=rocm/pytorch:latest

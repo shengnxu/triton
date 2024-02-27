@@ -179,8 +179,9 @@ def _attn_fwd(
     if use_fp8:
         tl.atomic_max(amax_s, amax_s_local)
         acc *= acc_descale
-        tl.atomic_max(amax_o, tl.max(acc))
     acc = acc / l_i[:, None]
+    if use_fp8:
+        tl.atomic_max(amax_o, tl.max(acc))
     # scale O
     if use_fp8:
         acc = (acc * o_scale).to(q.dtype)
@@ -262,7 +263,7 @@ class _attention(torch.autograd.Function):
             pre_load_v = pre_load_v,
             use_fp8=use_fp8,
         )
-        return o
+        return o, amax_s, amax_o
 
 
 attention = _attention.apply
@@ -280,11 +281,13 @@ def _tensor_amax(tensor: torch.Tensor) -> float:
     # can be recoginized as fp32 in triton
     return tensor.abs().float().amax().item()
 
-def get_fp8_quantization_factor(fp8_max_repr_val: float, tensor: torch.Tensor) -> float:
-    if tensor.dtype not in fp8_type_list:
+def get_fp8_quantization_factor(fp8_max_repr_val: float, tensor: torch.Tensor, 
+                                fp8_type: torch.dtype=torch.float8_e4m3fnuz,
+                                margin: int=1) -> float:
+    if fp8_type not in fp8_type_list:
         return 1.0
     ret = fp8_max_repr_val / _tensor_amax(tensor)
-    ret = math.pow(2, math.floor(math.log2(ret)))
+    ret = math.pow(2, math.floor(math.log2(ret))-margin)
     return ret
 
 def scale_fp8_tensor(
@@ -355,8 +358,8 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
 
     # triton implementation
     # TODO: forcing s_scale to be larger, why?
-    s_scale = fp8_max_repr_val / 1.0
-    # s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
+    #s_scale = fp8_max_repr_val / 1.0
+    s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
     o_scale = get_fp8_quantization_factor(fp8_max_repr_val, ref_out)
     q_scale = get_fp8_quantization_factor(fp8_max_repr_val, q)
     k_scale = get_fp8_quantization_factor(fp8_max_repr_val, k)
@@ -377,7 +380,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
         assert k.isnan().sum() == 0, "There is Nan in k"
         assert v.isnan().sum() == 0, "There is Nan in v"
     # Triton kernel call
-    tri_out = attention(q, k, v,
+    tri_out, tri_amax_s, tri_amax_o = attention(q, k, v,
         sm_scale, 1.0/q_scale, 1.0/k_scale, 1.0/v_scale, s_scale, 1.0/s_scale, o_scale)
     # Dequantize to compare with reference
     if use_fp8:
@@ -387,6 +390,10 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     # compare
     atol = 1.4e-1 if 'float8' in dtype else 1e-2
     rtol = 1e-2 if 'float8' in dtype else 0
+    if use_fp8:
+        ref_amax_o = ref_out.abs().amax().reshape([1])
+        print('ref_amax_o=', ref_amax_o, ' tri_amax_o=', tri_amax_o)
+        torch.testing.assert_close(ref_amax_o, tri_amax_o.half(), atol=atol, rtol=0)
     torch.testing.assert_close(ref_out, tri_out.half(), atol=atol, rtol=0)
 
 

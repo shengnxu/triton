@@ -194,16 +194,6 @@ public:
       IndexCacheInfo indexCacheInfo)
       : converter(&typeConverter), indexCacheInfo(indexCacheInfo) {}
 
-  explicit ConvertTritonGPUOpToLLVMPatternBase(
-      TritonGPUToLLVMTypeConverter &typeConverter, ModuleAllocation &allocation)
-      : converter(&typeConverter), allocation(&allocation) {}
-
-  explicit ConvertTritonGPUOpToLLVMPatternBase(
-      TritonGPUToLLVMTypeConverter &typeConverter, ModuleAllocation &allocation,
-      IndexCacheInfo indexCacheInfo)
-      : converter(&typeConverter), allocation(&allocation),
-        indexCacheInfo(indexCacheInfo) {}
-
   TritonGPUToLLVMTypeConverter *getTypeConverter() const { return converter; }
 
   static Value
@@ -247,27 +237,6 @@ public:
   // -----------------------------------------------------------------------
   // Shared memory utilities
   // -----------------------------------------------------------------------
-  template <typename T>
-  Value getSharedMemoryBase(Location loc, ConversionPatternRewriter &rewriter,
-                            T value) const {
-    auto ptrTy = LLVM::LLVMPointerType::get(rewriter.getContext(), 3);
-    FunctionOpInterface funcOp;
-    if constexpr (std::is_pointer_v<T>)
-      funcOp = value->template getParentOfType<FunctionOpInterface>();
-    else
-      funcOp = value.getParentRegion()
-                   ->template getParentOfType<FunctionOpInterface>();
-    auto *funcAllocation = allocation->getFuncData(funcOp);
-    auto smem = allocation->getFunctionSharedMemoryBase(funcOp);
-    auto bufferId = funcAllocation->getBufferId(value);
-    assert(bufferId != Allocation::InvalidBufferId && "BufferId not found");
-    size_t offset = funcAllocation->getOffset(bufferId);
-    Value offVal = i32_val(offset);
-    Value base =
-        gep(ptrTy, this->getTypeConverter()->convertType(rewriter.getI8Type()),
-            smem, offVal);
-    return base;
-  }
 
   DenseMap<unsigned, Value>
   getSwizzledSharedPtrs(Location loc, unsigned inVec, RankedTensorType srcTy,
@@ -640,7 +609,6 @@ public:
 
 protected:
   TritonGPUToLLVMTypeConverter *converter;
-  ModuleAllocation *allocation;
   IndexCacheInfo indexCacheInfo;
 };
 
@@ -658,25 +626,11 @@ public:
         ConvertTritonGPUOpToLLVMPatternBase(typeConverter) {}
 
   explicit ConvertTritonGPUOpToLLVMPattern(
-      TritonGPUToLLVMTypeConverter &typeConverter, ModuleAllocation &allocation,
-      PatternBenefit benefit = patternBenefitDefault)
-      : ConvertOpToLLVMPattern<SourceOp>(typeConverter, benefit),
-        ConvertTritonGPUOpToLLVMPatternBase(typeConverter, allocation) {}
-
-  explicit ConvertTritonGPUOpToLLVMPattern(
       TritonGPUToLLVMTypeConverter &typeConverter,
       IndexCacheInfo indexCacheInfo,
       PatternBenefit benefit = patternBenefitDefault)
       : ConvertOpToLLVMPattern<SourceOp>(typeConverter, benefit),
         ConvertTritonGPUOpToLLVMPatternBase(typeConverter, indexCacheInfo) {}
-
-  explicit ConvertTritonGPUOpToLLVMPattern(
-      TritonGPUToLLVMTypeConverter &typeConverter, ModuleAllocation &allocation,
-      IndexCacheInfo indexCacheInfo,
-      PatternBenefit benefit = patternBenefitDefault)
-      : ConvertOpToLLVMPattern<SourceOp>(typeConverter, benefit),
-        ConvertTritonGPUOpToLLVMPatternBase(typeConverter, allocation,
-                                            indexCacheInfo) {}
 
 protected:
   TritonGPUToLLVMTypeConverter *getTypeConverter() const {
@@ -694,7 +648,6 @@ public:
   static_assert(std::is_same_v<SourceOp, ReduceOp> ||
                 std::is_same_v<SourceOp, ScanOp>);
 
-  using ConvertTritonGPUOpToLLVMPatternBase::getSharedMemoryBase;
   using ConvertTritonGPUOpToLLVMPatternBase::getTypeConverter;
   using ConvertTritonGPUOpToLLVMPattern<
       SourceOp>::ConvertTritonGPUOpToLLVMPattern;
@@ -721,7 +674,7 @@ public:
     // Assign base index to each operand in their order in indices
     std::map<unsigned, Value> indexToBase;
     indexToBase[indices[0]] =
-        getSharedMemoryBase(loc, rewriter, op.getOperation());
+        LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
     for (unsigned i = 1; i < op.getNumOperands(); ++i) {
       indexToBase[indices[i]] = gep(
           ptr_ty(rewriter.getContext(), 3), getElementType(op, indices[i - 1]),

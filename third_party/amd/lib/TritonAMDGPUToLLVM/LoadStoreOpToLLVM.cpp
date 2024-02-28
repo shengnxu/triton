@@ -312,11 +312,10 @@ struct AtomicCASOpConversion
       triton::AtomicCASOp>::ConvertTritonGPUOpToLLVMPattern;
 
   AtomicCASOpConversion(TritonGPUToLLVMTypeConverter &converter,
-                        ModuleAllocation &allocation,
                         ModuleAxisInfoAnalysis &axisAnalysisPass,
                         PatternBenefit benefit)
       : ConvertTritonGPUOpToLLVMPattern<triton::AtomicCASOp>(
-            converter, allocation, benefit),
+            converter, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
   LogicalResult
@@ -356,7 +355,7 @@ struct AtomicCASOpConversion
 
     // Fill entry block with global memory barrier and conditional branch.
     rewriter.setInsertionPointToEnd(curBlock);
-    Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
+    Value atomPtr = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
     rewriter.create<LLVM::CondBrOp>(loc, pred, atomicBlock, endBlock);
 
     // Build main block with atomic_cmpxchg.
@@ -394,11 +393,10 @@ struct AtomicRMWOpConversion
       triton::AtomicRMWOp>::ConvertTritonGPUOpToLLVMPattern;
 
   AtomicRMWOpConversion(TritonGPUToLLVMTypeConverter &converter,
-                        ModuleAllocation &allocation,
                         ModuleAxisInfoAnalysis &axisAnalysisPass,
                         PatternBenefit benefit)
       : ConvertTritonGPUOpToLLVMPattern<triton::AtomicRMWOp>(
-            converter, allocation, benefit),
+            converter, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
   /// Try to match the mlir::triton::RMWOp to LLVM::AtomicBinOp.
@@ -531,7 +529,7 @@ struct AtomicRMWOpConversion
                        : extract_element(valueElemTy, retVal, i32_val(ii));
         }
       } else {
-        Value atomPtr = getSharedMemoryBase(loc, rewriter, op.getOperation());
+        Value atomPtr = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
         store(retVal, atomPtr);
         Value ret = load(valueElemTy, atomPtr);
         rewriter.replaceOp(op, {ret});
@@ -561,9 +559,6 @@ struct InsertSliceOpConversion
     Value src = op.getSource();
     Value res = op.getResult();
     auto funcOp = op->getParentOfType<FunctionOpInterface>();
-    auto *funcAllocation = allocation->getFuncData(funcOp);
-    assert(funcAllocation->getBufferId(res) == Allocation::InvalidBufferId &&
-           "Only support in-place insert_slice for now");
 
     auto srcTy = src.getType().dyn_cast<RankedTensorType>();
     auto srcLayout = srcTy.getEncoding().dyn_cast<BlockedEncodingAttr>();
@@ -623,11 +618,11 @@ struct InsertSliceAsyncOpConversion
       triton::gpu::InsertSliceAsyncOp>::ConvertTritonGPUOpToLLVMPattern;
 
   InsertSliceAsyncOpConversion(
-      TritonGPUToLLVMTypeConverter &converter, ModuleAllocation &allocation,
+      TritonGPUToLLVMTypeConverter &converter, 
       ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
       ModuleAxisInfoAnalysis &axisAnalysisPass, PatternBenefit benefit)
       : ConvertTritonGPUOpToLLVMPattern<triton::gpu::InsertSliceAsyncOp>(
-            converter, allocation, indexCacheInfo, benefit),
+            converter, indexCacheInfo, benefit),
         LoadStoreConversionBase(axisAnalysisPass) {}
 
   LogicalResult
@@ -642,18 +637,17 @@ namespace AMD {
 void populateLoadStoreOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
-    ModuleAllocation &allocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
   patterns.add<LoadOpConversion>(typeConverter, axisInfoAnalysis, benefit);
   patterns.add<StoreOpConversion>(typeConverter, axisInfoAnalysis, benefit);
-  patterns.add<AtomicCASOpConversion>(typeConverter, allocation,
+  patterns.add<AtomicCASOpConversion>(typeConverter,
                                       axisInfoAnalysis, benefit);
-  patterns.add<AtomicRMWOpConversion>(typeConverter, allocation,
+  patterns.add<AtomicRMWOpConversion>(typeConverter,
                                       axisInfoAnalysis, benefit);
-  patterns.add<InsertSliceOpConversion>(typeConverter, allocation,
+  patterns.add<InsertSliceOpConversion>(typeConverter,
                                         indexCacheInfo, benefit);
   patterns.add<InsertSliceAsyncOpConversion>(
-      typeConverter, allocation, indexCacheInfo, axisInfoAnalysis, benefit);
+      typeConverter, indexCacheInfo, axisInfoAnalysis, benefit);
 }
 } // namespace AMD

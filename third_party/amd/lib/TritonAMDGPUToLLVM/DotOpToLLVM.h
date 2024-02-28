@@ -10,7 +10,6 @@ namespace AMD{
 void populateDotOpToLLVMPatterns(TritonGPUToLLVMTypeConverter &typeConverter,
                                  RewritePatternSet &patterns, int numWarps,
                                  ModuleAxisInfoAnalysis &axisInfoAnalysis,
-                                 ModuleAllocation &allocation,
                                  PatternBenefit benefit);
 }
 

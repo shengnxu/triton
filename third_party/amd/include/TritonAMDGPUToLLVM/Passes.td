@@ -4,6 +4,11 @@
 include "mlir/Pass/PassBase.td"
 
 
+def AllocateSharedMemory : Pass<"allocate-shared-memory", "mlir::ModuleOp"> {
+    let summary = "Add metadata for shared memory allocation";
+    let constructor = "mlir::triton::gpu::createAllocateSharedMemoryPass()";
+}
+
 def ConvertTritonAMDGPUToLLVM : Pass<"convert-triton-amdgpu-to-llvm", "mlir::ModuleOp"> {
     let summary = "Convert TritonGPU to LLVM";
     let description = [{

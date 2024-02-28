@@ -21,11 +21,11 @@ struct ReduceOpConversion
     : public ConvertTritonGPUReduceScanToLLVMPattern<triton::ReduceOp> {
 public:
   ReduceOpConversion(
-      TritonGPUToLLVMTypeConverter &typeConverter, ModuleAllocation &allocation,
+      TritonGPUToLLVMTypeConverter &typeConverter,
       ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
       int computeCapability, PatternBenefit benefit)
       : ConvertTritonGPUReduceScanToLLVMPattern<triton::ReduceOp>(
-            typeConverter, allocation, indexCacheInfo, benefit),
+            typeConverter, indexCacheInfo, benefit),
         computeCapability(computeCapability) {}
 
   LogicalResult
@@ -510,10 +510,9 @@ private:
 void populateReduceOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
-    ModuleAllocation &allocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     int computeCapability, PatternBenefit benefit) {
-  patterns.add<ReduceOpConversion>(typeConverter, allocation, indexCacheInfo,
+  patterns.add<ReduceOpConversion>(typeConverter, indexCacheInfo,
                                    computeCapability, benefit);
 }
 } // namespace AMD

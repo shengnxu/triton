@@ -494,7 +494,7 @@ private:
     auto llvmElemTy = getTypeConverter()->convertType(dstTy.getElementType());
     auto elemPtrTy = ptr_ty(rewriter.getContext(), 3);
 
-    Value smemBase = getSharedMemoryBase(loc, rewriter, op.getOperation());
+    Value smemBase = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
     smemBase = bitcast(smemBase, elemPtrTy);
     auto smemShape = convertType<unsigned, int64_t>(srcShapePerCTA);
 
@@ -575,7 +575,7 @@ private:
 
     if (shouldUseDistSmem(srcLayout, dstLayout))
       return lowerDistToDistWithDistSmem(op, adaptor, rewriter);
-    Value smemBase = getSharedMemoryBase(loc, rewriter, op.getOperation());
+    Value smemBase = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
     auto elemPtrTy = ptr_ty(rewriter.getContext(), 3);
     smemBase = bitcast(smemBase, elemPtrTy);
     auto shape = dstTy.getShape();
@@ -748,7 +748,7 @@ private:
     auto dstSharedLayout = dstTy.getEncoding().cast<SharedEncodingAttr>();
     auto inOrd = getOrder(srcLayout);
     auto outOrd = dstSharedLayout.getOrder();
-    Value smemBase = getSharedMemoryBase(loc, rewriter, dst);
+    Value smemBase = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
     auto elemTy = getTypeConverter()->convertType(srcTy.getElementType());
     auto elemPtrTy = ptr_ty(rewriter.getContext(), 3);
     smemBase = bitcast(smemBase, elemPtrTy);
@@ -1056,10 +1056,9 @@ namespace AMD {
 void populateConvertLayoutOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
-    ModuleAllocation &allocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
-  patterns.add<ConvertLayoutOpConversion>(typeConverter, allocation,
-                                          indexCacheInfo, benefit);
+  patterns.add<ConvertLayoutOpConversion>(typeConverter, indexCacheInfo,
+                                          benefit);
 }
 } // namespace AMD

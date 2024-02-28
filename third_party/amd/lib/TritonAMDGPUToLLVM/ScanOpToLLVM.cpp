@@ -11,6 +11,7 @@ using ::AMD::TritonGPUToLLVMTypeConverter;
 using ::mlir::LLVM::delinearize;
 using ::mlir::LLVM::linearize;
 using ::mlir::LLVM::AMD::shflIdxSync;
+using ::mlir::LLVM::shflSync;
 using ::mlir::LLVM::AMD::shflUpSync;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 
@@ -441,6 +442,26 @@ unpackInputs(Location loc, triton::ScanOp op, triton::ScanOpAdaptor adaptor,
   return srcValues;
 }
 
+// Flip the srcValues. Both reverses the chunks and reverses the lanes.
+// Lane reversal is done with a butterfly shuffle flip (divide and flip).
+SmallVector<SmallVector<Value>>
+flipSrcValues(Location loc, triton::ScanOp op,
+              ConversionPatternRewriter &rewriter,
+              SmallVector<SmallVector<Value>> srcValues, int iWarpSize) {
+  SmallVector<SmallVector<Value>> values(srcValues.size());
+  for (int i = 0; i < srcValues.size(); ++i) {
+    int revIndex = srcValues.size() - i - 1;
+    for (unsigned j = 0; j < op.getNumOperands(); ++j) {
+      for (unsigned k = iWarpSize / 2; k >= 1; k = k / 2) {
+        srcValues[revIndex][j] =
+            shflSync(loc, rewriter, srcValues[revIndex][j], k);
+      }
+      values[i].push_back(srcValues[revIndex][j]);
+    }
+  }
+  return values;
+}
+
 // Lowering using warp shuffle operations to do warp level scan.
 LogicalResult
 ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
@@ -452,7 +473,8 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
 
   Value threadId = getThreadId(rewriter, loc);
   auto mod = op->getParentOfType<ModuleOp>();
-  unsigned iWarpSize = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
+//unsigned iWarpSize = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
+  unsigned iWarpSize = 64;
   Value warpSize = i32_val(iWarpSize);
   Value warpId = udiv(threadId, warpSize);
   Value laneId = urem(threadId, warpSize);
@@ -463,6 +485,18 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
   warpIdAxis = urem(warpIdAxis, i32_val(axisNumWarps));
   auto srcValues =
       unpackInputs(loc, op, adaptor, rewriter, *getTypeConverter());
+
+  // For the reverse option we apply flip(scan(flip()) in
+  // order to avoid having a separate code path in the reverse direction.
+  // We do this by 1) reversing chunks, 2) reversing lanes, 3) reversing
+  // warp ids and then undoing this below.
+  // (Note: Tried pretty hard to get shflDownSync to work but I ended up
+  // having to add a lot of the complex cross warp code (if rev switch
+  // first/last etc). Reverse first seems more maintainable.)
+  if (op.getReverse()) {
+    warpIdAxis = sub(i32_val(axisNumWarps - 1), warpIdAxis);
+    srcValues = flipSrcValues(loc, op, rewriter, srcValues, iWarpSize);
+  }
 
   // Scan contigous elements in a thread and update `srcValues`.
   scanThreadContiguousElements(srcValues, rewriter, helper);
@@ -515,6 +549,10 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
   };
 
   SmallVector<Value> results(op.getNumOperands());
+   if (op.getReverse()) {
+    srcValues = flipSrcValues(loc, op, rewriter, srcValues, iWarpSize);
+  }
+
   auto valuesTransposed = transpose(srcValues);
   for (unsigned i = 0; i < op.getNumOperands(); ++i) {
     auto resultTy = op.getResult()[i].getType().dyn_cast<RankedTensorType>();
@@ -529,10 +567,9 @@ ScanOpConversion::emitFastScan(triton::ScanOp op, triton::ScanOpAdaptor adaptor,
 void populateScanOpToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
-    ModuleAllocation &allocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
-  patterns.add<ScanOpConversion>(typeConverter, allocation, indexCacheInfo,
+  patterns.add<ScanOpConversion>(typeConverter, indexCacheInfo,
                                  benefit);
 }
 } // namespace AMD

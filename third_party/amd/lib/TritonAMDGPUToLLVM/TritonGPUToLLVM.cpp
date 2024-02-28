@@ -407,7 +407,7 @@ struct ExtractSliceOpConversion
 
     // newBase = base + offset
     // Triton supports either static and dynamic offsets
-    auto smemObj = getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
+    auto smemObj = LLVM::getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
                                                    llvmElemTy, rewriter);
     SmallVector<Value, 4> opOffsetVals;
     SmallVector<Value, 4> offsetVals;
@@ -452,10 +452,9 @@ namespace AMD {
 void populateTritonGPUToLLVMPatterns(
     TritonGPUToLLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
     int numWarps, ModuleAxisInfoAnalysis &axisInfoAnalysis,
-    ModuleAllocation &moduleAllocation,
     ConvertTritonGPUOpToLLVMPatternBase::IndexCacheInfo &indexCacheInfo,
     PatternBenefit benefit) {
-  patterns.add<ExtractSliceOpConversion>(typeConverter, moduleAllocation,
+  patterns.add<ExtractSliceOpConversion>(typeConverter,
                                          benefit);
   patterns.add<GetProgramIdOpConversion>(typeConverter, benefit);
   patterns.add<GetNumProgramsOpConversion>(typeConverter, benefit);

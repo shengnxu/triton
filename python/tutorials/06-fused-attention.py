@@ -13,7 +13,6 @@ Extra Credits:
 
 import pytest
 import torch
-import itertools
 
 import triton
 import triton.language as tl
@@ -27,6 +26,7 @@ import triton.language as tl
 
 # AMD E5M2B16
 TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
+
 
 @triton.jit
 def _attn_fwd_inner(acc, l_i, m_i, q,
@@ -692,7 +692,7 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype):
                           (4, 48, 4096, 64),
                           (1, 16, 8192, 64),
                           ])
-def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.bfloat16):
+def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
     torch.manual_seed(20)
     causal = True
     q = (torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
@@ -746,16 +746,25 @@ for mode in ['fwd', 'bwd']:
                 continue
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H', 'N_CTX'],
-                x_vals=[(4, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
-                        (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                # x_vals=[(4, 16, 1024),
+                #         (8, 16, 2048),
+                #         (4, 16, 4096),
+                #         (2, 16, 8192),
+                #         (1, 16, 16384),
+                #         (4, 48, 1024),
+                #         (4, 48, 2048),
+                #         (4, 48, 4096),
+                #         (4, 48, 8192),
+                #         (4, 48, 16384),
+                #         ],
+                x_vals=[(8,  4, 2048),
+                        (8,  4, 4096),
+                        (16, 4, 2048),
+                        (16, 4, 4096),
+                        (32, 4, 2048),
+                        (32, 4, 4096),
+                        (64, 4, 2048),
+                        (64, 4, 4096),
                         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
@@ -765,7 +774,7 @@ for mode in ['fwd', 'bwd']:
                 plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}',
                 args={
                     'D_HEAD': D_HEAD,
-                    'dtype': torch.float16,
+                    'dtype': torch.bfloat16,
                     'mode': mode,
                     'causal': causal,
                 },
@@ -773,7 +782,7 @@ for mode in ['fwd', 'bwd']:
 
 
 @triton.testing.perf_report(configs)
-def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"):
+def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.bfloat16, device="cuda"):
     assert mode in ["fwd", "bwd"]
     warmup = 25
     rep = 10

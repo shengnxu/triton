@@ -166,8 +166,13 @@ def _attn_fwd_inner(
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
     PADDED_HEAD: tl.constexpr
 ):
+    # if ((tl.program_id(0)==0 and tl.program_id(1)==0) and tl.program_id(2)==0):
+    #     tl.device_print("BLOCK_N", BLOCK_N)
+
     # loop over k, v, and update accumulator
     for start_n in range (block_min, block_max, BLOCK_N):
+        # if ((tl.program_id(0)==0 and tl.program_id(1)==0) and tl.program_id(2)==0):
+        #     tl.device_print("start_n", start_n)
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
         k = load_fn(K_block_ptr, PADDED_HEAD, MASK_STEPS and (n_extra_tokens != 0), "zero")
@@ -230,20 +235,21 @@ def _attn_fwd_inner(
             bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
+    
     return acc, l_i, m_i
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
    ],
    key=['hq', 'hk', 'IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
 )
@@ -267,6 +273,9 @@ def attn_fwd(
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr
 ):
+
+    # return # debug the empty kernel
+
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
     off_z = tl.program_id(2)
@@ -1159,29 +1168,31 @@ for mode in ['fwd']:
     for D_HEAD in [128]:
         if mode == 'bwd' and D_HEAD == 128:
             continue
-        for causal in [False, True]:
+        for causal in [False]: #[False, True]:
             if mode == 'bwd' and causal == False:
                 continue
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H', 'N_CTX_Q', 'N_CTX_K'],
-                x_vals=[(16, 16, 1024, 1024),
-                        (8, 16, 2048, 2048),
-                        (4, 16, 4096, 4096),
-                        (2, 16, 8192, 8192),
-                        (1, 16, 16384, 16384),
-                        (2, 48, 1024, 1024),
-                        (2, 48, 2048, 1024),
-                        (2, 48, 4096, 8192),
-                        (2, 48, 8192, 4096),
-                        (2, 48, 16384, 8192),
-                        (8, 16, 1989, 15344),
-                        (4, 16, 4097, 163),
-                        (2, 16, 8122, 2159),
-                        (1, 16, 16281, 7),
-                        (2, 48, 1021, 1020),
-                        (2, 48, 2001, 2048),
-                        (2, 48, 3996, 9639),
-                        (2, 48, 8181, 1021),
+                x_vals=[
+                        (32, 32, 1024, 128)
+                        # (16, 16, 1024, 1024),
+                        # (8, 16, 2048, 2048),
+                        # (4, 16, 4096, 4096),
+                        # (2, 16, 8192, 8192),
+                        # (1, 16, 16384, 16384),
+                        # (2, 48, 1024, 1024),
+                        # (2, 48, 2048, 1024),
+                        # (2, 48, 4096, 8192),
+                        # (2, 48, 8192, 4096),
+                        # (2, 48, 16384, 8192),
+                        # (8, 16, 1989, 15344),
+                        # (4, 16, 4097, 163),
+                        # (2, 16, 8122, 2159),
+                        # (1, 16, 16281, 7),
+                        # (2, 48, 1021, 1020),
+                        # (2, 48, 2001, 2048),
+                        # (2, 48, 3996, 9639),
+                        # (2, 48, 8181, 1021),
                         ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
@@ -1250,7 +1261,8 @@ def bench_flash_attention(
         total_flops *= 0.5
     if mode == "bwd":
         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-    return total_flops / ms * 1e-9
+    # return total_flops / ms * 1e-9
+    return ms
 
 bench_flash_attention.run(save_path=".", print_data=True)
 
@@ -1314,5 +1326,5 @@ def bench_varlen_flash_attention(
     total_flops = 2 * flops_per_matmul
     return total_flops / ms * 1e-9
 
-bench_varlen_flash_attention.run(save_path=".", print_data=True)
+# bench_varlen_flash_attention.run(save_path=".", print_data=True)
 

@@ -44,3 +44,13 @@ docs/getting-started/tutorials
 /compile_commands.json
 .vscode
 .vs
+
+# AMD
+scripts
+log
+*.html
+*.csv
+*.png
+*.db
+*.json
+*.txt

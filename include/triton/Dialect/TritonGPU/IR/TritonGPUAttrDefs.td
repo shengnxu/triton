@@ -131,6 +131,8 @@ compared to 1*64 when the hasLeadingOffset is false.
 
         if (mfmaEnc) {
           int kDimNum = dotOpEnc.getOpIdx() == 0 ? 1 : 0;
+          if (needTrans)
+            kDimNum = 1 - kDimNum;
           bool isKDimInner = (order[0] == kDimNum);
           if (isKDimInner) {
             const int numBanks = 32;
@@ -142,21 +144,17 @@ compared to 1*64 when the hasLeadingOffset is false.
             int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeWidthInBit;
 
             int perPhase = std::max(1, elemsPerOneBanksRow / innerDimLength);
-            // Note: the following settings is customized to avoid
-            // **load** bank conflicts
-            //
-            // vecSize is set to k_base, which is the number of elements each
-            // workitem loads for one mfma instruction.
-            // For now, the k_base rules are as follows
-            // 1. All selected mfma instructions produce a single block
-            // 2. For f16 data type, 2 VGPRs are used for operand A --> k_base = 4
-            // 3. For non-f16 data types, 1 VGPR are used for operand A
-            //    k_base = 32 / elemTypeInBits
-            // 4. TODO: what about f64?
-            //
+            // vecSize is set to kWidth of the dotop layout
+            int vecSize = dotOpEnc.getKWidth();
             // maxPhase is set to SIMDWidth / perPhase
-            int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
-            int maxPhase = SIMDWidth / perPhase;
+            int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);
+            // TODO (zhanglx): figure out better parameters for mfma4
+            auto mDim = mfmaEnc.getMDim();
+            auto nDim = mfmaEnc.getNDim();
+            auto nonKDim = dotOpEnc.getOpIdx() == 0 ? mDim : nDim;
+            if (4 == nonKDim)
+               maxPhase = 4;
+            assert(maxPhase > 0);
 
             return get(context, vecSize, perPhase, maxPhase, order, CTALayout);
           } else {
@@ -675,12 +673,19 @@ def MfmaEncodingAttr : DistributedEncoding<"MfmaEncoding"> {
   let mnemonic = "mfma";
 
   let description = [{
-An encoding for tensors that have been produced by MI100 && MI200 tensor cores.
-It is characterized by parameters `warpsPerCTA` and `nonKDim` that indicates how data should be partitioned
-between waves (analogous to the term 'warp' used in NVIDIA's CUDA programming model).
+An encoding for tensors that have been produced by tensor cores of AMD MI GPUs.
+It is characterized by the following parameters:
+- `versionMajor` and `versionMinor` indicates the GPU arch
+  - 1.0: gfx908, i.e. MI100
+  - 2.0: gfx90a: i.e. MI200, MI210, MI250
+  - 3.0: gfx940, gfx941, gfx942: MI300
+- `warpsPerCTA` indicates the wave layout in the workgroup.
+- `MDim` and `NDim` indicate the dimension of the output of the mfma instruction.
+- `isTransposed` indicates the result tensor is transposed so that it can be converted to dotOperand layout
+without going to LDS. This is used in the case of chained dot (E.g. Flash-Attention kernel).
 
 Example 1:
-Suppose we have a tensor with a shape of [32, 64], warpsPerCTA set to [1, 2] and nonKDim set to 32.
+Suppose we have a tensor with a shape of [32, 64], warpsPerCTA set to [1, 2] and MDim=NDim=32.
 The data will be distributed between threads as follows:
 
                 wave 0                                 wave 1
@@ -719,7 +724,7 @@ The data will be distributed between threads as follows:
 [ 32  33  34  35 ...... 62  63 ]      [ 96  97  98  99 ...... 126  127 ]
 
 Example 2:
-Suppose we have a tensor with a shape of [16, 32], warpsPerCTA set to [1, 2] and nonKDim set to 16.
+Suppose we have a tensor with a shape of [16, 32], warpsPerCTA set to [1, 2] and MDim=NDim=16.
 The data will be distributed between threads as follows:
 
                 wave 0                                 wave 1
@@ -742,8 +747,8 @@ The data will be distributed between threads as follows:
 [ 48  49  50  51 ...... 62  63 ]      [ 112 113 114 115 ...... 126  127 ]
 
 Example 3:
-Suppose we have a tensor with a shape of [8, 8], warpsPerCTA set to [2, 2] and nonKDim set to 4.
-The data will be distributed between threads as follows(note that each element is duploicated in 16 threads):
+Suppose we have a tensor with a shape of [8, 8], warpsPerCTA set to [2, 2] and MDim=NDim=4.
+The data will be distributed between threads as follows(note that each element is duplicated in 16 threads):
 
 M  N ->                    wave 0                                                       wave 2
 | --------------------------/\--------------------------   ------------------------------/\------------------------------
@@ -762,8 +767,11 @@ V [ 0,4,8...60   1,5...61     2,6...62     3,7...63    ]   [ 128,132...188  129,
 
   let parameters = (
     ins
-    "unsigned":$nonKDim,
+    "unsigned": $versionMajor,
+    "unsigned": $versionMinor,
     ArrayRefParameter<"unsigned">:$warpsPerCTA,
+    "unsigned":$MDim,
+    "unsigned":$NDim,
     "bool":$isTransposed
   );
 

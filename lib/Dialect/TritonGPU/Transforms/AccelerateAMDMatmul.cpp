@@ -52,31 +52,55 @@ int getMfmaVersion(MatrixCoreVersion matrixCoreVer) {
   return 0;
 }
 
-SmallVector<unsigned, 2>
-warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
-             SmallVector<int64_t, 2> shapePerWarp) {
-  // TODO: needs to be updated with appropriate shapePerWarp etc.
+static bool isTransposeChainDotPattern(tt::DotOp &dotOp) {
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };
   mlir::ForwardSliceOptions fwdOpt;
   fwdOpt.filter = filter;
+  mlir::SetVector<mlir::Operation*> fwdSlices;
+  mlir::getForwardSlice(static_cast<mlir::Operation*>(dotOp), &fwdSlices, fwdOpt);
+  for (Operation *op : fwdSlices) {
+    // ensure output of the first dot is the operand 0 of the second dot
+    if (isa<tt::DotOp>(op) && (op != dotOp)) {
+      auto dOp = dyn_cast<tt::DotOp>(op);
+      auto oper0 = dOp.getOperand(0).getDefiningOp();
+      if(std::find(fwdSlices.begin(), fwdSlices.end(), oper0) != fwdSlices.end()) {
+        return true;
+      }
+    }
+  }
+
   mlir::BackwardSliceOptions bwdOpt;
   bwdOpt.omitBlockArguments = true;
   bwdOpt.filter = filter;
-  auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
-  for (Operation *op : slices)
+  mlir::SetVector<mlir::Operation*> bwdSlices;
+  // search backward of the operand 0 of the dot 
+  mlir::Operation* oper0 = dotOp.getOperand(0).getDefiningOp();
+  mlir::getBackwardSlice(oper0, &bwdSlices, bwdOpt);
+  for (Operation *op : bwdSlices) {
     if (isa<tt::DotOp>(op) && (op != dotOp)) {
-      if (shape[0] >= shape[1]) {
-        return {(unsigned)numWarps, 1};
-      } else {
-        return {1, (unsigned)numWarps};
-      }
+      return true;
     }
+  }
+
+  return false;
+}
+
+SmallVector<unsigned, 2>
+warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
+             SmallVector<int64_t, 2> shapePerWarp) {
+  // TODO: needs to be updated with appropriate shapePerWarp etc.
+  if (isTransposeChainDotPattern(dotOp)) {
+    if (shape[0] >= shape[1]) {
+      return {(unsigned)numWarps, 1};
+    } else {
+      return {1, (unsigned)numWarps};
+    }
+  }
 
   SmallVector<int64_t, 2> tensorShape = {shape[0], shape[1]};
   SmallVector<unsigned, 2> ret = {1, 1};
-
   do {
     if (ret[0] * ret[1] >= numWarps)
       break;
@@ -99,8 +123,9 @@ warpsPerTile(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
 }
 
 SmallVector<unsigned, 2>
-warpsPerTileMFMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
-  return warpsPerTile(dotOp, shape, numWarps, {32, 32});
+warpsPerTileMFMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
+                 SmallVector<int64_t, 2> shapePerWarp) {
+  return warpsPerTile(dotOp, shape, numWarps, shapePerWarp);
 }
 
 SmallVector<unsigned, 2>
@@ -110,128 +135,91 @@ warpsPerTileWMMA(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
 
 class BlockedToMFMA : public mlir::RewritePattern {
   int mfmaVersion;
+  int kpack;
   int enforcedNonKDim;
 
 public:
-  BlockedToMFMA(mlir::MLIRContext *context, int mfmaVersion, int nonKDim)
+  BlockedToMFMA(mlir::MLIRContext *context, int mfmaVersion, int nonKDim,
+                int kpack)
       : mlir::RewritePattern(tt::DotOp::getOperationName(), 2, context),
-        mfmaVersion(mfmaVersion), enforcedNonKDim(nonKDim) {}
+        mfmaVersion(mfmaVersion), enforcedNonKDim(nonKDim), kpack(kpack) {}
 
-  bool isChainDot(tt::DotOp &dotOp) const {
+  bool isSecondDot(tt::DotOp &dotOp) const {
     auto filter = [&dotOp](Operation *op) {
       return op->getParentRegion() == dotOp->getParentRegion();
     };
-    mlir::ForwardSliceOptions fwdOpt;
-    fwdOpt.filter = filter;
     mlir::BackwardSliceOptions bwdOpt;
     bwdOpt.omitBlockArguments = true;
     bwdOpt.filter = filter;
-    auto slices = mlir::getSlice(dotOp, bwdOpt, fwdOpt);
-    for (Operation *op : slices) {
-      if (isa<tt::DotOp>(op) && (op != dotOp))
-        return true;
-    }
+    SetVector<Operation *> slices;
+    mlir::getBackwardSlice(dotOp.getResult(), &slices, bwdOpt);
+    if (llvm::find_if(slices, [](Operation *op) {
+          return isa<tt::DotOp>(op);
+        }) != slices.end())
+      return true;
     return false;
   }
 
   /// @brief Choose MFMA instruction parameters
   /// @param dot target dot operation
   /// @return pair {nonKDim, kDim} sizes of one MFMA instruction arguments
-  std::pair<int64_t, int64_t> chooseMfmaDimensions(tt::DotOp dot) const {
+  std::tuple<int64_t, int64_t, int64_t>
+  chooseMfmaDimensions(tt::DotOp dot) const {
     // number of matrix elements along k dim per one MFMA intruction
-    int64_t kDim = -1;
+    unsigned kDim = 0;
     auto opType = dot.getA().getType().cast<RankedTensorType>();
-    auto elemType = opType.getElementType();
+
+    auto dataTypeA = opType.getElementType();
+    auto dataTypeB =
+        dot.getB().getType().cast<RankedTensorType>().getElementType();
 
     auto resType = dot.getD().getType().cast<RankedTensorType>();
     auto resShape = resType.getShape();
 
-    int64_t nonKDim = -1;
+    unsigned mDim = 0;
+    unsigned nDim = 0;
     if (enforcedNonKDim != 0) {
-      nonKDim = enforcedNonKDim;
+      mDim = enforcedNonKDim;
+      nDim = enforcedNonKDim;
     } else {
-      nonKDim = -1;
       int minSize = std::min(resShape[0], resShape[1]);
-      if (minSize >= 32)
-        nonKDim = 32;
-      if (minSize >= 16 && minSize < 32)
-        nonKDim = 16;
-      if (minSize < 16)
-        nonKDim = 4;
-      assert(nonKDim != -1);
+      if (minSize >= 32) {
+        mDim = 32;
+        nDim = 32;
+      }
+      if (minSize >= 16 && minSize < 32) {
+        mDim = 16;
+        nDim = 16;
+      }
+      if (minSize < 16) {
+        if (resShape[0] < 16 && resShape[1] >= 64) {
+          mDim = 4;
+          nDim = 64;
+        } else if (resShape[0] >= 64 && resShape[1] < 16) {
+          mDim = 64;
+          nDim = 4;
+        } else {
+          assert(opType.getShape()[1] >= 64 &&
+                 "k should be at least 64 to use this layout");
+          mDim = 4;
+          nDim = 4;
+        }
+      }
+      assert(mDim != 0);
+      assert(nDim != 0);
     }
-    switch (nonKDim) {
-    case 32:
-      if (elemType.isF32())
-        kDim = 2;
-      if (elemType.isF16())
-        kDim = 8;
-      if (elemType.isBF16()) {
-        if (mfmaVersion == 1)
-          kDim = 4;
-        if (mfmaVersion >= 2)
-          kDim = 8;
-      }
-      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
-        assert(mfmaVersion == 3);
-        kDim = 16;
-      }
-      if (elemType.isInteger(8)) {
-        if (mfmaVersion == 3) {
-          kDim = 16;
-        }
-        else {
-          kDim = 8;
-        }
-      }
-      break;
-    case 16:
-      if (elemType.isF32())
-        kDim = 4;
-      if (elemType.isF16())
-        kDim = 16;
-      if (elemType.isBF16()) {
-        if (mfmaVersion == 1)
-          kDim = 8;
-        if (mfmaVersion >= 2)
-          kDim = 16;
-      }
-      if (elemType.isFloat8E4M3FNUZ() || elemType.isFloat8E5M2FNUZ()) {
-        assert(mfmaVersion == 3);
-        kDim = 32;
-      }
-      if (elemType.isInteger(8)) {
-        if (mfmaVersion == 3) {
-          kDim = 32;
-        }
-        else {
-          kDim = 16;
-        }
-      }
-      break;
-    case 4:
-      if (elemType.isF32())
-        kDim = 16;
-      if (elemType.isF16())
-        kDim = 64;
-      if (elemType.isBF16()) {
-        if (mfmaVersion == 1)
-          kDim = 32;
-        if (mfmaVersion >= 2)
-          kDim = 64;
-      }
-      if (elemType.isInteger(8)) {
-        kDim = 64;
-      }
-      break;
-    default:
-      llvm::report_fatal_error("unsupported nonKDim size in MFMA dot");
-    }
-    assert(kDim != -1);
-    assert(nonKDim != -1);
-    assert(resShape[0] % nonKDim == 0 && resShape[1] % nonKDim == 0);
+
+    auto maybeMfmaInsn =
+        MfmaInsn::selectMfma(mDim, nDim, dataTypeA, dataTypeB, mfmaVersion);
+    if (failed(maybeMfmaInsn))
+      llvm::report_fatal_error("No match found in MFMA database\n");
+    else
+      kDim = (*maybeMfmaInsn).getKDim();
+    assert(kDim != 0);
+    assert(mDim != 0 && nDim != 0);
+    assert(resShape[0] % mDim == 0 && resShape[1] % nDim == 0);
     assert(opType.getShape()[1] % kDim == 0);
-    return {nonKDim, kDim};
+    return {mDim, nDim, kDim};
   }
 
   mlir::LogicalResult
@@ -242,9 +230,6 @@ public:
     auto oldRetType = dotOp.getResult().getType().cast<RankedTensorType>();
     if (!oldRetType.getEncoding() ||
         !oldRetType.getEncoding().isa<ttg::BlockedEncodingAttr>())
-      return failure();
-
-    if (!supportMFMA(dotOp))
       return failure();
 
     auto CTALayout = ttg::getCTALayout(oldRetType.getEncoding());
@@ -266,13 +251,16 @@ public:
 
     ttg::MfmaEncodingAttr mfmaEnc;
 
-    auto [nonKDim, kDim] = chooseMfmaDimensions(dotOp);
+    auto [mDim, nDim, kDim] = chooseMfmaDimensions(dotOp);
 
-    auto warpsPerTile = warpsPerTileMFMA(dotOp, retShape, numWarps);
+    auto warpsPerTile =
+        warpsPerTileMFMA(dotOp, retShape, numWarps, {mDim, nDim});
 
-    bool isTransposed = isChainDot(dotOp);
-    mfmaEnc = ttg::MfmaEncodingAttr::get(oldRetType.getContext(), nonKDim,
-                                         warpsPerTile, isTransposed);
+    bool isTransposed = isTransposeChainDotPattern(dotOp);
+    mfmaEnc = ttg::MfmaEncodingAttr::get(
+        oldRetType.getContext(),
+        /*versionMajor*/ mfmaVersion, /*versionMinor*/ 0, warpsPerTile,
+        /*instrShape*/ mDim, nDim, isTransposed);
 
     auto newRetType =
         RankedTensorType::get(retShape, oldRetType.getElementType(), mfmaEnc);
@@ -292,25 +280,29 @@ public:
                          .cast<ttg::BlockedEncodingAttr>()
                          .getOrder();
 
-    // kWidth is a number of consecutive elements per one instruction per one
-    // thread
-    auto kWidth = kDim;
+    // kWidth is initialized as k_base, which is the number of elements hold by
+    // one thread per mfma instruction
+    auto kWidth = -1;
     // in mfma 32x32 case argument matrix groups elements in 2 groups
     // in mfma 16x16 case argument matrix groups elements in 4 groups
-    // in mfma 4x4 case arguemnt matrix groups in 16 groups
-    switch (nonKDim) {
-    case 32:
-      kWidth /= 2;
-      break;
-    case 16:
-      kWidth /= 4;
-      break;
-    case 4:
-      kWidth /= 16;
-      break;
-    default:
-      llvm::report_fatal_error("unsupported kDim in mfma dot");
-    }
+    // in mfma 4x4 case argument matrix groups in 16 groups
+    if (mDim == 32 && nDim == 32)
+      kWidth = kDim / 2;
+    if (mDim == 16 && nDim == 16)
+      kWidth = kDim / 4;
+    if (mDim == 4 && nDim == 4)
+      kWidth = kDim / 16;
+    if (mDim == 4 && nDim == 64 || mDim == 64 && nDim == 4)
+      kWidth = kDim;
+    assert(kWidth != -1);
+
+    // We want to extend kWidth by kpack (kpack=1 means no extension)
+    // to increase ds_read vector size
+    // However, in FA, the second dot can only use kWidth = k_bse since it's
+    // limited by the result of the first dot, which is of mfmaLayout.
+    if (!isSecondDot(dotOp))
+      kWidth *= kpack;
+
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
         ttg::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc, kWidth));
@@ -405,11 +397,11 @@ class TritonAMDGPUAccelerateMatmulPass
           TritonAMDGPUAccelerateMatmulPass> {
 public:
   TritonAMDGPUAccelerateMatmulPass() = default;
-  TritonAMDGPUAccelerateMatmulPass(StringRef archGen,
-                                   int matrixInstructionSize,
-                                   bool enableWmmaTransform) {
+  TritonAMDGPUAccelerateMatmulPass(StringRef archGen, int matrixInstructionSize,
+                                   int kpack, bool enableWmmaTransform) {
     this->archGenerationName = archGen.data();
     this->matrixInstructionSize = matrixInstructionSize;
+    this->kpack = kpack;
     this->enableWmmaTransform = enableWmmaTransform;
   }
   void runOnOperation() override {
@@ -422,7 +414,7 @@ public:
         MatrixCoreVersion::CDNA_MFMA2 == matrixCoreVer ||
         MatrixCoreVersion::CDNA_MFMA3 == matrixCoreVer) {
       patterns.add<::BlockedToMFMA>(context, getMfmaVersion(matrixCoreVer),
-                                    matrixInstructionSize);
+                                    matrixInstructionSize, kpack);
     } else if (MatrixCoreVersion::RDNA_WMMA == matrixCoreVer &&
                enableWmmaTransform) {
       patterns.add<::BlockedToWMMA>(context);
@@ -433,10 +425,9 @@ public:
   }
 };
 
-std::unique_ptr<Pass>
-mlir::createTritonAMDGPUAccelerateMatmulPass(std::string archGen,
-                                             int matrixInstructionSize,
-                                             bool enableWmmaTransform) {
+std::unique_ptr<Pass> mlir::createTritonAMDGPUAccelerateMatmulPass(
+    std::string archGen, int matrixInstructionSize, int kpack,
+    bool enableWmmaTransform) {
   return std::make_unique<TritonAMDGPUAccelerateMatmulPass>(
-      archGen, matrixInstructionSize, enableWmmaTransform);
+      archGen, matrixInstructionSize, kpack, enableWmmaTransform);
 }

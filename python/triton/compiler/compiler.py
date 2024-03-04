@@ -100,7 +100,7 @@ def ttir_to_ttgir(mod, num_warps, warpsize, num_ctas, target):
 
 
 def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, enable_warp_specialization,
-                   enable_persistent, optimize_epilogue, matrix_inst_type):
+                   enable_persistent, optimize_epilogue, matrix_inst_type, slice_k_tile, kpack):
     is_cuda = _is_cuda(target)
     if is_cuda:
         capability = target.capability
@@ -119,10 +119,11 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
     if is_hip():
         gfx_arch = target["gfx_arch"]
         matrix_inst_size = matrix_inst_type
-        pm.add_tritonamdgpu_accelerate_matmul_pass(gfx_arch, matrix_inst_size)
+        pm.add_tritonamdgpu_accelerate_matmul_pass(gfx_arch, matrix_inst_size, kpack)
     pm.add_tritongpu_remove_layout_conversions_pass()
     if optimize_epilogue:
         pm.add_tritongpu_optimize_epilogue_pass()
+    pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
     pm.add_tritongpu_optimize_dot_operands_pass()
     if num_stages == 0 and is_hip() and target["matrix_core_version"] != 0:
         pm.add_tritongpu_stream_pipeline_pass()
@@ -273,7 +274,9 @@ def make_hash(fn, target, env_vars, device_backend, **kwargs):
         num_ctas = kwargs.get("num_ctas", 1)
         num_stages = kwargs.get("num_stages", 3)
         waves_per_eu = kwargs.get("waves_per_eu", 0)
-        matrix_instr_nonkdim = kwargs.get("matrix_instr_nonkdim", 0);
+        slice_k_tile = kwargs.get("slice_k_tile", 0)
+        matrix_instr_nonkdim = kwargs.get("matrix_instr_nonkdim", 0)
+        kpack = kwargs.get("kpack", 1)
         enable_warp_specialization = kwargs.get("enable_warp_specialization", False)
         enable_persistent = kwargs.get("enable_persistent", False)
         debug = kwargs.get("debug", False)
@@ -282,7 +285,7 @@ def make_hash(fn, target, env_vars, device_backend, **kwargs):
                                      sorted(conf.ids_of_folded_args), sorted(conf.divisible_by_8))
         configs_key = [get_conf_key(conf) for conf in configs]
         env_vars_list = [f"{env_vars[k]}" for k in sorted(env_vars.keys())]
-        key = f"{fn.cache_key}-{version_key}-{''.join(signature.values())}-{configs_key}-{constants}-{num_warps}-{num_stages}-{waves_per_eu}-{matrix_instr_nonkdim}-{num_ctas}-{num_stages}-{enable_warp_specialization}-{enable_persistent}-{debug}-{target}-{env_vars_list}"
+        key = f"{fn.cache_key}-{version_key}-{''.join(signature.values())}-{configs_key}-{constants}-{num_warps}-{num_stages}-{waves_per_eu}-{slice_k_tile}-{matrix_instr_nonkdim}-{kpack}-{num_ctas}-{num_stages}-{enable_warp_specialization}-{enable_persistent}-{debug}-{target}-{env_vars_list}"
         return hashlib.md5(key.encode("utf-8")).hexdigest()
     assert isinstance(fn, str)
     ignore_version = kwargs.get('ignore_version', False)
@@ -414,7 +417,9 @@ def compile(fn, **kwargs):
     num_ctas = kwargs.get("num_ctas", 1)
     num_stages = kwargs.get("num_stages", get_arch_default_num_stages(device_type, capability=capability))
     waves_per_eu = kwargs.get("waves_per_eu", 0)
+    slice_k_tile = kwargs.get("slice_k_tile", 0)
     matrix_instr_nonkdim = kwargs.get("matrix_instr_nonkdim", 0)
+    kpack = kwargs.get("kpack", 1)
     enable_fp_fusion = kwargs.get("enable_fp_fusion", True)
     # TODO[shuhaoj]: Default should be to enable warp specialization once possible
     enable_warp_specialization = kwargs.get("enable_warp_specialization", False)
@@ -453,7 +458,7 @@ def compile(fn, **kwargs):
     if is_cuda:
         stages["ttgir"] = (lambda path: parse_mlir_module(path, context), lambda src: optimize_ttgir(
             ttir_to_ttgir(src, num_warps, num_ctas, target), num_stages, num_warps, num_ctas, target, cluster_info,
-            enable_warp_specialization, enable_persistent, optimize_epilogue))
+            enable_warp_specialization, enable_persistent, optimize_epilogue, slice_k_tile))
         stages["llir"] = (lambda path: Path(path).read_text(),
                           lambda src: ttgir_to_llir(src, extern_libs, target, tma_infos))
         add_cuda_stages(target, extern_libs, stages)
@@ -472,12 +477,14 @@ def compile(fn, **kwargs):
         other["optimize_epilogue"] = optimize_epilogue 
         other["tma_infos"] = tma_infos
         other["waves_per_eu"] = waves_per_eu
+        other["slice_k_tile"] = slice_k_tile
         other["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+        other["kpack"] = kpack
 
         _device_backend.add_stages(target, extern_libs, stages, other)
     elif device_type == "xpu":
         stages["ttgir"] = (lambda path: parse_mlir_module(path, context),
-                           lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue))
+                           lambda src: optimize_ttgir(ttir_to_ttgir(src, num_warps, num_ctas, arch), num_stages, num_warps, num_ctas, arch, cluster_info, enable_warp_specialization, enable_persistent, optimize_epilogue, slice_k_tile))
         stages["llir"] = (lambda path: Path(path).read_text(),
                           lambda src: ttgir_to_llir(src, extern_libs, arch, tma_infos))
         _device_backend.add_stages(arch, extern_libs, stages)
@@ -556,7 +563,9 @@ def compile(fn, **kwargs):
             "num_ctas": num_ctas,
             "num_stages": num_stages,
             "waves_per_eu": waves_per_eu,
+            "slice_k_tile": slice_k_tile,
             "matrix_instr_nonkdim": matrix_instr_nonkdim,
+            "kpack": kpack,
             "enable_warp_specialization": enable_warp_specialization,
             "enable_persistent": enable_persistent,
             "constants": _get_jsonable_constants(constants),
@@ -689,6 +698,7 @@ class CompiledKernel:
         self.num_ctas = metadata["num_ctas"]
         self.num_stages = metadata["num_stages"]
         self.waves_per_eu = metadata["waves_per_eu"]
+        self.slice_k_tile = metadata["slice_k_tile"]
         self.clusterDims = metadata["clusterDims"]
         if "tensormaps_info" in metadata:
             self.tensormaps_info = metadata["tensormaps_info"]

@@ -131,9 +131,7 @@ def _fwd_kernel_splitK(
     )
 
     if QUANTIZED:
-        # Pointers to quantization coefficients. Even those they are 1D,
-        # we have to use block pointers, since usual pointers
-        # don't support boundary checks
+        # Pointers to quantization coefficients
         K_scale_shift_block_ptr = tl.make_block_ptr(
             base=k_base,
             shape=(1, hi),
@@ -165,19 +163,13 @@ def _fwd_kernel_splitK(
     # don't work as expected with `exp` in the loop
     qk_scale = sm_scale * 1.44269504
     # load q: it will stay in SRAM throughout
-    # q: "VAR_ARGS_ARRAY"  # noqa: F821
-    # for i in range(elem_num):  # noqa: F821
     q = tl.load(  # noqa: F821
-        tl.advance(Q_block_ptr, (0, 0)), boundary_check=(0,)
-    )
-    q = (q * qk_scale).to(tl.float16)
+        tl.advance(Q_block_ptr, (0, 0)), boundary_check=(0,))  
+    q = (q * qk_scale).to(q.dtype)
 
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
-        # k: "VAR_ARGS_ARRAY"  # noqa: F821
-        # v: "VAR_ARGS_ARRAY"  # noqa: F821
-        # for i in range(len(acc)):  # noqa: F821
-        k, v = load_dequantize_k_v_group(  # noqa: F821
+        k, v = load_dequantize_k_v_group(
             K_block_ptr,
             V_block_ptr,
             K_scale_shift_block_ptr,
@@ -188,12 +180,9 @@ def _fwd_kernel_splitK(
             Q.dtype.element_ty,
             0,
         )
-        # k.append(k_tmp)
-        # v.append(v_tmp)
 
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        # for i in range(elem_num):  # noqa: F821
         qk += tl.dot(q, k)  # noqa: F821
 
         # TODO: This is slow, and only needed at the last iteration.
@@ -211,9 +200,8 @@ def _fwd_kernel_splitK(
         p = p.to(Q.dtype.element_ty)
 
         # -- scale and update acc --
-        # for i in range(elem_num):  # noqa: F821
-        acc *= alpha[:, None]  # noqa: F821
-        acc += tl.dot(p, v)  # noqa: F821
+        acc *= alpha[:, None]
+        acc += tl.dot(p, v)
         # update pointers
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -234,10 +222,9 @@ def _fwd_kernel_splitK(
         block_shape=(BLOCK_M, D_PER_GROUP),
         order=(1, 0),
     )
-    # for i in range(elem_num):  # noqa: F821
     tl.store(
         tl.advance(O_block_ptr, (0, 0)),
-        acc,  # noqa: F821
+        acc,
         boundary_check=(0,),
     )
     # Write metadata for split-K reduction
@@ -277,7 +264,6 @@ def load_dequantize_k_v_group(
 
     if PACKED_PER_VAL > 1:
         # K/V are quantized, load quantization coefficients and dequantize
-
         K_scale_shift_block_ptr = tl.advance(K_scale_shift_block_ptr, (group_id, 0))
         V_scale_shift_block_ptr = tl.advance(V_scale_shift_block_ptr, (0, group_id))
 
@@ -508,12 +494,8 @@ class _attention(torch.autograd.Function):
     SUPPORTED_DTYPES = {
         torch.half,
         torch.bfloat16,
-    }  # Those are dtypes of Q. In the quantized case K/V has dtype int32
+    }
     SUPPORTED_MAX_K = 128
-    # SUPPORTED_ATTN_BIAS_TYPES: Set[Any] = {
-    #     type(None),
-    #     BlockDiagonalCausalWithOffsetPaddedKeysMask,
-    # }
     SUPPORTS_DROPOUT = False
     SUPPORTS_CUSTOM_SCALE = True
     SUPPORTS_BMGHK = True
@@ -571,6 +553,7 @@ class _attention(torch.autograd.Function):
         lse = torch.empty((B * G * H, M), device=q.device, dtype=torch.float32)
         grid = (triton.cdiv(M, BLOCK_M), B * G * H, split_k)
 
+        num_warps = 1
         split_size = (Mk + split_k - 1) // split_k
         use_seq_len = seq_len is not None
 
@@ -600,7 +583,7 @@ class _attention(torch.autograd.Function):
             BLOCK_DMODEL=Lk,
             BOUNDS_CHECKS_N=(split_size % BLOCK_N) > 0 or use_seq_len,
             USE_SEQ_LEN=use_seq_len,
-            num_warps=1,
+            num_warps=num_warps,
             num_stages=1,
             PACKED_PER_VAL=PACKED_PER_VAL,
             N_GROUPS=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1,

@@ -398,8 +398,6 @@ def _splitK_reduce(
     # read sum
     l_sum *= alpha
     g_sum = tl.sum(l_sum, axis=0)
-
-    alpha = tl.math.exp2(l_m - g_m)
     acc = acc * alpha[:, None]
     acc_out = tl.sum(acc, axis=0) / g_sum
     Out_ptr = (

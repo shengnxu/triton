@@ -19,8 +19,10 @@ Not currently supported:
 
 """
 
+import argparse
 import pytest
 import random
+import sys
 import torch
 
 import triton
@@ -1252,67 +1254,172 @@ def bench_flash_attention(
         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
     return total_flops / ms * 1e-9
 
-bench_flash_attention.run(save_path=".", print_data=True)
+def nonvarlen_benchmark_configs():
+    configs=[(16, 16, 1024, 1024),
+            (8, 16, 2048, 2048),
+            (4, 16, 4096, 4096),
+            (2, 16, 8192, 8192),
+            (1, 16, 16384, 16384),
+            (2, 48, 1024, 1024),
+            (2, 48, 2048, 1024),
+            (2, 48, 4096, 8192),
+            (2, 48, 8192, 4096),
+            (2, 48, 16384, 8192),
+            (8, 16, 1989, 15344),
+            (4, 16, 4097, 163),
+            (2, 16, 8122, 2159),
+            (1, 16, 16281, 7),
+            (2, 48, 1021, 1020),
+            (2, 48, 2001, 2048),
+            (2, 48, 3996, 9639),
+            (2, 48, 8181, 1021),
+            ]
+    return configs
 
-configs = []
-for mode in ['fwd']:
-    for D_HEAD in [128]:
-        configs.append(triton.testing.Benchmark(
-            x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
-            x_vals=[(2, 16, 4, 1024),
-                    (8, 16, 2, 2048),
-                    (4, 16, 8, 4096),
-                    (2, 16, 4, 8192),
-                    (2, 16, 8, 16384),
-                    (2, 48, 12, 1024),
-                    (2, 48, 24, 2048),
-                    (2, 48, 8, 4096),
-                    (2, 48, 4, 8192),
-                    (2, 48, 2, 16384),
-                    (2, 64, 32, 1024),
-                    (4, 64, 16, 2048),
-                    (4, 64, 8, 4096),
-                    (4, 64, 32, 8192),
-                    (4, 128, 16, 16384),
-                    ],
-            line_arg='provider',
-            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-            styles=[('red', '-'), ('blue', '-')],
-            ylabel='ms',
-            plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
-            args={
-                'D_HEAD': D_HEAD,
-                'dtype': torch.float16,
-                'mode': mode})
-        )
-@triton.testing.perf_report(configs)
-def bench_varlen_flash_attention(
-    BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
-):
-    assert mode in ["fwd"]
-    warmup = 25
-    rep = 100
-    if provider == "triton":
+def varlen_benchmark_configs():
+    configs=[(2, 16, 4, 1024),
+            (8, 16, 2, 2048),
+            (4, 16, 8, 4096),
+            (2, 16, 4, 8192),
+            (2, 16, 8, 16384),
+            (2, 48, 12, 1024),
+            (2, 48, 24, 2048),
+            (2, 48, 8, 4096),
+            (2, 48, 4, 8192),
+            (2, 48, 2, 16384),
+            (2, 64, 32, 1024),
+            (4, 64, 16, 2048),
+            (4, 64, 8, 4096),
+            (4, 64, 32, 8192),
+            (4, 128, 16, 16384),
+            ]
+    return configs
+
+def run_benchmark(varlen):
+    configs = []
+    causal = False
+    if varlen:
+        x_names=['BATCH', 'HQ', 'HK', 'N_CTX']
+        x_vals_list = varlen_benchmark_configs()
+    else:
+        x_names=['BATCH', 'H', 'N_CTX_Q', 'N_CTX_K']
+        x_vals_list = nonvarlen_benchmark_configs()
+    D_HEAD = 128 
+    configs.append(triton.testing.Benchmark(
+        x_names=x_names,
+        x_vals=x_vals_list,
+        line_arg='provider',
+        line_vals=['triton'],
+        line_names=['Triton'],
+        styles=[('red', '-')],
+        ylabel='ms',
+        plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
+        args={
+            'D_HEAD': D_HEAD,
+            'dtype': torch.float16,
+            'causal': causal,
+            'mode': mode})
+    )
+
+    @triton.testing.perf_report(configs)
+    def bench_flash_attention(
+        BATCH, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"
+    ):
+        assert mode in ["fwd", "bwd"]
+        warmup = 25
+        rep = 100
+        sm_scale = D_HEAD**-0.5
+        input_metadata = MetaData(sm_scale=sm_scale)
+        input_metadata.max_seqlens_q = N_CTX_Q
+        input_metadata.max_seqlens_k = N_CTX_K
+        if causal:
+            input_metadata.need_causal()
+        # TODO: Enable bias after testing.
+        # if use_bias:
+        #     bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
+        #     input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
+        # else:
+        #     bias = None
+        bias = None
+
+        # Bwd pass only supports causal=True right now
+        if mode == 'bwd':
+            causal = True
+        q = torch.randn((BATCH, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        k = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        v = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+        o = torch.empty_like(q)
+        if mode == "fwd":
+            q = q.to(torch_dtype)
+            k = k.to(torch_dtype)
+        fn = lambda: attention(q, k, v, o, input_metadata)
+        if mode == 'bwd':
+            o = fn()
+            do = torch.randn_like(o)
+            fn = lambda: o.backward(do, retain_graph=True)
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        flops_per_matmul = 2.0 * BATCH * H * N_CTX_Q * N_CTX_K * D_HEAD
+        total_flops = 2 * flops_per_matmul
+        # TODO: This needs to be fixed for unequal Q/K seqlens
+        if causal:
+            total_flops *= 0.5
+        if mode == "bwd":
+            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+        return total_flops / ms * 1e-9
+
+    @triton.testing.perf_report(configs)
+    def bench_varlen_flash_attention(
+        BATCH, HQ, HK, N_CTX, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"
+    ):
+        assert mode in ["fwd"]
+        warmup = 25
+        rep = 100
         q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
         tri_out = torch.empty_like(q)
         fn = lambda: attention(q, k, v, tri_out, input_metadata)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn(
-            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
-        )
-        fn = lambda: flash_attn_func(qkv, causal=causal)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 0
-    for i in range (0, input_metadata.num_contexts):
-        seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
-        seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
-        # x2 for 2 GEMMs
-        flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
-    # x2 for mul and add
-    total_flops = 2 * flops_per_matmul
-    return total_flops / ms * 1e-9
+        flops_per_matmul = 0
+        for i in range (0, input_metadata.num_contexts):
+            seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
+            seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
+            # x2 for 2 GEMMs
+            flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
+        # x2 for mul and add
+        total_flops = 2 * flops_per_matmul
+        return total_flops / ms * 1e-9
 
-bench_varlen_flash_attention.run(save_path=".", print_data=True)
+    if varlen:
+        bench_varlen_flash_attention.run(save_path=".", print_data=True)
+    else:
+        bench_flash_attention.run(save_path=".", print_data=True)
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        prog="Benchmark FlashAttention",
+        allow_abbrev=False,
+    )
+    parser.add_argument("-b", type=int, default=0)
+    parser.add_argument("-heads", type=int, default=0)
+    parser.add_argument("-sq", type=int, default=0)
+    parser.add_argument("-sk", type=int, default=0)
+    parser.add_argument("-d", type=int, default=0)
+    parser.add_argument("-causal", action='store_true', default=False)
+    parser.add_argument("-varlen", action='store_true', default=False)
+    parser.add_argument("-return_time", action='store_true', default=False)
+    parser.add_argument("-bench_suite", action='store_false', default=True)
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    run_bench_suite = args.bench_suite
+    print(f">>>>>>>{args.bench_suite}")
+    if args.b or args.heads or args.sq or args.sk or args.d:
+        run_bench_suite = False
+        assert args.b and args.heads and args.sq and args.sk and args.d, \
+               "If custom config is specified, please provide all of batch/heads/sq/sk/d"
+    
+    if run_bench_suite:
+        run_benchmark(args.varlen)
+
+if __name__ == '__main__':
+    sys.exit(main())

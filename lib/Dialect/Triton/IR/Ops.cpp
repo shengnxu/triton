@@ -614,6 +614,11 @@ OpFoldResult SplatOp::fold(FoldAdaptor adaptor) {
   auto value = adaptor.getSrc();
   if (!value)
     return {};
+  // bypass fold if splat on fp8 type
+  auto elem_ty = getType().cast<RankedTensorType>().getElementType();
+  if (elem_ty.isFloat8E4M3FNUZ() || elem_ty.isFloat8E5M2FNUZ()) {
+    return {};
+  }
   auto shapedType = getType().cast<ShapedType>();
   auto ret = SplatElementsAttr::get(shapedType, ArrayRef<Attribute>(value));
   return ret;

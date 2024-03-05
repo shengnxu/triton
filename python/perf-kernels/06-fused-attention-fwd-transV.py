@@ -19,28 +19,7 @@ import sys
 import triton
 import triton.language as tl
 
-
-# should use e4m3 for forward pass and e5m2 for backward pass
-# set intended dtype and scaling factor if fp8
-TORCH_HAS_FP8E4FNUZ = hasattr(torch, 'float8_e4m3fnuz')
-TORCH_HAS_FP8E4FN = hasattr(torch, 'float8_e4m3fn')
-TORCH_HAS_FP8E5FNUZ = hasattr(torch, 'float8_e5m2fnuz')
-TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2')
-fp8_max_repr_val_dict = {}
-fp8_type_list = []
-if TORCH_HAS_FP8E4FNUZ:
-    fp8_max_repr_val_dict[torch.float8_e4m3fnuz] = 240.0
-    fp8_type_list.append(torch.float8_e4m3fnuz)
-# if TORCH_HAS_FP8E4FN:
-#     fp8_max_repr_val_dict[torch.float8_e4m3fn] = 448.0
-#     fp8_type_list.append(torch.float8_e4m3fn)
-if TORCH_HAS_FP8E5FNUZ:
-    fp8_max_repr_val_dict[torch.float8_e5m2fnuz] = 57344.0
-    fp8_type_list.append(torch.float8_e5m2fnuz)
-if TORCH_HAS_FP8E5:
-    fp8_max_repr_val_dict[torch.float8_e5m2] = 57344.0
-    fp8_type_list.append(torch.float8_e5m2)
-
+from fp8_utils import get_fp8_scaling_factor, scale_and_cast_to_fp8, fp8_max_repr_val_dict, fp8_type_list
 
 @triton.jit
 def max_fn(x, y):
@@ -157,7 +136,6 @@ def _attn_fwd(
         ##### Scale + Dot + Descale #####
         # Scale
         if use_fp8:
-
             p = (p * s_scale).to(q.dtype)
         else:
             p = p.to(v.dtype)
@@ -270,53 +248,11 @@ attention = _attention.apply
 
 name_to_torch_types = {
     'fp16': torch.float16,
+    'float8_e4m3fn': torch.float8_e4m3fn,
     'float8_e4m3fnuz': torch.float8_e4m3fnuz,
     'float8_e5m2': torch.float8_e5m2,
     'float8_e5m2fnuz': torch.float8_e5m2fnuz,
-
 }
-
-def _tensor_amax(tensor: torch.Tensor) -> float:
-    # use .item() because only python float, rather than pytorch float tensor
-    # can be recoginized as fp32 in triton
-    return tensor.abs().float().amax().item()
-
-def get_fp8_quantization_factor(fp8_max_repr_val: float, tensor: torch.Tensor, 
-                                fp8_type: torch.dtype=torch.float8_e4m3fnuz,
-                                margin: int=1) -> float:
-    if fp8_type not in fp8_type_list:
-        return 1.0
-    ret = fp8_max_repr_val / _tensor_amax(tensor)
-    ret = math.pow(2, math.floor(math.log2(ret))-margin)
-    return ret
-
-def scale_fp8_tensor(
-        tensor: torch.Tensor,
-        fp8_type: torch.dtype,
-        scaling_factor: float = None,
-    ) -> tuple[torch.Tensor, float, float]:
-    """Scale a non-fp8 tensor to fp8 and return scaling and descaling factor
-
-    Args:
-        tensor (torch.Tensor): _description_
-        fp8_type (torch.dtype): _description_
-        scaling_factor (float, optional): _description_. Defaults to None.
-
-    Returns:
-        tuple[torch.Tensor, float, float]: _description_
-    """
-    assert fp8_type in fp8_type_list, f"Intended dtype {fp8_type} not supported by PyTorch"
-    # get the maximally representable number for this fp8 type
-    fp8_max_repr_val = fp8_max_repr_val_dict[fp8_type]
-    # use tensor's amax or user input
-    amax = _tensor_amax(tensor) if scaling_factor is None else scaling_factor
-    scale = fp8_max_repr_val / amax
-    # rounding to nearest lower power of 2
-    scale = math.pow(2, math.floor(math.log2(scale)))
-    # scale and cast
-    tensor_scaled_fp8 = (tensor.float() * scale).to(fp8_type)
-
-    return tensor_scaled_fp8, scale, 1.0/scale
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, dtype',
 [ (*shape, dtype)
@@ -330,7 +266,6 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     torch_dtype = name_to_torch_types[dtype]
     use_fp8 = torch_dtype in fp8_type_list
-    fp8_max_repr_val = fp8_max_repr_val_dict[torch_dtype] if use_fp8 else 1.0
 
     q = (
         torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda")
@@ -359,29 +294,34 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     # triton implementation
     # TODO: forcing s_scale to be larger, why?
     #s_scale = fp8_max_repr_val / 1.0
-    s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
-    o_scale = get_fp8_quantization_factor(fp8_max_repr_val, ref_out)
-    q_scale = get_fp8_quantization_factor(fp8_max_repr_val, q)
-    k_scale = get_fp8_quantization_factor(fp8_max_repr_val, k)
-    v_scale = get_fp8_quantization_factor(fp8_max_repr_val, v)
-    print("fp8_max_repr_val:", fp8_max_repr_val)
-    print("_tensor_amax(s):", _tensor_amax(p), "_tensor_amax(o):",
-          _tensor_amax(ref_out), "_tensor_amax(q):",
-          _tensor_amax(q), "_tensor_amax(k):",
-          _tensor_amax(k), "_tensor_amax(v):", _tensor_amax(v))
-    print("s_scale:", s_scale, "o_scale:", o_scale, "q_scale:",
-          q_scale, "k_scale:", k_scale, "v_scale:", v_scale)
+    # s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
+    # o_scale = get_fp8_quantization_factor(fp8_max_repr_val, ref_out)
+    # q_scale = get_fp8_quantization_factor(fp8_max_repr_val, q)
+    # k_scale = get_fp8_quantization_factor(fp8_max_repr_val, k)
+    # v_scale = get_fp8_quantization_factor(fp8_max_repr_val, v)
+    # print("fp8_max_repr_val:", fp8_max_repr_val)
+    # print("_tensor_amax(s):", _tensor_amax(p), "_tensor_amax(o):",
+    #       _tensor_amax(ref_out), "_tensor_amax(q):",
+    #       _tensor_amax(q), "_tensor_amax(k):",
+    #       _tensor_amax(k), "_tensor_amax(v):", _tensor_amax(v))
+    # print("s_scale:", s_scale, "o_scale:", o_scale, "q_scale:",
+    #       q_scale, "k_scale:", k_scale, "v_scale:", v_scale)
     # scale and cast qkv to fp8
     if use_fp8:
-        q = (q.float() * q_scale).to(torch_dtype)
-        k = (k.float() * k_scale).to(torch_dtype)
-        v = (v.float() * v_scale).to(torch_dtype)
+        q, _, q_descale = scale_and_cast_to_fp8(q, torch_dtype, margin=1)
+        k, _, k_descale = scale_and_cast_to_fp8(k, torch_dtype, margin=1)
+        v, _, v_descale = scale_and_cast_to_fp8(v, torch_dtype, margin=1)
         assert q.isnan().sum() == 0, "There is Nan in q"
         assert k.isnan().sum() == 0, "There is Nan in k"
         assert v.isnan().sum() == 0, "There is Nan in v"
+        s_scale = get_fp8_scaling_factor(p, torch_dtype, margin=1)
+        o_scale = get_fp8_scaling_factor(ref_out, torch_dtype, margin=1)
+        s_descale = 1.0 / s_scale
+    else:
+        s_descale = s_scale = o_scale = q_descale = k_descale = v_descale = 1.0
     # Triton kernel call
     tri_out, tri_amax_s, tri_amax_o = attention(q, k, v,
-        sm_scale, 1.0/q_scale, 1.0/k_scale, 1.0/v_scale, s_scale, 1.0/s_scale, o_scale)
+        sm_scale, q_descale, k_descale, v_descale, s_scale, s_descale, o_scale)
     # Dequantize to compare with reference
     if use_fp8:
         assert tri_out.isnan().sum() == 0, \
@@ -464,23 +404,21 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, devi
     v = torch.randn((BATCH, H, D_HEAD, N_CTX), dtype=torch.float16, device="cuda", requires_grad=True)
     sm_scale = 1.3
     if use_fp8:
+        q, _, q_descale = scale_and_cast_to_fp8(q, torch_dtype, margin=1)
+        k, _, k_descale = scale_and_cast_to_fp8(k, torch_dtype, margin=1)
+        v, _, v_descale = scale_and_cast_to_fp8(v, torch_dtype, margin=1)
+        assert q.isnan().sum() == 0, "There is Nan in q"
+        assert k.isnan().sum() == 0, "There is Nan in k"
+        assert v.isnan().sum() == 0, "There is Nan in v"
         # pseudo s_scale & o_scale.
         # can't calculate them from reference pytorch code, otherwise taking too much memory
         s_scale = fp8_max_repr_val / 1.0
         o_scale = fp8_max_repr_val / 1.0
-        # s_scale = get_fp8_quantization_factor(fp8_max_repr_val, p)
-        # o_scale = get_fp8_quantization_factor(fp8_max_repr_val, ref_out)
-        q_scale = get_fp8_quantization_factor(fp8_max_repr_val, q)
-        k_scale = get_fp8_quantization_factor(fp8_max_repr_val, k)
-        v_scale = get_fp8_quantization_factor(fp8_max_repr_val, v)
-        # scale and cast qkv to fp8
-        q = (q.float() * q_scale).to(torch_dtype)
-        k = (k.float() * k_scale).to(torch_dtype)
-        v = (v.float() * v_scale).to(torch_dtype)
+        s_descale = 1.0 / s_scale
     else:
-        s_descale = s_scale = o_scale = q_scale = k_scale = v_scale = 1.0
+        s_descale = s_scale = o_scale = q_descale = k_descale = v_descale = 1.0
     # Triton kernel call
-    fn = lambda: attention(q, k, v, sm_scale, 1.0/q_scale, 1.0/k_scale, 1.0/v_scale, s_scale, 1.0/s_scale, o_scale)
+    fn = lambda: attention(q, k, v, sm_scale, q_descale, k_descale, v_descale, s_scale, s_descale, o_scale)
     ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
     flops_per_matmul = 2. * BATCH * H * N_CTX * N_CTX * D_HEAD
     total_flops = 2 * flops_per_matmul

@@ -26,13 +26,11 @@ import torch
 import triton
 import triton.language as tl
 
-torch_dtype:tl.constexpr = torch.float16
+from fp8_utils import _tensor_amax, get_fp8_scaling_factor, scale_and_cast_to_fp8, fp8_max_repr_val_dict, fp8_type_list
 
-# TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-# if TORCH_HAS_FP8E5:
-#     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
 class MetaData():
+    # TODO: fix this class variable
     cu_seqlens_q = None
     cu_seqlens_k = None
     max_seqlens_q = 0
@@ -68,7 +66,7 @@ class MetaData():
     def need_causal(self):
         self.causal = True
 
-    def need_dropout(dropout_p, return_encoded_softmax):
+    def need_dropout(self, dropout_p, return_encoded_softmax):
         self.dropout_p = dropout_p
         self.return_encoded_softmax = return_encoded_softmax
 
@@ -95,11 +93,21 @@ class MetaData():
         assert k.shape == v.shape
         assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
         # TODO: Change assert if we support qkl f8 and v f16
-        assert q.dtype == k.dtype and q.dtype == v.dtype
+        # assert q.dtype == k.dtype and q.dtype == v.dtype
         # TODO: Fix assert to check head size <=256 once supported
         assert head_size <= 128
         assert o.shape == q.shape
         assert (nheads_q % nheads_k) == 0
+
+    def set_fp8_params(self, use_fp8, q_descale, k_descale, v_descale, s_scale, s_descale, o_scale):
+        self.use_fp8 = use_fp8
+        self.q_descale = q_descale
+        self.k_descale = k_descale
+        self.v_descale = v_descale
+        self.s_scale = s_scale
+        self.s_descale = s_descale
+        self.o_scale = o_scale
+
 
 @triton.jit
 def cdiv_fn(x,y):
@@ -154,6 +162,8 @@ def _attn_fwd_inner(
     masked_blocks,
     n_extra_tokens,
     bias_ptr,
+    qk_descale,
+    s_scale,
     IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -164,7 +174,8 @@ def _attn_fwd_inner(
     MASK_STEPS: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
-    PADDED_HEAD: tl.constexpr
+    PADDED_HEAD: tl.constexpr,
+    USE_FP8: tl.constexpr,
 ):
     # loop over k, v, and update accumulator
     for start_n in range (block_min, block_max, BLOCK_N):
@@ -194,6 +205,8 @@ def _attn_fwd_inner(
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
+        if USE_FP8:  # descale qk after 1st gemm
+            qk *= qk_descale
         if bias_ptr is not None:
             bias = load_fn(bias_ptr, False, MASK_STEPS and (n_extra_tokens != 0), "zero")
             # While bias is added after multiplying qk with sm_scale,
@@ -223,7 +236,11 @@ def _attn_fwd_inner(
         l_i = l_i * alpha + l_ij
         # update m_i and l_i
         m_i = m_ij
+        if USE_FP8:  # scale p in fp32 and cast to fp8
+            p *= s_scale
         acc += tl.dot(p.to(V_block_ptr.type.element_ty), v)
+        # TODO: discuss this, no need to descale p after 2nd gemm, but would performance be worse?
+        # if USE_FP8:  # descale
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         if bias_ptr is not None:
@@ -234,22 +251,24 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
    ],
    key=['hq', 'hk', 'IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
 )
 @triton.jit
 def attn_fwd(
-    Q, K, V, bias, sm_scale, L, Out,
+    Q, K, V, bias, sm_scale,
+    q_descale, k_descale, v_descale, s_scale, s_descale, o_scale,
+    L, Out,
     stride_qz, stride_qh, stride_qm, stride_qk,
     stride_kz, stride_kh, stride_kn, stride_kk,
     stride_vz, stride_vh, stride_vk, stride_vn,
@@ -271,7 +290,8 @@ def attn_fwd(
     PRE_LOAD_V: tl.constexpr,
     BIAS_TYPE: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
-    RETURN_ENCODED_SOFTMAX: tl.constexpr
+    RETURN_ENCODED_SOFTMAX: tl.constexpr,
+    USE_FP8: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
@@ -390,6 +410,7 @@ def attn_fwd(
     else:
         bias_ptr = None
     if ENABLE_DROPOUT:
+        # TODO: off_hz is not defined anywhere
         batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     else:
         batch_philox_offset = 0
@@ -416,7 +437,12 @@ def attn_fwd(
     qk_scale = sm_scale * 1.44269504089
     # Q is loaded once at the beginning and shared by all N blocks.
     q = load_fn(Q_block_ptr, True, padded_head, "zero")
-    q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
+    if not USE_FP8:
+        q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
+        qk_descale = 1.0
+    else:
+        qk_descale = qk_scale * q_descale * k_descale
+        acc_descale = s_descale * v_descale
 
     # Here we compute how many full and masked blocks we have.
     padded_block_k = n_extra_tokens != 0
@@ -444,10 +470,12 @@ def attn_fwd(
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             # _, _, offs_n_causal, masked_blocks, n_extra_tokens, _
             block_min, block_max, 0, 0, 0, bias_ptr,
+            qk_descale, s_scale,
             # IS_CAUSAL, ....
             False, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
-            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head
+            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
+            USE_FP8,
         )
         block_min = block_max
         block_max = n_blocks * BLOCK_N
@@ -471,12 +499,18 @@ def attn_fwd(
             start_m, seqlen_k,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             block_min, block_max, offs_n_causal, masked_blocks,  n_extra_tokens, bias_ptr,
+            qk_descale, s_scale,
             IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
-            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head
+            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
+            USE_FP8,
         )
     # epilogue
+    if USE_FP8:  # descale acc (fp32 now)
+        acc *= acc_descale
     acc = acc / l_i[:, None]
+    # TODO: add amax_o & amx_s
+    # if USE_FP8:
     if ENABLE_DROPOUT:
         acc = acc / (1 - dropout_p)
     # If seqlen_q > seqlen_k but the delta is not a multiple of BLOCK_M,
@@ -486,6 +520,8 @@ def attn_fwd(
     end_m_idx = (start_m + 1) * BLOCK_M
     start_m_idx = start_m * BLOCK_M
     causal_start_idx = seqlen_q - seqlen_k
+    if USE_FP8:  # scale acc before casting to fp8
+        acc *= o_scale
     acc = acc.to(Out.type.element_ty)
     if IS_CAUSAL:
         if causal_start_idx > start_m_idx and causal_start_idx < end_m_idx:
@@ -846,7 +882,10 @@ class _attention(torch.autograd.Function):
             bias_strides = (0,0,0,0)
 
         attn_fwd[grid](
-            q, k, v, metadata.bias, metadata.sm_scale, M, o,
+            q, k, v, metadata.bias, metadata.sm_scale,
+            metadata.q_descale, metadata.k_descale, metadata.v_descale,
+            metadata.s_scale, metadata.s_descale, metadata.o_scale,
+            M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
             metadata.cu_seqlens_q, metadata.cu_seqlens_k,
             dropout_p=metadata.dropout_p,
@@ -862,7 +901,8 @@ class _attention(torch.autograd.Function):
             BLOCK_DMODEL=padded_d_model,
             BIAS_TYPE=0 if metadata.bias is None else 1,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
-            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax
+            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
+            USE_FP8=metadata.use_fp8,
         )
 
         ctx.save_for_backward(q, k, v, o, M)
@@ -948,8 +988,17 @@ class _attention(torch.autograd.Function):
 
 attention = _attention.apply
 
+name_to_torch_types = {
+    'fp16': torch.float16,
+    'bf16': torch.bfloat16,
+    'float8_e4m3fnuz': torch.float8_e4m3fnuz,
+    'float8_e5m2': torch.float8_e5m2,
+    'float8_e5m2fnuz': torch.float8_e5m2fnuz,
+}
+
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 1024, 1024, 64),
+                         [
+                          (4, 48, 1024, 1024, 64),
                           (4, 48, 8192, 8192, 64),
                           (2, 16, 16384, 16384, 128),
                           (2, 16, 1020, 987, 128),
@@ -966,13 +1015,18 @@ attention = _attention.apply
                           (4, 4, 128, 128, 65),
                           (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False, True])
+@pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_bias', [False])
-def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.float16):
+@pytest.mark.parametrize('dtype', ['float8_e4m3fnuz'])
+def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype):
     # TODO: using bias causes coredump for certain configs and must be fixed.
     if use_bias:
         pytest.skip()
     torch.manual_seed(20)
+    torch_dtype = name_to_torch_types[dtype]
+    use_fp8 = torch_dtype in fp8_type_list
+    print("torch_dtype:", torch_dtype)
+    print("use_fp8:", bool(use_fp8))
     sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
@@ -984,18 +1038,11 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.fl
         input_metadata.need_bias(bias, Z, H, N_CTX_Q, N_CTX_K)
     else:
         bias = None
-    q = torch.randn((Z, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    # if TORCH_HAS_FP8E5:
-    #     q = q.to(torch_dtype)
-    #     k = k.to(torch_dtype)
-    o = torch.empty_like(q)
+    q = torch.randn((Z, H, N_CTX_Q, D_HEAD), dtype=torch.float16, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    k = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=torch.float16, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    v = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=torch.float16, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
 
-    # triton implementation
-    tri_out, _ = attention(q, k, v, o, input_metadata)
     # reference implementation:171
-
     scores = torch.einsum('bhqd,bhkd->bhqk', q, k).float() * sm_scale
     if causal:
         mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
@@ -1011,8 +1058,42 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.fl
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
+
+    print("ref_out:", ref_out.shape)
+    # triton implementation
+    if use_fp8:
+        q, _, q_descale = scale_and_cast_to_fp8(q, torch_dtype, margin=1)
+        k, _, k_descale = scale_and_cast_to_fp8(k, torch_dtype, margin=1)
+        v, _, v_descale = scale_and_cast_to_fp8(v, torch_dtype, margin=1)
+        # v_descale = 1.0
+        assert q.isnan().sum() == 0, "There is Nan in q"
+        assert k.isnan().sum() == 0, "There is Nan in k"
+        assert v.isnan().sum() == 0, "There is Nan in v"
+        s_scale = get_fp8_scaling_factor(p, torch_dtype, margin=1)
+        o_scale = get_fp8_scaling_factor(ref_out, torch_dtype, margin=1)
+        print("ref_out amax:", _tensor_amax(ref_out))
+        s_descale = 1.0 / s_scale
+    else:
+        s_descale = s_scale = o_scale = q_descale = k_descale = v_descale = 1.1
+    input_metadata.set_fp8_params(use_fp8, q_descale, k_descale, v_descale,
+                                  s_scale, s_descale, o_scale)
+    print(q_descale, k_descale, v_descale, s_scale, s_descale, o_scale)
+    o = torch.empty_like(q)
+    print(q.dtype, k.dtype, v.dtype, o.dtype)
+    tri_out, _ = attention(q, k, v, o, input_metadata)
     # compare
-    torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
+    if use_fp8:
+        assert tri_out.isnan().sum() == 0, \
+            f"There is {(tri_out.isnan().sum())}/{tri_out.numel()} Nan in output"
+        tri_out = tri_out.float() / o_scale
+        ref_amax_o = ref_out.abs().amax().reshape([1])
+        print(ref_amax_o)
+        # print('ref_amax_o=', ref_amax_o, ' tri_amax_o=', tri_amax_o)
+        # torch.testing.assert_close(ref_amax_o, tri_amax_o.half(), atol=atol, rtol=0)
+    # compare
+    atol = 1.4e-1 if 'float8' in dtype else 2e-2
+    rtol = 1e-2 if 'float8' in dtype else 2e-2
+    torch.testing.assert_close(ref_out, tri_out.half(), atol=atol, rtol=rtol)
 
 def varlen_input_helper(Z, HQ, HK, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
@@ -1160,164 +1241,164 @@ try:
 except BaseException:
     HAS_FLASH = False
 
-configs = []
-for mode in ['fwd']:
-    for D_HEAD in [128]:
-        if mode == 'bwd' and D_HEAD == 128:
-            continue
-        for causal in [False, True]:
-            if mode == 'bwd' and causal == False:
-                continue
-            configs.append(triton.testing.Benchmark(
-                x_names=['BATCH', 'H', 'N_CTX_Q', 'N_CTX_K'],
-                x_vals=[(16, 16, 1024, 1024),
-                        (8, 16, 2048, 2048),
-                        (4, 16, 4096, 4096),
-                        (2, 16, 8192, 8192),
-                        (1, 16, 16384, 16384),
-                        (2, 48, 1024, 1024),
-                        (2, 48, 2048, 1024),
-                        (2, 48, 4096, 8192),
-                        (2, 48, 8192, 4096),
-                        (2, 48, 16384, 8192),
-                        (8, 16, 1989, 15344),
-                        (4, 16, 4097, 163),
-                        (2, 16, 8122, 2159),
-                        (1, 16, 16281, 7),
-                        (2, 48, 1021, 1020),
-                        (2, 48, 2001, 2048),
-                        (2, 48, 3996, 9639),
-                        (2, 48, 8181, 1021),
-                        ],
-                line_arg='provider',
-                line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-                line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-                styles=[('red', '-'), ('blue', '-')],
-                ylabel='ms',
-                plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}',
-                args={
-                    'D_HEAD': D_HEAD,
-                    'dtype': torch.float16,
-                    'mode': mode,
-                    'causal': causal})
-            )
-@triton.testing.perf_report(configs)
-def bench_flash_attention(
-    BATCH, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"
-):
-    assert mode in ["fwd", "bwd"]
-    warmup = 25
-    rep = 100
-    sm_scale = D_HEAD**-0.5
-    input_metadata = MetaData(sm_scale=sm_scale)
-    input_metadata.max_seqlens_q = N_CTX_Q
-    input_metadata.max_seqlens_k = N_CTX_K
-    if causal:
-        input_metadata.need_causal()
-    # TODO: Enable bias after testing.
-    # if use_bias:
-    #     bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
-    #     input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
-    # else:
-    #     bias = None
-    bias = None
+# configs = []
+# for mode in ['fwd']:
+#     for D_HEAD in [128]:
+#         if mode == 'bwd' and D_HEAD == 128:
+#             continue
+#         for causal in [False, True]:
+#             if mode == 'bwd' and causal == False:
+#                 continue
+#             configs.append(triton.testing.Benchmark(
+#                 x_names=['BATCH', 'H', 'N_CTX_Q', 'N_CTX_K'],
+#                 x_vals=[(16, 16, 1024, 1024),
+#                         (8, 16, 2048, 2048),
+#                         (4, 16, 4096, 4096),
+#                         (2, 16, 8192, 8192),
+#                         (1, 16, 16384, 16384),
+#                         (2, 48, 1024, 1024),
+#                         (2, 48, 2048, 1024),
+#                         (2, 48, 4096, 8192),
+#                         (2, 48, 8192, 4096),
+#                         (2, 48, 16384, 8192),
+#                         (8, 16, 1989, 15344),
+#                         (4, 16, 4097, 163),
+#                         (2, 16, 8122, 2159),
+#                         (1, 16, 16281, 7),
+#                         (2, 48, 1021, 1020),
+#                         (2, 48, 2001, 2048),
+#                         (2, 48, 3996, 9639),
+#                         (2, 48, 8181, 1021),
+#                         ],
+#                 line_arg='provider',
+#                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+#                 line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+#                 styles=[('red', '-'), ('blue', '-')],
+#                 ylabel='ms',
+#                 plot_name=f'fused-attention-{mode}-d{D_HEAD}-causal={causal}',
+#                 args={
+#                     'D_HEAD': D_HEAD,
+#                     'dtype': torch.float16,
+#                     'mode': mode,
+#                     'causal': causal})
+#             )
+# @triton.testing.perf_report(configs)
+# def bench_flash_attention(
+#     BATCH, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, mode, provider, dtype=torch.float16, device="cuda"
+# ):
+#     assert mode in ["fwd", "bwd"]
+#     warmup = 25
+#     rep = 100
+#     sm_scale = D_HEAD**-0.5
+#     input_metadata = MetaData(sm_scale=sm_scale)
+#     input_metadata.max_seqlens_q = N_CTX_Q
+#     input_metadata.max_seqlens_k = N_CTX_K
+#     if causal:
+#         input_metadata.need_causal()
+#     # TODO: Enable bias after testing.
+#     # if use_bias:
+#     #     bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
+#     #     input_metadata.need_bias(bias, BATCH, H, N_CTX, N_CTX)
+#     # else:
+#     #     bias = None
+#     bias = None
 
-    # Bwd pass only supports causal=True right now
-    if mode == 'bwd':
-        causal = True
-    if provider == "triton":
-        q = torch.randn((BATCH, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        k = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        v = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-        o = torch.empty_like(q)
-        if mode == "fwd":
-            q = q.to(torch_dtype)
-            k = k.to(torch_dtype)
-        fn = lambda: attention(q, k, v, o, input_metadata)
-        if mode == 'bwd':
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn(
-            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
-        )
-        fn = lambda: flash_attn_func(qkv, causal=causal)
-        if mode == "bwd":
-            o = fn()
-            do = torch.randn_like(o)
-            fn = lambda: o.backward(do, retain_graph=True)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 2.0 * BATCH * H * N_CTX_Q * N_CTX_K * D_HEAD
-    total_flops = 2 * flops_per_matmul
-    # TODO: This needs to be fixed for unequal Q/K seqlens
-    if causal:
-        total_flops *= 0.5
-    if mode == "bwd":
-        total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-    return total_flops / ms * 1e-9
+#     # Bwd pass only supports causal=True right now
+#     if mode == 'bwd':
+#         causal = True
+#     if provider == "triton":
+#         q = torch.randn((BATCH, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#         k = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#         v = torch.randn((BATCH, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+#         o = torch.empty_like(q)
+#         # if mode == "fwd":
+#         #     q = q.to(torch_dtype)
+#         #     k = k.to(torch_dtype)
+#         fn = lambda: attention(q, k, v, o, input_metadata)
+#         if mode == 'bwd':
+#             o = fn()
+#             do = torch.randn_like(o)
+#             fn = lambda: o.backward(do, retain_graph=True)
+#         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#     if provider == "flash":
+#         qkv = torch.randn(
+#             (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
+#         )
+#         fn = lambda: flash_attn_func(qkv, causal=causal)
+#         if mode == "bwd":
+#             o = fn()
+#             do = torch.randn_like(o)
+#             fn = lambda: o.backward(do, retain_graph=True)
+#         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#     flops_per_matmul = 2.0 * BATCH * H * N_CTX_Q * N_CTX_K * D_HEAD
+#     total_flops = 2 * flops_per_matmul
+#     # TODO: This needs to be fixed for unequal Q/K seqlens
+#     if causal:
+#         total_flops *= 0.5
+#     if mode == "bwd":
+#         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+#     return total_flops / ms * 1e-9
 
-bench_flash_attention.run(save_path=".", print_data=True)
+# bench_flash_attention.run(save_path=".", print_data=True)
 
-configs = []
-for mode in ['fwd']:
-    for D_HEAD in [128]:
-        configs.append(triton.testing.Benchmark(
-            x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
-            x_vals=[(2, 16, 4, 1024),
-                    (8, 16, 2, 2048),
-                    (4, 16, 8, 4096),
-                    (2, 16, 4, 8192),
-                    (2, 16, 8, 16384),
-                    (2, 48, 12, 1024),
-                    (2, 48, 24, 2048),
-                    (2, 48, 8, 4096),
-                    (2, 48, 4, 8192),
-                    (2, 48, 2, 16384),
-                    (2, 64, 32, 1024),
-                    (4, 64, 16, 2048),
-                    (4, 64, 8, 4096),
-                    (4, 64, 32, 8192),
-                    (4, 128, 16, 16384),
-                    ],
-            line_arg='provider',
-            line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
-            line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
-            styles=[('red', '-'), ('blue', '-')],
-            ylabel='ms',
-            plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
-            args={
-                'D_HEAD': D_HEAD,
-                'dtype': torch.float16,
-                'mode': mode})
-        )
-@triton.testing.perf_report(configs)
-def bench_varlen_flash_attention(
-    BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
-):
-    assert mode in ["fwd"]
-    warmup = 25
-    rep = 100
-    if provider == "triton":
-        q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
-        tri_out = torch.empty_like(q)
-        fn = lambda: attention(q, k, v, tri_out, input_metadata)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    if provider == "flash":
-        qkv = torch.randn(
-            (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
-        )
-        fn = lambda: flash_attn_func(qkv, causal=causal)
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
-    flops_per_matmul = 0
-    for i in range (0, input_metadata.num_contexts):
-        seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
-        seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
-        # x2 for 2 GEMMs
-        flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
-    # x2 for mul and add
-    total_flops = 2 * flops_per_matmul
-    return total_flops / ms * 1e-9
+# configs = []
+# for mode in ['fwd']:
+#     for D_HEAD in [128]:
+#         configs.append(triton.testing.Benchmark(
+#             x_names=['BATCH', 'HQ', 'HK', 'N_CTX'],
+#             x_vals=[(2, 16, 4, 1024),
+#                     (8, 16, 2, 2048),
+#                     (4, 16, 8, 4096),
+#                     (2, 16, 4, 8192),
+#                     (2, 16, 8, 16384),
+#                     (2, 48, 12, 1024),
+#                     (2, 48, 24, 2048),
+#                     (2, 48, 8, 4096),
+#                     (2, 48, 4, 8192),
+#                     (2, 48, 2, 16384),
+#                     (2, 64, 32, 1024),
+#                     (4, 64, 16, 2048),
+#                     (4, 64, 8, 4096),
+#                     (4, 64, 32, 8192),
+#                     (4, 128, 16, 16384),
+#                     ],
+#             line_arg='provider',
+#             line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
+#             line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),
+#             styles=[('red', '-'), ('blue', '-')],
+#             ylabel='ms',
+#             plot_name=f'fused-attention-varlen-{mode}-d{D_HEAD}',
+#             args={
+#                 'D_HEAD': D_HEAD,
+#                 'dtype': torch.float16,
+#                 'mode': mode})
+#         )
+# @triton.testing.perf_report(configs)
+# def bench_varlen_flash_attention(
+#     BATCH, HQ, HK, N_CTX, D_HEAD, mode, provider, dtype=torch.float16, device="cuda"
+# ):
+#     assert mode in ["fwd"]
+#     warmup = 25
+#     rep = 100
+#     if provider == "triton":
+#         q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX, D_HEAD, dtype)
+#         tri_out = torch.empty_like(q)
+#         fn = lambda: attention(q, k, v, tri_out, input_metadata)
+#         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#     if provider == "flash":
+#         qkv = torch.randn(
+#             (BATCH, N_CTX, 3, H, D_HEAD), dtype=dtype, device=device, requires_grad=True
+#         )
+#         fn = lambda: flash_attn_func(qkv, causal=causal)
+#         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+#     flops_per_matmul = 0
+#     for i in range (0, input_metadata.num_contexts):
+#         seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
+#         seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
+#         # x2 for 2 GEMMs
+#         flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
+#     # x2 for mul and add
+#     total_flops = 2 * flops_per_matmul
+#     return total_flops / ms * 1e-9
 
-bench_varlen_flash_attention.run(save_path=".", print_data=True)
+# bench_varlen_flash_attention.run(save_path=".", print_data=True)

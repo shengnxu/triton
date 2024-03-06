@@ -481,7 +481,7 @@ static std::map<std::string, std::string> getExternLibs(mlir::ModuleOp module) {
                                            "python" / "triton" / "third_party" /
                                            "cuda" / "lib" / "libdevice.10.bc";
       if (!fs::exists(compiletime_path)) {
-        std::string error_msg = "Can't find libdevice at neither " +
+        std::string error_msg = "[HSACOTranslation] Can't find libdevice at neither " +
                                 runtime_path.string() + " nor " +
                                 compiletime_path.string();
         llvm::report_fatal_error(error_msg.c_str());

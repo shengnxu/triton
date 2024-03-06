@@ -21,18 +21,18 @@ using ::mlir::triton::gpu::getShapePerCTA;
 using ::mlir::triton::gpu::getTotalElemsPerThread;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
-static CUtensorMapDataType getCUtensorMapDataType(Type ty) {
+static TensorMapDataType getCUtensorMapDataType(Type ty) {
   if (ty.isF16()) {
-    return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_FLOAT16;
+    return TensorMapDataType::kTensorMapDataTypeFloat16;
   } else if (ty.isBF16()) {
-    return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_BFLOAT16;
+    return TensorMapDataType::kTensorMapDataTypeBFloat16;
   } else if (ty.isF32()) {
-    return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_FLOAT32;
+    return TensorMapDataType::kTensorMapDataTypeFloat32;
   } else if (ty.getIntOrFloatBitWidth() == 8) {
-    return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_UINT8;
+    return TensorMapDataType::kTensorMapDataTypeUint8;
   } else {
     llvm::report_fatal_error("Unsupported elemTy for InsertSliceAsyncV2Op");
-    return CUtensorMapDataType::CU_TENSOR_MAP_DATA_TYPE_FLOAT16;
+    return TensorMapDataType::kTensorMapDataTypeFloat16;
   }
 }
 
@@ -583,26 +583,26 @@ struct StoreAsyncOpConversion
     tmaInfo.boxDims = boxDims;
     tmaInfo.elementStrides = elementStrides;
 
-    CUtensorMapSwizzle swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE;
+    TensorMapSwizzle swizzle = TensorMapSwizzle::kTensorMapSwizzleNone;
     assert(
         ((elemTy.getIntOrFloatBitWidth() == 16 && sharedLayout.getVec() == 8) or
          (elemTy.getIntOrFloatBitWidth() == 32 &&
           sharedLayout.getVec() == 4)) &&
         "Unexpected shared layout for StoreAsyncOp");
     if (sharedLayout.getPerPhase() == 4 && sharedLayout.getMaxPhase() == 2)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle32B;
     else if (sharedLayout.getPerPhase() == 2 && sharedLayout.getMaxPhase() == 4)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle64B;
     else if (sharedLayout.getPerPhase() == 1 && sharedLayout.getMaxPhase() == 8)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle128B;
     else
       llvm::report_fatal_error("Unsupported shared layout for StoreAsyncOp");
     tmaInfo.swizzle = swizzle;
-    tmaInfo.interleave = CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE;
+    tmaInfo.interleave = TensorMapInterleave::kTensorMapInterleaveNone;
     tmaInfo.l2Promotion =
-        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
+        TensorMapL2promotion::kTensorMapL2promotionL2_128B;
     tmaInfo.oobFill =
-        CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
+        TensorMapFloatOOBfill::kTensorMapFloatOOBfillNone;
 
     tmaMetadata->emplace_back(tmaInfo);
 
@@ -780,26 +780,26 @@ struct StoreAsyncOpConversion
     tmaInfo.boxDims = boxDims;
     tmaInfo.elementStrides = elementStrides;
 
-    CUtensorMapSwizzle swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE;
+    TensorMapSwizzle swizzle = TensorMapSwizzle::kTensorMapSwizzleNone;
     assert(((dstElemTy.getIntOrFloatBitWidth() == 16 &&
              sharedLayout.getVec() == 8) or
             (dstElemTy.getIntOrFloatBitWidth() == 32 &&
              sharedLayout.getVec() == 4)) &&
            "Unexpected shared layout for StoreAsyncOp");
     if (sharedLayout.getPerPhase() == 4 && sharedLayout.getMaxPhase() == 2)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle32B;
     else if (sharedLayout.getPerPhase() == 2 && sharedLayout.getMaxPhase() == 4)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle64B;
     else if (sharedLayout.getPerPhase() == 1 && sharedLayout.getMaxPhase() == 8)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle128B;
     else
       llvm::report_fatal_error("Unsupported shared layout for StoreAsyncOp");
     tmaInfo.swizzle = swizzle;
-    tmaInfo.interleave = CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE;
+    tmaInfo.interleave = TensorMapInterleave::kTensorMapInterleaveNone;
     tmaInfo.l2Promotion =
-        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
+        TensorMapL2promotion::kTensorMapL2promotionL2_128B;
     tmaInfo.oobFill =
-        CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
+        TensorMapFloatOOBfill::kTensorMapFloatOOBfillNone;
 
     tmaMetadata->emplace_back(tmaInfo);
 
@@ -1902,27 +1902,27 @@ struct InsertSliceAsyncV2OpConversion
     std::vector<uint32_t> elementStrides(rank, 1);
     tmaInfo.elementStrides = elementStrides;
 
-    CUtensorMapSwizzle swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE;
+    TensorMapSwizzle swizzle = TensorMapSwizzle::kTensorMapSwizzleNone;
     if (sharedLayout.getPerPhase() == 4 && sharedLayout.getMaxPhase() == 2)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle32B;
     else if (sharedLayout.getPerPhase() == 2 && sharedLayout.getMaxPhase() == 4)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle64B;
     else if (sharedLayout.getPerPhase() == 1 && sharedLayout.getMaxPhase() == 8)
-      swizzle = CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B;
+      swizzle = TensorMapSwizzle::kTensorMapSwizzle128B;
     else
       llvm::report_fatal_error(
           "Unsupported shared layout for InsertSliceAsyncV2Op");
 
     tmaInfo.swizzle = swizzle;
-    tmaInfo.interleave = CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE;
+    tmaInfo.interleave = TensorMapInterleave::kTensorMapInterleaveNone;
     tmaInfo.l2Promotion =
-        CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
+        TensorMapL2promotion::kTensorMapL2promotionL2_128B;
     tmaInfo.oobFill =
-        CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE;
+        TensorMapFloatOOBfill::kTensorMapFloatOOBfillNone;
 
     uint32_t numBoxes = 1;
     uint32_t elemSizeOfBytes = elemTy.getIntOrFloatBitWidth() / 8;
-    if (swizzle == CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B) {
+    if (swizzle == TensorMapSwizzle::kTensorMapSwizzle128B) {
       while (elemSizeOfBytes * boxDims[0] > 128) {
         boxDims[0] = boxDims[0] / 2;
         numBoxes *= 2;

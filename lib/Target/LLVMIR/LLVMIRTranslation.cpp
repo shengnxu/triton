@@ -323,12 +323,14 @@ static std::map<std::string, std::string> getExternLibs(mlir::ModuleOp module) {
                                                .parent_path() /
                                            "python" / "triton" / "third_party" /
                                            "cuda" / "lib" / "libdevice.10.bc";
+#if !defined(USE_ROCM)
       if (!fs::exists(compiletime_path)) {
-        std::string error_msg = "Can't find libdevice at neither " +
+        std::string error_msg = "[LLVMIR] Can't find libdevice at neither " +
                                 runtime_path.string() + " nor " +
                                 compiletime_path.string();
         llvm::report_fatal_error(error_msg.c_str());
       }
+#endif
       externLibs.try_emplace(libdevice, compiletime_path.string());
     }
   }

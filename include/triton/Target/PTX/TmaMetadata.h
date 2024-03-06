@@ -24,7 +24,6 @@
 #ifndef TRITON_TARGET_PTX_TMAMETADATA_H
 #define TRITON_TARGET_PTX_TMAMETADATA_H
 
-#include "python/triton/third_party/cuda/include/cuda.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Format.h"
@@ -101,6 +100,36 @@ struct TMAInfo {
 using TMAMetadataTy = std::vector<TMAInfo>;
 
 } // namespace gpu
+
+enum TensorMapDataType {
+  kTensorMapDataTypeFloat16,
+  kTensorMapDataTypeFloat32,
+  kTensorMapDataTypeBFloat16,
+  kTensorMapDataTypeUint8,
+};
+
+enum TensorMapSwizzle {
+  kTensorMapSwizzleNone = 0,
+  kTensorMapSwizzle32B,
+  kTensorMapSwizzle64B,
+  kTensorMapSwizzle128B,
+};
+
+enum TensorMapInterleave {
+  kTensorMapInterleaveNone = 0,
+};
+
+enum TensorMapL2promotion {
+  kTensorMapL2promotionL2_None = 0,
+  kTensorMapL2promotionL2_32B,
+  kTensorMapL2promotionL2_64B,
+  kTensorMapL2promotionL2_128B,
+};
+
+enum TensorMapFloatOOBfill {
+  kTensorMapFloatOOBfillNone = 0,
+};
+
 } // namespace triton
 } // namespace mlir
 

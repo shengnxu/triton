@@ -86,7 +86,6 @@ if(NOT MLIR_DIR)
       add_definitions(${LLVM_DEFINITIONS_LIST})
 
       llvm_map_components_to_libnames(LLVM_LIBRARIES support core
-        NVPTXInfo nvptxcodegen
         AMDGPUInfo AMDGPUcodegen
       )
     else()
@@ -106,9 +105,6 @@ if(NOT MLIR_DIR)
   else()
     set(LLVM_LDFLAGS "-L${LLVM_LIBRARY_DIR}")
     set(LLVM_LIBRARIES
-      LLVMNVPTXCodeGen
-      LLVMNVPTXDesc
-      LLVMNVPTXInfo
       LLVMAMDGPUDisassembler
       LLVMMCDisassembler
       LLVMAMDGPUCodeGen

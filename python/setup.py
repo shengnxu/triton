@@ -226,6 +226,7 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
+        print(f'build_extension {ext}')
         lit_dir = shutil.which('lit')
         ninja_dir = shutil.which('ninja')
         user_home = os.getenv("HOME") or os.getenv("USERPROFILE") or \

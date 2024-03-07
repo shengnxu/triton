@@ -1205,38 +1205,38 @@ def varlen_benchmark_configs():
             ]
     return configs
 
-def run_benchmark(custom, varlen, *config):
+def run_benchmark(custom):
 
-    batch, hq, hk, sq, sk, head_size = config
-    print(f"b = {batch}")
-    print(f"hq = {hq}")
-    print(f"hk = {hk}")
-    print(f"sq = {sq}")
-    print(f"sk = {sk}")
-    print(f"d = {head_size}")
-    configs = []
-    causal = False
+    args = parse_args()
+    dtype = arg_to_torch_dtype[args.dtype]
+    hk = args.hq if not args.hk else args.hk
+    sk = args.sq if not args.sk else args.sk
     mode = 'fwd'
     x_names=['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
+    causal = True
+    varlen = args.varlen
+    configs = []
     if custom:
-        x_vals_list=[(batch, hq, hk, sq, sk)]
+        x_vals_list=[(args.b, args.hq, args.hk, args.sq, args.sk)]
     else:
         if varlen:
             x_vals_list = varlen_benchmark_configs()
         else:
             x_vals_list = nonvarlen_benchmark_configs()
+    print_time = args.return_time
+    line_names = 'Time (ms)' if print_time else 'TFLOPS'
     configs.append(triton.testing.Benchmark(
         x_names=x_names,
         x_vals=x_vals_list,
         line_arg='provider',
         line_vals=['triton'],
-        line_names=['Triton'],
+        line_names=[line_names],
         styles=[('red', '-')],
         ylabel='ms',
-        plot_name=f'fused-attention-varlen-{mode}-d{head_size}',
+        plot_name=f'fused-attention-varlen-{mode}-d{args.d}',
         args={
-            'D_HEAD': head_size,
-            'dtype': torch.float16,
+            'D_HEAD': args.d,
+            'dtype': dtype,
             'causal': causal,
             'mode': mode})
     )
@@ -1248,8 +1248,6 @@ def run_benchmark(custom, varlen, *config):
         assert mode in ["fwd", "bwd"]
         warmup = 25
         rep = 100
-        if causal:
-            input_metadata.need_causal()
         # TODO: Enable bias after testing.
         # if use_bias:
         #     bias = torch.randn((1, H, N_CTX, N_CTX), dtype=torch.float32, device="cuda")
@@ -1273,6 +1271,8 @@ def run_benchmark(custom, varlen, *config):
         else:
             q, k, v, input_metadata = input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype)
             flops_per_matmul = 2.0 * BATCH * HQ * N_CTX_Q * N_CTX_K * D_HEAD
+        if causal:
+            input_metadata.need_causal()
         o = torch.empty_like(q)
         fn = lambda: attention(q, k, v, o, input_metadata)
         if mode == 'bwd':
@@ -1286,7 +1286,10 @@ def run_benchmark(custom, varlen, *config):
             total_flops *= 0.5
         if mode == "bwd":
             total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
-        return total_flops / ms * 1e-9
+        if print_time:
+            return ms
+        else:
+            return total_flops / ms * 1e-9
 
     bench_flash_attention.run(save_path=".", print_data=True)
 
@@ -1303,22 +1306,33 @@ def parse_args():
     parser.add_argument("-d", type=int, default=0)
     parser.add_argument("-causal", action='store_true', default=False)
     parser.add_argument("-varlen", action='store_true', default=False)
+    parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-return_time", action='store_true', default=False)
-    parser.add_argument("-bench_suite", action='store_false', default=True)
     return parser.parse_args()
+
+arg_to_torch_dtype = {
+    'fp16': torch.float16,
+    'bf16': torch.bfloat16,
+    'fp32': torch.float32
+}
 
 def main():
     args = parse_args()
     custom_config = False
     if args.b or args.hq or args.hk or args.sq or args.sk or args.d:
         custom_config = True
-        assert args.b and args.hq and args.sq and args.sk and args.d, \
-               "If custom config is specified, please provide all of batch/heads/sq/sk/d"
+        assert args.b and args.hq and args.sq and args.d, \
+               "If custom config is specified, please provide \
+                all of batch, number of Q heads, Q sequence length \
+                and head size."
     
-    hk = args.hq if not args.hk else args.hk
-    print(f">>>>>>>{custom_config}")
-    run_benchmark(custom_config, args.varlen, 
-                  args.b, args.hq, hk, args.sq, args.sk, args.d)
+    assert args.dtype in arg_to_torch_dtype, \
+           "Only fp16, bf16 and f32 types currently supported."
+    # TODO: Uncomment once causal is tested thoroughly.
+    assert not args.causal,\
+            "Causal masking not yet supported."
+
+    run_benchmark(custom_config) 
 
 if __name__ == '__main__':
     sys.exit(main())

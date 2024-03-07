@@ -488,7 +488,8 @@ def attn_fwd(
             out_mask_boundary = tl.full((BLOCK_DMODEL,), causal_start_idx, dtype=tl.int32)
             mask_m_offsets = start_m_idx + tl.arange(0, BLOCK_M)
             out_ptrs_mask = mask_m_offsets[:, None] >= out_mask_boundary[None, :]
-            acc = tl.where(out_ptrs_mask, acc, 0)
+            z = 0.0
+            acc = tl.where(out_ptrs_mask, acc, z.to(acc.type.element_ty))
     # write back LSE
     l_ptrs = L + off_z * hq * MAX_SEQLENS_Q + off_h_q * MAX_SEQLENS_Q + offs_m
     # If seqlen_q not multiple of BLOCK_M, we need to mask out the last few rows.
@@ -1213,7 +1214,7 @@ def run_benchmark(custom):
     sk = args.sq if not args.sk else args.sk
     mode = 'fwd'
     x_names=['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
-    causal = True
+    causal = args.causal
     varlen = args.varlen
     configs = []
     if custom:

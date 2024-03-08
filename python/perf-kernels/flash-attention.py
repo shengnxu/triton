@@ -1329,9 +1329,6 @@ def main():
     
     assert args.dtype in arg_to_torch_dtype, \
            "Only fp16, bf16 and f32 types currently supported."
-    # TODO: Uncomment once causal is tested thoroughly.
-    assert not args.causal,\
-            "Causal masking not yet supported."
 
     run_benchmark(custom_config) 
 

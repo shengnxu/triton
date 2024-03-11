@@ -1212,6 +1212,7 @@ def run_benchmark(custom):
     dtype = arg_to_torch_dtype[args.dtype]
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
+    head_size = 128 if not args.d else args.d
     mode = 'fwd'
     x_names=['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = args.causal
@@ -1234,9 +1235,9 @@ def run_benchmark(custom):
         line_names=[line_names],
         styles=[('red', '-')],
         ylabel='ms',
-        plot_name=f'fused-attention-varlen-{mode}-d{args.d}',
+        plot_name=f'fused-attention-varlen-{mode}-d{head-size}',
         args={
-            'D_HEAD': args.d,
+            'D_HEAD': head_size,
             'dtype': dtype,
             'causal': causal,
             'mode': mode})

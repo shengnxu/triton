@@ -1235,7 +1235,7 @@ def run_benchmark(custom):
         line_names=[line_names],
         styles=[('red', '-')],
         ylabel='ms',
-        plot_name=f'fused-attention-varlen-{mode}-d{head-size}',
+        plot_name=f'fused-attention-varlen-{mode}-d{head_size}',
         args={
             'D_HEAD': head_size,
             'dtype': dtype,

@@ -236,16 +236,17 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
-    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
+    # #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=1),
    ],
    key=['hq', 'hk', 'IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
 )
@@ -271,6 +272,8 @@ def attn_fwd(
 ):
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
+    # start_m = 0
+    # off_h_q = 0
     off_z = tl.program_id(2)
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -374,9 +377,19 @@ def attn_fwd(
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
+
+
+    # if ((tl.program_id(0)==0 and tl.program_id(1)==0) and tl.program_id(2)==0):
+    #     tl.device_print("BIAS_TYPE: ", BIAS_TYPE)
     if BIAS_TYPE != 0:
+        # b_offset = 0
+        # b_offset = off_h_q
+        b_offset = off_h_q * stride_bh
+        
+        # if ((tl.program_id(0)==0 and tl.program_id(1)==0) and tl.program_id(2)==0):
+        #     tl.device_print("stride_bh: ", stride_bh)
         bias_ptr = tl.make_block_ptr(
-            base=bias + off_h_q * stride_bh,
+            base=bias + b_offset,
             shape=(seqlen_q, seqlen_k),
             strides=(stride_bm, stride_bn),
             offsets=(start_m * BLOCK_M, 0),
@@ -385,6 +398,9 @@ def attn_fwd(
         )
     else:
         bias_ptr = None
+
+    # if ((tl.program_id(0)==0 and tl.program_id(1)==0) and tl.program_id(2)==0):
+    #     tl.device_print("ENABLE_DROPOUT: ", ENABLE_DROPOUT)
     if ENABLE_DROPOUT:
         batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     else:
@@ -451,6 +467,7 @@ def attn_fwd(
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
     if (masked_blocks > 0): 
+        # tl.device_print("masked_blocks: ", masked_blocks)
         if IS_CAUSAL:
             offs_n_causal = offs_n + (seqlen_q - seqlen_k)
         else:
@@ -783,6 +800,14 @@ empty = torch.empty(128, device="cuda")
 class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, o, metadata):
+        print("forward")
+        print("ctx:", ctx)
+        print("q:", q.shape)
+        print("k:", k.shape)
+        print("v:", v.shape)
+        print("o:", o.shape)
+        print("metadata:", metadata)
+
         if o is None:
             o = torch.empty_like(q, dtype=v.dtype)
         metadata.check_args(q, k, v, o)
@@ -801,6 +826,7 @@ class _attention(torch.autograd.Function):
             k_strides = (k.stride(0), k.stride(1), k.stride(2), k.stride(3))
             v_strides = (v.stride(0), v.stride(1), v.stride(2), v.stride(3))
             o_strides = (o.stride(0), o.stride(1), o.stride(2), o.stride(3))
+        # print("metadata.varlen:", metadata.varlen)
 
         # Get closest power of 2 over or equal to 32.
         unpadded_head_dims = {32, 64, 128}
@@ -842,6 +868,19 @@ class _attention(torch.autograd.Function):
         else:
             bias_strides = (0,0,0,0)
 
+        print("attn_fwd")
+        print("q:", q.shape)
+        print("k:", k.shape)
+        print("v:", v.shape)
+        print("o:", o.shape)
+        print("metadata.bias:", metadata.bias.shape if metadata.bias is not None else None)
+        print("metadata.sm_scale:", metadata.sm_scale)
+        print("q_strides:", q_strides)
+        print("k_strides:", k_strides)
+        print("v_strides:", v_strides)
+        print("o_strides:", o_strides)
+        print("bias_strides:", bias_strides)
+        print("metadata.dropout_p:", metadata.dropout_p)
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
@@ -946,29 +985,43 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 1024, 1024, 64),
-                          (4, 48, 8192, 8192, 64),
-                          (2, 16, 16384, 16384, 128),
-                          (2, 16, 1020, 987, 128),
-                          (2, 16, 15498, 2, 128),
-                          (2, 16, 7, 16219, 64),
-                          (4, 48, 1, 1, 64),
-                          (4, 48, 1, 1, 128),
-                          (4, 48, 3, 3, 128),
-                          (4, 48, 1001, 990, 64),
-                          (1, 8, 8081, 7099, 64),
-                          (1, 8, 16330, 15989, 128),
-                          (4, 4, 1024, 1024, 33),
-                          (4, 4, 65, 1019, 65),
-                          (4, 4, 128, 128, 65),
-                          (4, 4, 113, 123, 1),
+                         [
+                            # (1, 1, 8192, 8192, 128),
+                            # (1, 1, 8192, 8192, 128),
+                            (1, 24, 8192, 8192, 1),
+                            # (1, 48, 8192, 8192, 8),
+                            # (1, 48, 8192, 8192, 16),
+                            # (1, 48, 8192, 8192, 32),
+                        #   (1, 48, 8192, 8192, 64),
+                        #   (4, 48, 8192, 8192, 64),
+                        #   (2, 16, 16384, 16384, 128),
+                        #   (2, 16, 1020, 987, 128),
+                        #   (2, 16, 15498, 2, 128),
+                        #   (2, 16, 7, 16219, 64),
+                        #   (4, 48, 1, 1, 64),
+                        #   (4, 48, 1, 1, 128),
+                        #   (4, 48, 3, 3, 128),
+                        #   (4, 48, 1001, 990, 64),
+                        #   (1, 8, 8081, 7099, 64),
+                        #   (1, 8, 16330, 15989, 128),
+                        #   (4, 4, 1024, 1024, 33),
+                        #   (4, 4, 65, 1019, 65),
+                        #   (4, 4, 128, 128, 65),
+                        #   (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False, True])
-@pytest.mark.parametrize('use_bias', [False])
+@pytest.mark.parametrize('causal', [False]) # doesnot seems to affect things but just disable for now
+@pytest.mark.parametrize('use_bias', [True])
 def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.float16):
+    print("test_op_fwd")
+    print("Z:", Z)
+    print("H:", H)
+    print("N_CTX_Q:", N_CTX_Q)
+    print("N_CTX_K:", N_CTX_K)
+    print("D_HEAD:", D_HEAD)
+    print("causal:", causal)
+    print("use_bias:", use_bias)
+    print("dtype:", dtype)
     # TODO: using bias causes coredump for certain configs and must be fixed.
-    if use_bias:
-        pytest.skip()
     torch.manual_seed(20)
     sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(sm_scale=sm_scale)

@@ -946,7 +946,7 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 1024, 1024, 64),
+                         [(4, 48, 1024, 1024, 128),
                         #   (4, 48, 8192, 8192, 64),
                         #   (2, 16, 16384, 16384, 128),
                         #   (2, 16, 1020, 987, 128),
@@ -1007,10 +1007,10 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
     if sliding_window:
         window_left, window_right = 512, 512
         mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
-                          diagonal=-window_left)
+                          diagonal=-window_left+1)
         scores[:, :, mask==0] = float("-inf")
         mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
-                          diagonal=-window_right)
+                          diagonal=window_right-1)
         scores[:, :, mask==0] = float("-inf")
     p = torch.softmax(scores, dim=-1)
     if causal:

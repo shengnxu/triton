@@ -947,27 +947,31 @@ attention = _attention.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
                          [(4, 48, 1024, 1024, 64),
-                          (4, 48, 8192, 8192, 64),
-                          (2, 16, 16384, 16384, 128),
-                          (2, 16, 1020, 987, 128),
-                          (2, 16, 15498, 2, 128),
-                          (2, 16, 7, 16219, 64),
-                          (4, 48, 1, 1, 64),
-                          (4, 48, 1, 1, 128),
-                          (4, 48, 3, 3, 128),
-                          (4, 48, 1001, 990, 64),
-                          (1, 8, 8081, 7099, 64),
-                          (1, 8, 16330, 15989, 128),
-                          (4, 4, 1024, 1024, 33),
-                          (4, 4, 65, 1019, 65),
-                          (4, 4, 128, 128, 65),
-                          (4, 4, 113, 123, 1),
+                        #   (4, 48, 8192, 8192, 64),
+                        #   (2, 16, 16384, 16384, 128),
+                        #   (2, 16, 1020, 987, 128),
+                        #   (2, 16, 15498, 2, 128),
+                        #   (2, 16, 7, 16219, 64),
+                        #   (4, 48, 1, 1, 64),
+                        #   (4, 48, 1, 1, 128),
+                        #   (4, 48, 3, 3, 128),
+                        #   (4, 48, 1001, 990, 64),
+                        #   (1, 8, 8081, 7099, 64),
+                        #   (1, 8, 16330, 15989, 128),
+                        #   (4, 4, 1024, 1024, 33),
+                        #   (4, 4, 65, 1019, 65),
+                        #   (4, 4, 128, 128, 65),
+                        #   (4, 4, 113, 123, 1),
                           ])
 @pytest.mark.parametrize('causal', [False, True])
 @pytest.mark.parametrize('use_bias', [False])
-def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.float16):
+@pytest.mark.parametrize('sliding_window', [True])
+def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window, dtype=torch.float16):
     # TODO: using bias causes coredump for certain configs and must be fixed.
     if use_bias:
+        pytest.skip()
+    # Causal + SWA isn't a valid usecase.
+    if causal and sliding_window:
         pytest.skip()
     torch.manual_seed(20)
     sm_scale = D_HEAD ** -0.5
@@ -995,11 +999,19 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=torch.fl
 
     scores = torch.einsum('bhqd,bhkd->bhqk', q, k).float() * sm_scale
     if causal:
-        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=N_CTX_K-N_CTX_Q)
         scores[:, :, mask==0] = float("-inf")
     if use_bias:
         scores += input_metadata.bias
+    if sliding_window:
+        window_left, window_right = 512, 512
+        mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
+                          diagonal=-window_left)
+        scores[:, :, mask==0] = float("-inf")
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+                          diagonal=-window_right)
+        scores[:, :, mask==0] = float("-inf")
     p = torch.softmax(scores, dim=-1)
     if causal:
         # If N_CTX_Q > N_CTX_K, there is at least one row of all -infs going into

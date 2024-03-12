@@ -5,7 +5,7 @@ set -ex
 # Check if ROCM_VERSION argument is provided
 if [[ -z "$1" ]]; then
     echo "ROCM_VERSION argument not provided setting to default."
-    ROCM_VERSION="6.1"
+    ROCM_VERSION="6.2"
 else
     ROCM_VERSION="$1"
 fi
@@ -62,7 +62,7 @@ ROCM_SO=(
 
 if [[ $ROCM_INT -ge 60100 ]]; then
     ROCM_SO+=("librocprofiler-register.so.0")
-fi	
+fi
 
 # Find the SO libs dynamically
 for lib in "${ROCM_SO[@]}"

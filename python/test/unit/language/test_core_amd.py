@@ -1666,7 +1666,7 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                           if not (allow_tf32 and (in_dtype in ['float16']))] +
 
                          [(*shape, warps, False, False, epilogue, allow_tf32, in_dtype, out_dtype, non_k_dim, 1)
-                          for shape in [(64, 16, 128), (16, 64, 128)]
+                          for shape in [(64, 64, 128), (16, 64, 128)]
                           for warps in [1, 4]
                           for epilogue in ['none', 'trans', 'add-matrix', 'chain-dot', 'softmax']
                           for allow_tf32 in [False]
@@ -1706,8 +1706,9 @@ def test_permute(dtype_str, shape, perm, device='cuda'):
                                            [4, 32, 64, 4],
                                            [32, 4, 64, 2],
                                            [16, 4, 64, 8],
-                                           [64, 4, 16, 1],
-                                           [4, 64, 16, 1],
+                                           [64, 4, 64, 1],
+                                           [4, 64, 64, 1],
+                                           [4, 64, 64, 4],
                                            ]
                           for allow_tf32 in [False, True]
                           for col_a in [True, False]

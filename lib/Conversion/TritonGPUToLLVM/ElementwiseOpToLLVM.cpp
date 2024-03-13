@@ -6,6 +6,8 @@
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
+#include <iostream>
+
 using namespace mlir::triton::gpu;
 
 namespace mlir::triton::gpu {
@@ -22,6 +24,9 @@ LLVM::LLVMFuncOp appendOrGetExternFuncOp(ConversionPatternRewriter &rewriter,
                                          StringRef libpath /*= ""*/) {
   using LLVM::LLVMFuncOp;
 
+  std::cout << "funcName: " << funcName.str() << std::endl;
+  std::cout << "libname: " << libname.str() << std::endl;
+  std::cout << "libpath: " << libpath.str() << std::endl;
   auto funcAttr = StringAttr::get(op->getContext(), funcName);
   Operation *funcOp = SymbolTable::lookupNearestSymbolFrom(op, funcAttr);
   if (funcOp)

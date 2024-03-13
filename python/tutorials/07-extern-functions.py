@@ -33,7 +33,8 @@ def asin_kernel(
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements
     x = tl.load(x_ptr + offsets, mask=mask)
-    x = libdevice.asin(x)
+    #x = libdevice.asin(x)
+    x = tl.math.sqrt_rn(x)
     tl.store(y_ptr + offsets, x, mask=mask)
 
 
@@ -63,7 +64,7 @@ print(f'The maximum difference between torch and triton is '
 
 output_triton = torch.empty_like(x)
 asin_kernel[grid](x, output_triton, n_elements, BLOCK_SIZE=1024,
-                  extern_libs={'libdevice': '/usr/local/cuda/nvvm/libdevice/libdevice.10.bc'})
+                  extern_libs={'ocml.bc': '/root/triton/third_party/amd/backend/lib/ocml.bc'})
 print(output_torch)
 print(output_triton)
 print(f'The maximum difference between torch and triton is '

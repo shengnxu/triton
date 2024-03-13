@@ -3,6 +3,8 @@
 #include "triton/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVMBase.h"
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
 
+#include <iostream>
+
 using namespace mlir;
 using namespace mlir::triton;
 using namespace mlir::triton::gpu;
@@ -1495,6 +1497,39 @@ struct ExpOpConversionApprox
   }
 };
 
+template <typename TritonOp>
+struct OpToExternCallConversion
+    : public ElementwiseOpConversionBase<TritonOp,
+                                         OpToExternCallConversion<TritonOp>> {
+  using Base =
+      ElementwiseOpConversionBase<TritonOp, OpToExternCallConversion<TritonOp>>;
+  using Base::Base;
+  using Adaptor = typename Base::OpAdaptor;
+
+  explicit OpToExternCallConversion(LLVMTypeConverter &typeConverter,
+                                    ModuleAxisInfoAnalysis &axisAnalysisPass,
+                                    StringRef externFuncName,
+                                    PatternBenefit benefit)
+      : Base::ElementwiseOpConversionBase(typeConverter, axisAnalysisPass,
+                                          benefit),
+        funcName(externFuncName) {}
+
+  SmallVector<Value> createDestOps(TritonOp op, Adaptor adaptor,
+                                   ConversionPatternRewriter &rewriter,
+                                   Type elemTy, MultipleOperandsRange operands,
+                                   Location loc) const {
+    Type funcType = getFunctionType(elemTy, operands[0]);
+    std::cout << "CreateDestOps:" << funcName.str() << std::endl;
+    LLVM::LLVMFuncOp funcOp =
+        appendOrGetExternFuncOp(rewriter, op, funcName, funcType,"ocml.bc", "/root/triton/third_party/amd/backend/lib/");
+    return {
+        rewriter.create<LLVM::CallOp>(loc, funcOp, operands[0]).getResult()};
+  }
+
+private:
+  StringRef funcName;
+};
+
 } // namespace
 
 namespace AMD {
@@ -1508,6 +1543,7 @@ void populateElementwiseOpToLLVMPatterns(
 #define POPULATE_BINARY_OP(SRC_OP, DST_OP)                                     \
   patterns.add<ElementwiseOpConversion<SRC_OP, DST_OP>>(                       \
       typeConverter, axisInfoAnalysis, benefit);
+	std::cout << "populate" << std::endl;
   POPULATE_BINARY_OP(arith::SubIOp, LLVM::SubOp) // -
   POPULATE_BINARY_OP(arith::AddIOp, LLVM::AddOp) // +
   POPULATE_BINARY_OP(arith::MulIOp, LLVM::MulOp) // *
@@ -1561,6 +1597,19 @@ void populateElementwiseOpToLLVMPatterns(
 #undef POPULATE_UNARY_OP
 
   patterns.add<ElementwiseOpConversion<math::FmaOp, LLVM::FMAOp>>(
+      typeConverter, axisInfoAnalysis, benefit);
+
+   patterns.add<OpToExternCallConversion<triton::PreciseSqrtOp>>(
+      typeConverter, axisInfoAnalysis, "__ocml_sqrt_f32", benefit);
+      //typeConverter, axisInfoAnalysis, "__ocml_sqrt_rte_f32", benefit);
+   //patterns.add<OpToExternCallConversion<triton::PreciseDivFOp>>(
+   //   typeConverter, axisInfoAnalysis, "__ocml_div_rte_f32", benefit);
+      //typeConverter, axisInfoAnalysis, "__nv_fdiv_rn", benefit);
+  
+   patterns.add<ElementwiseOpConversion<triton::PreciseSqrtOp, LLVM::SqrtOp>>(
+      typeConverter, axisInfoAnalysis, benefit);
+
+   patterns.add<ElementwiseOpConversion<triton::PreciseDivFOp, LLVM::FDivOp>>(
       typeConverter, axisInfoAnalysis, benefit);
 
   patterns.add<FDivOpConversion>(typeConverter, axisInfoAnalysis, benefit);

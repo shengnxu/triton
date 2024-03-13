@@ -3793,8 +3793,6 @@ def test_num_warps_pow2(device):
                           ('tl.math.div_rn(x,y)', '(x.to(tl.float64) / y.to(tl.float64)).to(tl.float32)')])
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
 def test_precise_math(expr_prec, expr_ref, num_ctas, device):
-    if is_hip():
-        pytest.skip("TODO test_precise_math (added by https://github.com/openai/triton/pull/3172) does not work on HIP")
 
     @triton.jit
     def kernel(X, Y, OUT, OUT_REF, BLOCK: tl.constexpr):
@@ -3820,7 +3818,8 @@ def test_precise_math(expr_prec, expr_ref, num_ctas, device):
 
     kernel = patch_kernel(kernel, {'PREC_CALC': expr_prec, 'REF_CALC': expr_ref})
 
-    kernel[(1, )](x, y, out, out_ref, BLOCK=shape[0], num_ctas=num_ctas)
+    kernel[(1, )](x, y, out, out_ref, BLOCK=shape[0], num_ctas=num_ctas,
+            extern_libs={'ocml.bc': '/root/triton/third_party/amd/backend/lib/ocml.bc'})
     assert torch.all(out == out_ref)  # bitwise exact
 
 

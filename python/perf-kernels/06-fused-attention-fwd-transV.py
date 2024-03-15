@@ -159,21 +159,19 @@ class _attention(torch.autograd.Function):
             num_stages = 1
             ## causal=False likes to pre load v but causal=True does not
             pre_load_v = False if causal else True
-            slice_k_tile = 32
-            kpack = 1
         else:
             ## D_HEAD = 128
             ## For fp16, pick BLOCK_M=256, num_warps=8
             ## For fp8, pick BLOCK_M=128, num_warps=4
             ## TODO (zhanglx): add tuning infra for FA
             BLOCK_M = 128 if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
+            BLOCK_M = 128
             BLOCK_N = 128
             waves_per_eu = 2
             num_warps = BLOCK_M // 32
             num_stages = 1
             pre_load_v = False
             slice_k_tile = 32
-            kpack = 1
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
@@ -193,8 +191,7 @@ class _attention(torch.autograd.Function):
             num_warps = num_warps,
             num_stages = num_stages,
             pre_load_v = pre_load_v,
-            slice_k_tile = slice_k_tile,
-            kpack = kpack,
+            slice_k_tile = slice_k_tile
         )
 
         return o
@@ -264,7 +261,7 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in ['fp16', 'bf16', 'fp8']:
+for dtype in ['fp16']:
     for D_HEAD in [128]:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(

@@ -106,7 +106,6 @@ class Autotuner(KernelInterface):
         # augment meta-parameters with tunable ones
         current = dict(meta, **config.kwargs)
         full_nargs = {**self.nargs, **current}
-
         def kernel_call():
             if config.pre_hook:
                 config.pre_hook(full_nargs)

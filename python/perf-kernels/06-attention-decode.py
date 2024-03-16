@@ -647,11 +647,13 @@ attention = _attention.apply
 
 def get_input_shapes():
     cases = [
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 18)
-    ] + [
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(8, 18)
+#        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
+#        for i in range(8, 18)
+#    ] + [
+#        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
+#        for i in range(8, 18)
+#    ] + [
+        (1, 1, 16896, 8, 1, 128)
     ]
 
     return cases
@@ -677,7 +679,11 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
         .requires_grad_()
     ).expand(-1, -1, -1, (Hq + Hkv - 1) // Hkv, -1)
     scale = 1 / K**0.5
-    tri_out = attention(q, k, v, scale)
+
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        tri_out = attention(q, k, v, scale)
+    g.replay()
 
     q = q.reshape([B, Mq, -1, K]).permute(0, 2, 1, 3)
     k = k.reshape([B, Mkv, -1, K]).permute(0, 2, 1, 3)

@@ -85,9 +85,10 @@ do
     fi
 
     cp $file_path $TRITON_ROCM_DIR/lib
+    
     # When running locally, and not building a wheel, we need to satisfy shared objects requests that don't look for versions
-    LINKNAME=$(echo $lib | sed -e 's/\.so.*/.so/g')
-    ln -sf $lib $TRITON_ROCM_DIR/lib/$LINKNAME
+    #LINKNAME=$(echo $lib | sed -e 's/\.so.*/.so/g')
+    #ln -sf $lib $TRITON_ROCM_DIR/lib/$LINKNAME
 done
 
 # Copy Include Files

@@ -452,7 +452,7 @@ def attn_fwd(
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
-    if (masked_blocks > 0): 
+    if (masked_blocks > 0):
         if IS_CAUSAL:
             offs_n_causal = offs_n + (seqlen_q - seqlen_k)
         else:
@@ -462,7 +462,7 @@ def attn_fwd(
         if bias_ptr is not None:
             bias_ptr = tl.advance(bias_ptr, (0, n_full_blocks*BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
-            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, 
+            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr,
                                                    (0, n_full_blocks))
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
@@ -515,9 +515,9 @@ def attn_fwd(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    # Need boundary check on this to make sure the padding from the 
+    # Need boundary check on this to make sure the padding from the
     # Q and KV tensors in both dims are not part of what we store back.
-    # TODO: Do the boundary check optionally. 
+    # TODO: Do the boundary check optionally.
     tl.store(O_block_ptr, acc, boundary_check=(0,1))
 
 @triton.jit
@@ -843,7 +843,7 @@ class _attention(torch.autograd.Function):
         philox_offset = 0x1D4B42
 
         if metadata.bias is not None:
-            bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1), 
+            bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1),
                             metadata.bias.stride(2), metadata.bias.stride(3))
         else:
             bias_strides = (0,0,0,0)
@@ -1056,7 +1056,7 @@ def test_op_fwd_bias(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, dtype=tor
 
     scores = torch.einsum('bhqd,bhkd->bhqk', q, k).float() * sm_scale
     if causal:
-        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=N_CTX_K-N_CTX_Q)
         scores[:, :, mask==0] = float("-inf")
     if use_bias:
@@ -1388,11 +1388,11 @@ def main():
                "If custom config is specified, please provide \
                 all of batch, number of Q heads, Q sequence length \
                 and head size."
-    
+
     assert args.dtype in arg_to_torch_dtype, \
            "Only fp16, bf16 and f32 types currently supported."
 
-    run_benchmark(custom_config) 
+    run_benchmark(custom_config)
 
 if __name__ == '__main__':
     sys.exit(main())

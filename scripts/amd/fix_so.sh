@@ -1,6 +1,10 @@
 #!/bin/bash
 #From https://github.com/pytorch/builder/blob/main/manywheel/build_common.sh
-WHEELHOUSE_DIR=/artifacts
+if [ -z "$1" ]; then
+    echo "Need wheel location argument" && exit 1
+fi
+
+WHEELHOUSE_DIR=$1
 PATCHELF_BIN=patchelf
 ROCM_LIB=third_party/rocm/lib
 ROCM_LD=third_party/rocm/llvm/bin

@@ -196,7 +196,6 @@ class HIPBackend(BaseBackend):
         kernels[0].set_calling_conv(amd.CALLING_CONV_AMDGPU_KERNEL)
         kernels[0].add_fn_attr("amdgpu-flat-work-group-size", f"1,{options.num_warps*options.warp_size}")
         kernels[0].add_fn_attr("amdgpu-waves-per-eu", f"{options.waves_per_eu}")
-        kernels[0].add_fn_attr("denormal-fp-math-f32", "preserve-sign")
 
         if options.extern_libs:
             paths = [path for (name, path) in options.extern_libs]

@@ -45,23 +45,23 @@ done
 
 
 # Required ROCm libraries
-if [[ "${MAJOR_VERSION}" == "6" ]]; then
-    libamdhip="libamdhip64.so.6"
-else
-    libamdhip="libamdhip64.so.5"
-fi
+#if [[ "${MAJOR_VERSION}" == "6" ]]; then
+#    libamdhip="libamdhip64.so.6"
+#else
+#    libamdhip="libamdhip64.so.5"
+#fi
 
 # Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
-    "${libamdhip}"
-    "libhsa-runtime64.so.1"
-    "libamd_comgr.so.2"
-    "libdrm.so.2"
-    "libdrm_amdgpu.so.1"
+    "libamdhip64.so"
+    "libhsa-runtime64.so"
+    "libamd_comgr.so"
+    "libdrm.so"
+    "libdrm_amdgpu.so"
 )
 
 if [[ $ROCM_INT -ge 60100 ]]; then
-    ROCM_SO+=("librocprofiler-register.so.0")
+    ROCM_SO+=("librocprofiler-register.so")
 fi	
 
 # Find the SO libs dynamically

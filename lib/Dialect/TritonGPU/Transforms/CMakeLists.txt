@@ -1,6 +1,7 @@
 add_mlir_dialect_library(TritonGPUTransforms
   AccelerateMatmul.cpp
   AccelerateAMDMatmul.cpp
+  AMDBypassLDSForDotLayout.cpp
   Coalesce.cpp
   DecomposeConversions.cpp
   OptimizeDotOperands.cpp

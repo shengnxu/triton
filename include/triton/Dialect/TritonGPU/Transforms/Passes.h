@@ -13,6 +13,7 @@ std::unique_ptr<Pass> createTritonGPUPipelinePass(int numStages = 3,
 
 std::unique_ptr<Pass> createTritonGPUStreamPipelinePass();
 std::unique_ptr<Pass> createTritonAMDGPUDotSlicingPass(int sliceKTile = 0);
+std::unique_ptr<Pass> createTritonAMDGPUBypassLDSForDotLayout();
 
 std::unique_ptr<Pass>
 createTritonGPUAccelerateMatmulPass(int computeCapability = 80);

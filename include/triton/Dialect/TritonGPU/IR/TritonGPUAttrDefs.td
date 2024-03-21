@@ -144,15 +144,28 @@ compared to 1*64 when the hasLeadingOffset is false.
             int innerDimLength = shape[order[0]];
             int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeWidthInBit;
 
+            int mDim = mfmaEnc.getMDim();
+            int nDim = mfmaEnc.getNDim();
+            int nonKDim = dotOpEnc.getOpIdx() == 0 ? mDim : nDim;
+            if ((mDim == 4 && nDim == 64) || (nDim == 4 && mDim == 64)) {
+              // Operands of the layout have following shapes
+              // Large operand:
+              // - shape 64(non-k)x64(k) for 16 bit dtypes
+              // - shape 64(non-k)x16(k) for 32 bit dtypes
+              // Small operand:
+              // - shape 4(non-k)x64(k) for 16 bit dtypes
+              // - shape 4(non-k)x16(k) for 32 bit dtypes
+              const int vecSize = bankBitWidth / typeWidthInBit;
+              const int perPhase = std::max(1, numBanks / innerDimLength);
+              const int maxPhase = std::min(numBanks, nonKDim) / perPhase;
+              return get(context, vecSize, perPhase, maxPhase, order, CTALayout);
+            }
             int perPhase = std::max(1, elemsPerOneBanksRow / innerDimLength);
             // vecSize is set to kWidth of the dotop layout
             int vecSize = dotOpEnc.getKWidth();
             // maxPhase is set to SIMDWidth / perPhase
             int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);
             // TODO (zhanglx): figure out better parameters for mfma4
-            auto mDim = mfmaEnc.getMDim();
-            auto nDim = mfmaEnc.getNDim();
-            auto nonKDim = dotOpEnc.getOpIdx() == 0 ? mDim : nDim;
             if (4 == nonKDim)
                maxPhase = 4;
             // if maxPhase * perPhase is larger than one block of warps,

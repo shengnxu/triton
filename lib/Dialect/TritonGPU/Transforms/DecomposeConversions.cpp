@@ -57,6 +57,14 @@ public:
             dstDotOp.getParent() == srcMfmaEncoding)
           return;
       }
+
+      if (auto blockedEncoding =
+              srcEncoding.dyn_cast<triton::gpu::BlockedEncodingAttr>()) {
+
+        if (blockedEncoding.getThreadsPerWarp()[0] == 32)
+          return;
+      }
+
 #endif
       auto tmpType = RankedTensorType::get(
           dstType.getShape(), dstType.getElementType(),

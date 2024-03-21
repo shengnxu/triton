@@ -1,6 +1,10 @@
 #!/bin/bash
 #From https://github.com/pytorch/builder/blob/main/manywheel/build_common.sh
-WHEELHOUSE_DIR=/artifacts
+if [ -z "$1" ]; then
+    echo "Need wheel location argument" && exit 1
+fi
+
+WHEELHOUSE_DIR=$1
 PATCHELF_BIN=patchelf
 ROCM_LIB=third_party/rocm/lib
 ROCM_LD=third_party/rocm/llvm/bin
@@ -17,7 +21,7 @@ replace_needed_sofiles() {
         patchedname=$3
         if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
             set +e
-            origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*") 
+            origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
             ERRCODE=$?
             set -e
             if [ "$ERRCODE" -eq "0" ]; then
@@ -45,7 +49,7 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
     find $PREFIX/_C -type f -name "*.so*" | while read sofile; do
         echo "Setting rpath of $sofile"
         $PATCHELF_BIN --set-rpath ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/'../$ROCM_LIB} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile 
+        $PATCHELF_BIN --print-rpath $sofile
     done
 
     # All included dependencies are included in a single lib directory
@@ -54,7 +58,7 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
     while read sofile; do
         echo "Setting rpath of $sofile to ${LIB_SO_RPATH:-'$ORIGIN'}"
         $PATCHELF_BIN --set-rpath ${LIB_SO_RPATH:-'$ORIGIN'} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile 
+        $PATCHELF_BIN --print-rpath $sofile
         deps+=("$sofile")
         deps_soname+=("$(basename $sofile)")
     done < <(find $PREFIX/$ROCM_LIB -type f -name "*.so*")
@@ -87,9 +91,14 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
 
     # Re-bundle whl with so adjustments
     zip -rqy $(basename $pkg) *
+
     # Add manylinux2014 to whl name for pypi.  I believe we have met the criteria for manylinux based on our
     # toolchain and rpath changes to make each whl self contained and built with manylinux versions of python
-    newpkg=$(echo $pkg | sed -e 's/\linux_x86_64/manylinux_2_17_x86_64.manylinux2014_x86_64/g')
+    if [[ -z "${MANYLINUX_VERSION}" ]]; then
+        newpkg=$pkg
+    else
+        newpkg=$(echo $pkg | sed -e "s/\linux_x86_64/${MANYLINUX_VERSION}/g")
+    fi
 
     # Remove original whl
     rm -f $pkg

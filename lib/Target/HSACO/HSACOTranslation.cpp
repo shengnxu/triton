@@ -328,6 +328,7 @@ void translateTritonToTritonGPU(mlir::ModuleOp &module,
   pm.addPass(mlir::createTritonGPURemoveLayoutConversionsPass());
   pm.addPass(mlir::createTritonGPUDecomposeConversionsPass());
   pm.addPass(mlir::createTritonAMDGPUReorderInstructionsPass());
+  pm.addPass(mlir::createTritonAMDGPUBypassLDSForDotLayout());
   pm.addPass(mlir::createCSEPass());
   pm.addPass(mlir::createSymbolDCEPass());
 

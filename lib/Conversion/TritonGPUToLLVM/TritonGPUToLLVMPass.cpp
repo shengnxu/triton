@@ -887,6 +887,9 @@ private:
       auto dstDotOp =
           dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
       if (srcBlocked && dstDotOp) {
+      if (srcBlocked.getThreadsPerWarp()[0] == 32)
+        return;
+
         auto tmpType = RankedTensorType::get(
             dstType.getShape(), dstType.getElementType(),
             triton::gpu::SharedEncodingAttr::get(

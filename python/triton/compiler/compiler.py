@@ -134,6 +134,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
 
     pm.add_tritongpu_bypass_lds_for_dot_layout_pass()
 
+    pm.add_tritongpu_bypass_lds_for_dot_layout_pass()
     pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
 
 
@@ -449,7 +450,7 @@ def compile(fn, **kwargs):
         extern_libs = dict()
     debug = kwargs.get("debug", False)
     # Flag to control whether to store mma layout directly
-    optimize_epilogue = False
+    optimize_epilogue = True
     if os.environ.get('OPTIMIZE_EPILOGUE', '') == '1':
         optimize_epilogue = True
     #

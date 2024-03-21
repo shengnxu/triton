@@ -761,21 +761,21 @@ name_to_torch_types = {
 # vary seq length for fixed head and batch=4
 configs = []
 for mode in ['fwd']:
-    for dtype in ["fp16", "bf16"]:
-        for D_HEAD in [128, 64]:
-            for causal in [False, True]:
+    for dtype in ["fp16"]:
+        for D_HEAD in [128]:
+            for causal in [False]:
                 configs.append(triton.testing.Benchmark(
                     x_names=['BATCH', 'H','N_CTX'],
-                    x_vals=[(16, 16, 1024),
-                            (8, 16, 2048),
-                            (4, 16, 4096),
-                            (2, 16, 8192),
-                            (1, 16, 16384),
-                            (4, 48, 1024),
-                            (4, 48, 2048),
-                            (4, 48, 4096),
+                    x_vals=[#(16, 16, 1024),
+                            # (8, 16, 2048),
+                            # (4, 16, 4096),
+                            # (2, 16, 8192),
+                            # (1, 16, 16384),
+                            # (4, 48, 1024),
+                            # (4, 48, 2048),
+                            # (4, 48, 4096),
                             (4, 48, 8192),
-                            (4, 48, 16384),
+                            # (4, 48, 16384),
                             ],
                 line_arg='provider',
                 line_vals=['triton'] + (['flash'] if HAS_FLASH else []),

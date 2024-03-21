@@ -121,8 +121,10 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
         matrix_inst_size = matrix_inst_type
         pm.add_tritonamdgpu_accelerate_matmul_pass(gfx_arch, matrix_inst_size, kpack)
     pm.add_tritongpu_remove_layout_conversions_pass()
-    if True:
+    optimize_epilogue = True
+    if optimize_epilogue:   
         pm.add_tritongpu_optimize_epilogue_pass()
+    pm.add_tritongpu_bypass_lds_for_dot_layout_pass()
     pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
     pm.add_tritongpu_optimize_dot_operands_pass()
     if num_stages == 0 and is_hip() and target["matrix_core_version"] != 0:

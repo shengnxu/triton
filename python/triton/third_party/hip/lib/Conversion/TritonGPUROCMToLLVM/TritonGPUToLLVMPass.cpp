@@ -723,6 +723,10 @@ private:
           srcType.getEncoding().dyn_cast<triton::gpu_rocm::BlockedEncodingAttr>();
       auto dstDotOp =
           dstType.getEncoding().dyn_cast<triton::gpu_rocm::DotOperandEncodingAttr>();
+
+      if (srcBlocked.getThreadsPerWarp()[0] == 32)
+        return;
+
       if (srcBlocked && dstDotOp) {
         auto tmpType = RankedTensorType::get(
             dstType.getShape(), dstType.getElementType(),

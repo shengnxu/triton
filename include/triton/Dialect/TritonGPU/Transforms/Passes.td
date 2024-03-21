@@ -69,6 +69,20 @@ def TritonAMDGPUDotSlicing: Pass<"tritonamdgpu-dot-slicing", "mlir::ModuleOp"> {
   ];
 }
 
+def TritonAMDGPUBypassLDSForDotLayout: Pass<"tritonamdgpu-bypass-lds-for-dot-layout", "mlir::ModuleOp"> {
+  let summary = "Bypass moving data trough LDS for dot layout when possible";
+
+  let description = [{
+    Bypass moving data trough LDS for dot layout when possible.
+  }];
+
+  let constructor = "mlir::createTritonAMDGPUBypassLDSForDotLayout()";
+
+  let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
+                           "mlir::arith::ArithDialect"];
+}
+
+
 def TritonGPUPrefetch : Pass<"tritongpu-prefetch", "mlir::ModuleOp"> {
   let summary = "prefetch";
 

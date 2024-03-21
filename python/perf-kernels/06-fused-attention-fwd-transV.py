@@ -268,17 +268,17 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     use_fp8 = torch_dtype in fp8_type_list
 
     q = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda")
+        torch.empty((Z, H, N_CTX, D_HEAD), dtype=init_dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
     k = (
-        torch.empty((Z, H, N_CTX, D_HEAD), dtype=torch.float16, device="cuda")
+        torch.empty((Z, H, N_CTX, D_HEAD), dtype=init_dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
     v = (
-        torch.empty((Z, H, D_HEAD, N_CTX), dtype=torch.float16, device="cuda")
+        torch.empty((Z, H, D_HEAD, N_CTX), dtype=init_dtype, device="cuda")
         .normal_(mean=0., std=0.5)
         .requires_grad_()
     )
@@ -394,6 +394,8 @@ for dtype in ['fp16', 'float8_e4m3fnuz']:
 
 @triton.testing.perf_report(configs)
 def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, device="cuda"):
+    if dtype == 'fp8' and not TORCH_HAS_FP8E4:
+        sys.exit("fp8 is not available")
     warmup = 25
     rep = 100
     torch_dtype = name_to_torch_types[dtype]

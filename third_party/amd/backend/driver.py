@@ -7,8 +7,9 @@ from triton.runtime.cache import get_cache_manager
 from triton.backends.driver import GPUDriver
 
 dirname = os.path.dirname(os.path.realpath(__file__))
-include_dir = [os.path.join(dirname, "include")]
-library_dir = [os.path.join(dirname, "lib")]
+sysdirname = "/opt/rocm-5.7.0/"
+include_dir = [os.path.join(sysdirname, "include"), os.path.join(dirname, "include")]
+library_dir = [os.path.join(sysdirname, "lib"), os.path.join(dirname, "lib")]
 libraries = ['amdhip64']
 
 def compile_module_from_src(src, name):

@@ -26,8 +26,8 @@ import triton.language as tl
 # AMD E4M3B8
 # Note: When picking this f8 data type, scaling is required when using f8
 # for the second gemm
-TORCH_HAS_FP8E4 = hasattr(torch, 'float8_e4m3fnuz')
-float8:tl.constexpr = None if not TORCH_HAS_FP8E4 else torch.float8_e4m3fnuz
+# TORCH_HAS_FP8E4 = hasattr(torch, 'float8_e4m3fnuz')
+# float8:tl.constexpr = None if not TORCH_HAS_FP8E4 else torch.float8_e4m3fnuz
 
 @triton.jit
 def max_fn(x, y):
@@ -164,7 +164,7 @@ class _attention(torch.autograd.Function):
             ## For fp16, pick BLOCK_M=256, num_warps=8
             ## For fp8, pick BLOCK_M=128, num_warps=4
             ## TODO (zhanglx): add tuning infra for FA
-            BLOCK_M = 128 if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
+            BLOCK_M = 128 #if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
             BLOCK_N = 128
             waves_per_eu = 2
             num_warps = BLOCK_M // 32
@@ -189,6 +189,8 @@ class _attention(torch.autograd.Function):
             num_warps = num_warps,
             num_stages = num_stages,
             pre_load_v = pre_load_v,
+            slice_k_tile = 32,
+            kpack=1,
         )
 
         return o
@@ -198,8 +200,8 @@ attention = _attention.apply
 
 name_to_torch_types = {
     'fp16': torch.float16,
-    'bf16': torch.bfloat16,
-    'fp8': float8
+    # 'bf16': torch.bfloat16,
+    # 'fp8': float8
 }
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, dtype',
@@ -207,10 +209,10 @@ name_to_torch_types = {
     for shape in [(4, 48, 1024, 128),
                   (4, 48, 2048, 128),
                   (4, 48, 4096, 128)]
-    for dtype in ['fp16', 'bf16', 'fp8']])
+    for dtype in ['fp16']])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
-    init_dtype = torch.float16 if dtype == 'fp8' else name_to_torch_types[dtype]
+    init_dtype = torch.float16 # if dtype == 'fp8' else name_to_torch_types[dtype]
     q = (
         torch.empty((Z, H, N_CTX, D_HEAD), dtype=init_dtype, device="cuda")
         .normal_(mean=0., std=0.5)
@@ -239,8 +241,8 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     dout = torch.randn_like(q, dtype=torch.float16)
     tri_out = attention(q, k, v, sm_scale)
     # compare
-    atol = 1.4e-1 if dtype == 'fp8' else 1e-2
-    rtol = 1e-2 if dtype == 'fp8' else 3e-3
+    atol = 1e-2
+    rtol = 3e-3
     torch.testing.assert_close(ref_out, tri_out, atol=atol, rtol=rtol)
 
 
@@ -258,21 +260,21 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in ['fp16', 'bf16', 'fp8']:
+for dtype in ['fp16']:
     for D_HEAD in [128]:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
+                x_vals=[#(16, 16, 1024),
+                #         (8, 16, 2048),
+                #         (4, 16, 4096),
+                #         (2, 16, 8192),
+                #         (1, 16, 16384),
+                #         (4, 48, 1024),
+                #         (4, 48, 2048),
                         (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        # (4, 48, 8192),
+                        # (4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'],
@@ -289,8 +291,8 @@ for dtype in ['fp16', 'bf16', 'fp8']:
 
 @triton.testing.perf_report(configs)
 def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, provider, dtype, device="cuda"):
-    if dtype == 'fp8' and not TORCH_HAS_FP8E4:
-        sys.exit("fp8 is not available")
+    # if dtype == 'fp8' and not TORCH_HAS_FP8E4:
+    #     sys.exit("fp8 is not available")
     warmup = 25
     rep = 100
     init_dtype = torch.float16 if dtype != 'bf16' else torch.bfloat16

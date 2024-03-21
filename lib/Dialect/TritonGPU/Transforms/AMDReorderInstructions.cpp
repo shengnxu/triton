@@ -222,9 +222,65 @@ public:
     return std::distance(value.user_begin(), value.user_end());
   }
 
-  void scheduleSlicedDot(ModuleOp m, int stages, bool sinkLDSRd, bool sinkLDSWr) {
-    SmallVector<SmallVector<Operation *>> dotChains;
+  // Rearrange instructions of dot chain in pipelining manner.
+  // Note that not only load instruction
+  // will be hoisted, but all instructions starting from load to cvt(shared,
+  // dot). Let's say there are two dots:
+  //
+  // k0 = load(k0_ptr)
+  // k0_shared = cvt(k0, blocked, shared)
+  // k0_dot = cvt(k0_shared, shared, dot)
+  // dot0 = dot(..., k0_dot, 0)
+  //
+  // k1 = load(k1_ptr)
+  // k1_shared = cvt(k0, blocked, shared)
+  // k1_dot = cvt(k0_shared, shared, dot)
+  // dot1 = dot(..., k1_dot, dot1)
+  //
+  // doPipelining will rearrange instructions in following manner:
+  //
+  // k0 = load(k0_ptr)
+  // k1 = load(k1_ptr)
+  //
+  // k0_shared = cvt(k0, blocked, shared)
+  // k1_shared = cvt(k0, blocked, shared)
+  //
+  // k1_dot = cvt(k0_shared, shared, dot)
+  // k0_dot = cvt(k0_shared, shared, dot)
+  //
+  // dot0 = dot(..., k0_dot, 0)
+  // dot1 = dot(..., k1_dot, dot1)
+  void doPipelining(SmallVector<SmallVector<Operation *>> &dotChains,
+                    int pipelineStages) {
+    for (auto chain : dotChains) {
+      for (int i = 0; i < (chain.size() - 1) / pipelineStages; i++) {
+        SmallVector<Operation *> operations;
+        SmallVector<Operation *> operationsIdx0;
+        int startStageIdx = i == 0 ? 0 : 1;
+        for (int j = startStageIdx; j <= pipelineStages; j++) {
+          processStage(/*currDot*/ chain[i * pipelineStages + j],
+                       /*moveBeforeDot*/ chain[i * pipelineStages],
+                       operationsIdx0, j == startStageIdx, /*operandIdx*/ 0);
+          processStage(/*currDot*/ chain[i * pipelineStages + j],
+                       /*moveBeforeDot*/ chain[i * pipelineStages], operations,
+                       j == startStageIdx, /*operandIdx*/ 1);
+        }
+      }
 
+      int startDotIdx = ((chain.size() - 1) / pipelineStages) * pipelineStages;
+      SmallVector<Operation *> operations;
+      SmallVector<Operation *> operationsIdx0;
+      for (int i = 1; i <= (chain.size() - 1) % pipelineStages; i++) {
+        processStage(chain[startDotIdx + i], chain[startDotIdx], operationsIdx0,
+                     i == 1, 0);
+        processStage(chain[startDotIdx + i], chain[startDotIdx], operations,
+                     i == 1, 1);
+      }
+    }
+  }
+
+  void findDotChains(ModuleOp &m,
+                     SmallVector<SmallVector<Operation *>> &dotChains) {
     m.walk([&](tt::DotOp dotOp) {
       if (!containsInAnyChain(dotChains, dotOp)) {
         SmallVector<Operation *> newChain;
@@ -248,33 +304,10 @@ public:
         }
       }
     });
+  }
 
-    for (auto chain : dotChains) {
-      for (int i = 0; i < chain.size() / stages; i++) {
-        SmallVector<Operation *> operations;
-        SmallVector<Operation *> operationsIdx0;
-        for (int j = 0; j < stages; j++) {
-          processStage(chain[i * stages + j], chain[i], operationsIdx0, j == 0,
-                       0);
-          processStage(chain[i * stages + j], chain[i], operations, j == 0, 1);
-        }
-      }
-
-      int startDotIdx = (chain.size() / stages) * stages;
-      SmallVector<Operation *> operations;
-      SmallVector<Operation *> operationsIdx0;
-      for (int i = 0; i < chain.size() % stages; i++) {
-        processStage(chain[startDotIdx + i], chain[chain.size() / stages],
-                     operationsIdx0, i == 0, 0);
-        processStage(chain[startDotIdx + i], chain[chain.size() / stages],
-                     operations, i == 0, 1);
-      }
-    }
-
-    if (!sinkLDSRd) {
-      return;
-    }
-
+  void sinkLDSConverts(SmallVector<SmallVector<Operation *>> &dotChains,
+                       bool sinkLDSWr) {
     for (auto chain : dotChains) {
       for (int i = 0; i < chain.size(); i++) {
         Operation *dotOp = chain[i];
@@ -290,36 +323,75 @@ public:
     }
   }
 
+  void interleaveLoadsAndLDS(SmallVector<SmallVector<Operation *>> &dotChains) {
+    for (auto chain : dotChains) {
+      for (int i = 1; i < chain.size(); i++) {
+        Operation *dotOp = chain[i - 1];
+        Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
+        assert(isLDSRead(ldsRd));
+
+        Operation *dotOpCurr = chain[i];
+        Operation *curr = dotOpCurr->getOperand(1).getDefiningOp();
+        while (!isa<tt::LoadOp>(curr)) {
+          curr = curr->getOperand(0).getDefiningOp();
+        }
+        moveBefore(curr, ldsRd);
+      }
+    }
+  }
+
+  void scheduleSlicedDot(ModuleOp m, int stages, bool sinkLDSRd, bool sinkLDSWr,
+                         bool interleaveLoadWithLDSOps) {
+    SmallVector<SmallVector<Operation *>> dotChains;
+    int pipelineLoads = stages - 1;
+
+    findDotChains(m, dotChains);
+
+    if (stages > 1)
+      doPipelining(dotChains, pipelineLoads);
+
+    if (sinkLDSRd)
+      sinkLDSConverts(dotChains, sinkLDSWr);
+
+    // Arrange ops in CK-like manner.
+    // k0 = load k0_ptrs
+    // k0_shared = cvt(k0, blocked, shared)
+    // k1 = load k1_ptrs
+    // k0_dot = cvt(k0, shared, dot)
+    // dot0 = dot(q0_dot, k0_dot, 0
+    //
+    // k1_shared = cvt(k1, blocked, shared)
+    // k2 = load k2_ptrs
+    // k1_dot = cvt(k1, shared, dot)
+    // dot1 = dot(q1_dot, k1_dot, dot0)
+    if (interleaveLoadWithLDSOps && stages == 2) {
+      interleaveLoadsAndLDS(dotChains);
+    }
+  }
+
   void runOnOperation() override {
     SmallVector<Operation *> movedOperations;
     ModuleOp m = getOperation();
 
     moveQTensorOutOfTheLoop(m);
+    // TODO: Add some of these variables as autotunable parameters if needed.
+    // At present, the optimal performance of FA fwd pass is achieved using the
+    // following setup:
     int stages = 4;
-    bool sinkLDSRd = true;
-    bool sinkLDSWr = true;
-    scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr);
+    bool sinkLDSRd = false;
+    bool sinkLDSWr = false;
+    bool interleaveLoadWithLDSOps = false;
+
+    // For CK-like FA fwd pass schedule of sliced dots use following configuration:
+    // int stages = 2;
+    // bool sinkLDSRd = true;
+    // bool sinkLDSWr = true;
+    // bool interleaveLoadWithLDSOps = true;
+    scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr,
+                      interleaveLoadWithLDSOps);
   }
 };
 
 std::unique_ptr<Pass> mlir::createTritonAMDGPUReorderInstructionsPass() {
   return std::make_unique<TritonAMDGPUReorderInstructionsPass>();
 }
-
-// m.walk([&](tt::DotOp dotOp) {
-//   auto *operandA = dotOp.getOperand(0).getDefiningOp();
-//   auto convert = dyn_cast<ttg::ConvertLayoutOp>(operandA);
-//   auto srcTy = convert.getSrc().getType().cast<RankedTensorType>();
-//   Attribute srcLayout = srcTy.getEncoding();
-
-//   if (isa<ttg::MfmaEncodingAttr>(srcLayout)) {
-//     Operation *currOp = operandA;
-//     Operation *moveBeforeOp = dotOp;
-//     while (!isa<ttg::ViewSliceOp>(currOp)) {
-//       moveBefore(currOp, moveBeforeOp);
-//       moveBeforeOp = currOp;
-//       currOp = currOp->getOperand(0).getDefiningOp();
-//     }
-//     moveBefore(currOp, moveBeforeOp);
-//   }
-// });

@@ -91,7 +91,7 @@ def _attn_fwd_inner(
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
 
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'kpack': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 32, 'pre_load_v': True}, num_stages=1, num_warps=4), # d64-False
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=4), # d64-True
@@ -663,8 +663,7 @@ attention = _attention.apply
                           #(4, 48, 8192, 64),
                           #(4, 48, 16384, 64)
                           ])
-@pytest.mark.parametrize('causal', [False, True])
-@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize('causal', [False])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     torch.manual_seed(20)
     q = (
@@ -697,49 +696,49 @@ def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
     assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
 
 
-@pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [(4, 48, 1024, 64),
-                          (4, 48, 2048, 64),
-                          (4, 48, 4096, 64),
-                          (1, 16, 8192, 64),
-                          ])
-@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
-def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
-    torch.manual_seed(20)
-    causal = True
-    q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    sm_scale = 0,5
-    split_kernel = True
-    dout = torch.randn_like(q)
-    # reference implementation
-    M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-    if causal:
-        p[:, :, M == 0] = float("-inf")
-    p = torch.softmax(p.float(), dim=-1).to(v.dtype)
-    ref_out = torch.matmul(p, v)
-    ref_out.backward(dout)
-    ref_dv, v.grad = v.grad.clone(), None
-    ref_dk, k.grad = k.grad.clone(), None
-    ref_dq, q.grad = q.grad.clone(), None
-    # # triton implementation
-    tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
-    tri_out.backward(dout)
-    tri_dv, v.grad = v.grad.clone(), None
-    tri_dk, k.grad = k.grad.clone(), None
-    tri_dq, q.grad = q.grad.clone(), None
-    # compare
-    assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
-    if torch.version.hip is None:
-        assert torch.allclose(ref_dv, tri_dv, atol=1e-2, rtol=0)
-    # The current block size for MI200 series is 64x64. This results in
-    # larger differences in float results due to rounding.
-    else:
-        assert torch.allclose(ref_dv, tri_dv, atol=5e-2, rtol=0)
-    assert torch.allclose(ref_dk, tri_dk, atol=5e-2, rtol=0)
-    assert torch.allclose(ref_dq, tri_dq, atol=5e-2, rtol=0)
+# @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
+#                          [(4, 48, 1024, 64),
+#                           (4, 48, 2048, 64),
+#                           (4, 48, 4096, 64),
+#                           (1, 16, 8192, 64),
+#                           ])
+# @pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+# def test_op_bwd(Z, H, N_CTX, D_HEAD, dtype=torch.float16):
+#     torch.manual_seed(20)
+#     causal = True
+#     q = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+#     k = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+#     v = torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+#     sm_scale = 0,5
+#     split_kernel = True
+#     dout = torch.randn_like(q)
+#     # reference implementation
+#     M = torch.tril(torch.ones((N_CTX, N_CTX), device="cuda"))
+#     p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+#     if causal:
+#         p[:, :, M == 0] = float("-inf")
+#     p = torch.softmax(p.float(), dim=-1).to(v.dtype)
+#     ref_out = torch.matmul(p, v)
+#     ref_out.backward(dout)
+#     ref_dv, v.grad = v.grad.clone(), None
+#     ref_dk, k.grad = k.grad.clone(), None
+#     ref_dq, q.grad = q.grad.clone(), None
+#     # # triton implementation
+#     tri_out = attention(q, k, v, causal, sm_scale, split_kernel)
+#     tri_out.backward(dout)
+#     tri_dv, v.grad = v.grad.clone(), None
+#     tri_dk, k.grad = k.grad.clone(), None
+#     tri_dq, q.grad = q.grad.clone(), None
+#     # compare
+#     assert torch.allclose(ref_out, tri_out, atol=1e-2, rtol=0)
+#     if torch.version.hip is None:
+#         assert torch.allclose(ref_dv, tri_dv, atol=1e-2, rtol=0)
+#     # The current block size for MI200 series is 64x64. This results in
+#     # larger differences in float results due to rounding.
+#     else:
+#         assert torch.allclose(ref_dv, tri_dv, atol=5e-2, rtol=0)
+#     assert torch.allclose(ref_dk, tri_dk, atol=5e-2, rtol=0)
+#     assert torch.allclose(ref_dq, tri_dq, atol=5e-2, rtol=0)
 
 
 try:

@@ -1909,6 +1909,10 @@ void init_triton_ir(py::module &&m) {
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUDecomposeConversionsPass());
            })
+      .def("add_tritongpu_bypass_lds_for_dot_layout_pass",
+           [](mlir::PassManager &self) {
+             self.addPass(mlir::createTritonAMDGPUBypassLDSForDotLayout());
+           })
       .def("add_tritongpu_fence_insertion_pass",
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonNvidiaGPUFenceInsertionPass());

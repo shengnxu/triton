@@ -269,12 +269,15 @@ struct DotOpMFMAConversionHelper {
     int kpack = kWidth / k_base;
     SmallVector<Value> results;
     auto vecTy = vec_ty(type, k_base);
+    auto vecTyi16 = vec_ty(i16_ty, k_base);
     for (int k = 0; k < kpack; ++k) {
       Value vec = undef(vecTy);
+      Value veci16 = undef(vecTyi16);
       for (int elemId = 0; elemId < k_base; ++elemId) {
         auto val =
             extract_element(type, rawElems, i32_val(elemId + k * k_base));
-        vec = insert_element(vecTy, vec, val, i32_val(elemId));
+        auto vali16 = bitcast(val, i16_ty);
+        veci16 = insert_element(vecTyi16, veci16, vali16, i32_val(elemId));
       }
       if (type.getIntOrFloatBitWidth() == 8) {
         if (4 == k_base)
@@ -283,7 +286,7 @@ struct DotOpMFMAConversionHelper {
         if (8 == k_base)
           results.push_back(bitcast(vec, i64_ty));
       } else
-        results.push_back(vec);
+        results.push_back(veci16);
     }
     return results;
   }

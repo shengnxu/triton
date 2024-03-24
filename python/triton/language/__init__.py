@@ -58,7 +58,9 @@ from .core import (
     float8e4b15,
     float8e4b15x4,
     float8e4nv,
+    float8e4b8,
     float8e5,
+    float8e5b16,
     function_type,
     inline_asm_elementwise,
     int1,
@@ -108,7 +110,6 @@ from .random import (
     randn4x,
     uint32_to_uniform_float,
 )
-
 
 __all__ = [
     "TRITON_MAX_TENSOR_NUMEL",

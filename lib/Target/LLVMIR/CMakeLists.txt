@@ -1,6 +1,7 @@
 add_mlir_translation_library(TritonLLVMIR
         LLVMIRTranslation.cpp
         LLVMDIScope.cpp
+        LLVMIRBreakPhiStruct.cpp
 
         LINK_COMPONENTS
         Core
@@ -13,7 +14,6 @@ add_mlir_translation_library(TritonLLVMIR
         PUBLIC
         MLIRArithToLLVM
         MLIRBuiltinToLLVMIRTranslation
-        MLIRExecutionEngineUtils
         MLIRIndexToLLVM
         MLIRIR
         MLIRLLVMDialect

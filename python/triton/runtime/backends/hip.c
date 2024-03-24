@@ -5,18 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static inline void gpuAssert(hipError_t code, const char *file, int line) {
-  {
-    if (code != HIP_SUCCESS) {
-      {
-        const char *prefix = "Triton Error [HIP]: ";
-        const char *str = hipGetErrorString(code);
-        char err[1024] = {0};
-        snprintf(err, 1024, "%s Code: %d, Messsage: %s", prefix, code, str);
-        PyErr_SetString(PyExc_RuntimeError, err);
-      }
-    }
-  }
+static bool gpuAssert(hipError_t code, const char *file, int line) {
+    if (code == HIP_SUCCESS)
+        return true;
+
+    const char *prefix = "Triton Error [HIP]: ";
+    const char *str = hipGetErrorString(code);
+    char err[1024] = {0};
+    snprintf(err, 1024, "%s Code: %d, Messsage: %s", prefix, code, str);
+    PyGILState_STATE gil_state;
+    gil_state = PyGILState_Ensure();
+    PyErr_SetString(PyExc_RuntimeError, err);
+    PyGILState_Release(gil_state);
+    return false;
 }
 
 #define HIP_CHECK(ans)                                                         \
@@ -26,13 +27,27 @@ static inline void gpuAssert(hipError_t code, const char *file, int line) {
       return NULL;                                                             \
   }
 
+#define HIP_CHECK_AND_RETURN_NULL(ans)                                         \
+  do {                                                                         \
+    if (!gpuAssert((ans), __FILE__, __LINE__))                                 \
+      return NULL;                                                             \
+  } while (0)
+
+#define HIP_CHECK_AND_RETURN_NULL_ALLOW_THREADS(ans)                           \
+  do {                                                                         \
+    if (!gpuAssert((ans), __FILE__, __LINE__)) {                               \
+      PyEval_RestoreThread(_save);                                             \
+      return NULL;                                                             \
+    }                                                                          \
+  } while (0)
+
 static PyObject *getDeviceProperties(PyObject *self, PyObject *args) {
   int device_id;
   if (!PyArg_ParseTuple(args, "i", &device_id))
     return NULL;
 
   hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+  HIP_CHECK_AND_RETURN_NULL(hipGetDeviceProperties(&props, device_id));
 
   // create a struct to hold device properties
   return Py_BuildValue("{s:i, s:i, s:i, s:i, s:i}", "max_shared_mem",
@@ -81,15 +96,24 @@ static PyObject *loadBinary(PyObject *self, PyObject *args) {
                     (void *)(uintptr_t)logbufsize, (void *)_log, (void *)1};
 
   // launch HIP Binary
+  int32_t n_regs = 0;
+  int32_t n_spills = 0;
   hipModule_t mod;
   hipFunction_t fun;
-  hipModuleLoadDataEx(&mod, hsaco, 5, opt, optval);
-  hipModuleGetFunction(&fun, mod, name);
+  Py_BEGIN_ALLOW_THREADS;
+  HIP_CHECK_AND_RETURN_NULL_ALLOW_THREADS(hipModuleLoadDataEx(&mod, hsaco, 5, opt, optval));
+  HIP_CHECK_AND_RETURN_NULL_ALLOW_THREADS(hipModuleGetFunction(&fun, mod, name));
+  HIP_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
+      hipFuncGetAttribute(&n_regs, HIP_FUNC_ATTRIBUTE_NUM_REGS, fun));
+  HIP_CHECK_AND_RETURN_NULL_ALLOW_THREADS(
+      hipFuncGetAttribute(&n_spills, HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, fun));
+  // somehow ISA dumping seems vgpr_spill_count always need minus 1
+  if(n_spills != 0) n_spills = n_spills / 4 - 1;
+
+  Py_END_ALLOW_THREADS;
   free(hsaco);
 
   // get allocated registers and spilled registers from the function
-  int n_regs = 0;
-  int n_spills = 0;
   if (PyErr_Occurred()) {
     return NULL;
   }

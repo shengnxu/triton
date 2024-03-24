@@ -27,99 +27,11 @@ using triton::gpu::DotOperandEncodingAttr;
 using triton::gpu::MmaEncodingAttr;
 using triton::gpu::SliceEncodingAttr;
 
-struct PatternSharedInfo {
-  // If a conversion cannot be eliminated with a high-benefit pattern (e.g.,
-  // SimplifyConversion, RematerializeBackward), it will be pushed forward in
-  // the hope that this will enable the elimination of these conversions later.
-  // However, pushing a conversion forward can introduce more conversions
-  // (op(cvt(arg_0), arg_1, ..., arg_n) -> cvt(op(arg_0, cvt(arg_1), ...,
-  // cvt(arg_n))). This is why the RematerializeForward pattern performs an
-  // analysis to determine whether these added conversions can be eliminated
-  // later. The RematerializeBackward pattern, applied after pushing this
-  // conversion forward, will eliminate these newly added conversions by
-  // reversing the process achieved with RematerializeForward. This can create
-  // an infinite loop between these two optimizations. To avoid this, we keep
-  // track of the conversions that were pushed forward and skip them in the
-  // RematerializeBackward pattern. A similar kind of loop can occur with the
-  // RematerializeForward and MoveConvertOutOfLoop patterns.
-  llvm::DenseMap<Operation *, Operation *> cvtsPushedForwardMap;
-};
-
 // -----------------------------------------------------------------------------
 //
 // -----------------------------------------------------------------------------
 
-// convert(blocked, dot_operand) ->
-// convert(blocked, mma) + convert(mma,  dot_operand)
-// if this value is itself the result of a dot operation
-// this is a heuristic to accommodate some pattern seen in fused attention
-// kernels.
-// TODO: replace this by something more generic, i.e. layout-aware CSE
-class DecomposeDotOperand : public mlir::RewritePattern {
-
-public:
-  explicit DecomposeDotOperand(mlir::MLIRContext *context)
-      : mlir::RewritePattern(triton::gpu::ConvertLayoutOp::getOperationName(),
-                             1, context) {}
-
-  template <typename encTy>
-  mlir::LogicalResult processEncoding(encTy encoding,
-                                      triton::gpu::ConvertLayoutOp convert,
-                                      RankedTensorType &dstType,
-                                      mlir::PatternRewriter &rewriter) const {
-    SetVector<Operation *> bwdSlices;
-    mlir::getBackwardSlice(convert.getResult(), &bwdSlices);
-    if (llvm::find_if(bwdSlices, [](Operation *op) {
-          return isa<triton::DotOp>(op);
-        }) == bwdSlices.end())
-      return mlir::failure();
-
-    auto tmpType = RankedTensorType::get(dstType.getShape(),
-                                         dstType.getElementType(), encoding);
-    auto tmp = rewriter.create<triton::gpu::ConvertLayoutOp>(
-        convert.getLoc(), tmpType, convert.getOperand());
-    rewriter.replaceOpWithNewOp<triton::gpu::ConvertLayoutOp>(convert, dstType,
-                                                                tmp);
-    return mlir::success();
-  }
-
-  mlir::LogicalResult
-  matchAndRewrite(mlir::Operation *op,
-                  mlir::PatternRewriter &rewriter) const override {
-    if (!llvm::isa<triton::gpu::ConvertLayoutOp>(op))
-      return mlir::failure();
-    auto convert = llvm::cast<triton::gpu::ConvertLayoutOp>(op);
-    auto srcType = convert.getOperand().getType().cast<RankedTensorType>();
-    auto dstType = convert.getType().cast<RankedTensorType>();
-    if (srcType.getEncoding().isa<triton::gpu::BlockedEncodingAttr>() &&
-        dstType.getEncoding().isa<triton::gpu::DotOperandEncodingAttr>()) {
-      auto dstDotOperand =
-          dstType.getEncoding().cast<triton::gpu::DotOperandEncodingAttr>();
-      auto dstParent = dstDotOperand.getParent();
-      if (dstDotOperand.getOpIdx() == 1 ||
-          (!dstParent.isa<triton::gpu::MmaEncodingAttr>() &&
-           !dstParent.isa<triton::gpu::MfmaEncodingAttr>()))
-        return mlir::failure();
-
-      if (dstParent.isa<triton::gpu::MmaEncodingAttr>()) {
-        auto dstParentMma = dstParent.cast<triton::gpu::MmaEncodingAttr>();
-        if (dstParentMma.isVolta() || dstParentMma.getWarpsPerCTA()[1] > 1)
-          return mlir::failure();
-        return processEncoding(dstParentMma, convert, dstType, rewriter);
-      }
-
-      if (dstParent.isa<triton::gpu::MfmaEncodingAttr>()) {
-        auto dstParentMfma = dstParent.cast<triton::gpu::MfmaEncodingAttr>();
-        if (dstParentMfma.getWarpsPerCTA()[1] > 1)
-          return mlir::failure();
-        return processEncoding(dstParentMfma, convert, dstType, rewriter);
-      }
-    }
-    return mlir::failure();
-  }
-};
-
-//
+// dot(a, b, load(ptr)) -> add(load(ptr), dot(a, b, 0))
 class ConvertDotConvert : public mlir::RewritePattern {
 public:
   ConvertDotConvert(mlir::MLIRContext *context)
@@ -154,7 +66,8 @@ public:
         op->getLoc(), dotOp.getResult().getType(), _0f);
     auto newDot = rewriter.create<triton::DotOp>(
         op->getLoc(), dotOp.getResult().getType(), dotOp.getOperand(0),
-        dotOp.getOperand(1), _0, dotOp.getAllowTF32());
+        dotOp.getOperand(1), _0, dotOp.getAllowTF32(),
+        dotOp.getMaxNumImpreciseAcc());
     auto newCvt = rewriter.create<triton::gpu::ConvertLayoutOp>(
         op->getLoc(), dstTy, newDot.getResult());
     rewriter.replaceOpWithNewOp<arith::AddFOp>(op, newCvt, cvtOp.getOperand());
@@ -250,49 +163,29 @@ static bool hasConvertToMMATransisitiveUse(Operation *op, Attribute encoding) {
     getForwardSlice(currentValue, &forwardSlice);
     for (Operation *op : forwardSlice) {
       if (auto convertOp = dyn_cast<triton::gpu::ConvertLayoutOp>(op)) {
-        if (convertOp.getResult()
-                .getType()
-                .cast<RankedTensorType>()
-                .getEncoding() == encoding)
-          return true;
-      }
-      auto yield = dyn_cast<scf::YieldOp>(op);
-      if (!yield)
-        continue;
-      auto forOp = dyn_cast<scf::ForOp>(yield.getOperation()->getParentOp());
-      if (!forOp)
-        continue;
-      for (OpOperand &operand : yield->getOpOperands()) {
-        Operation *def = operand.get().getDefiningOp();
-        if (def && forwardSlice.count(def) &&
-            (seen.insert(operand.get()).second == true))
-          queue.push_back(forOp.getRegionIterArg(operand.getOperandNumber()));
-      }
-    }
-  }
-  return false;
-}
+        Attribute dstEncoding = convertOp.getResult()
+                                    .getType()
+                                    .cast<RankedTensorType>()
+                                    .getEncoding();
+        if (auto mmaLayout =
+                dstEncoding.dyn_cast<triton::gpu::MmaEncodingAttr>())
+          return (mmaLayout.getVersionMajor() > 1) ? true
+                                                   : mmaLayout == encoding;
+        if (auto mfmaLayout =
+                dstEncoding.dyn_cast<triton::gpu::MfmaEncodingAttr>())
+          return mfmaLayout == encoding;
+        if (dstEncoding.isa<triton::gpu::DotOperandEncodingAttr>()) {
+          if (auto mmaLayout =
+                  encoding.dyn_cast<triton::gpu::MmaEncodingAttr>()) {
+            return mmaLayout.getVersionMajor() > 1;
 
-#ifdef USE_ROCM
-// Look ahead to at the transitive uses and see if there is a convert to mfma
-// operations.
-// TODO: unify with hasConvertToMMATransisitiveUse?
-static bool hasConvertToMFMATransisitiveUse(Operation *op, Attribute encoding) {
-  SmallVector<Value> queue = {op->getResult(0)};
-  SetVector<Operation *> forwardSlice;
-  llvm::SmallDenseSet<Value> seen;
-  while (!queue.empty()) {
-    Value currentValue = queue.back();
-    queue.pop_back();
-    getForwardSlice(currentValue, &forwardSlice);
-    for (Operation *op : forwardSlice) {
-      if (auto convertOp = dyn_cast<triton::gpu::ConvertLayoutOp>(op)) {
-        if (convertOp.getResult()
-                .getType()
-                .cast<RankedTensorType>()
-                .getEncoding() == encoding)
-          return true;
+          } else {
+            assert(encoding.dyn_cast<triton::gpu::MfmaEncodingAttr>());
+            return true;
+          }
+        }
       }
+
       auto yield = dyn_cast<scf::YieldOp>(op);
       if (!yield)
         continue;
@@ -309,14 +202,14 @@ static bool hasConvertToMFMATransisitiveUse(Operation *op, Attribute encoding) {
   }
   return false;
 }
-#endif
 
 // Return true if the op is an op with a layout we don't want to change. We will
 // propagate the layout starting from anchor ops.
 static bool isLayoutAnchor(Operation *op) {
   if (isa<triton::LoadOp, triton::StoreOp>(op))
     return isExpensiveLoadOrStore(op);
-  if (isa<triton::DotOp, triton::AtomicRMWOp, triton::AtomicCASOp>(op))
+  if (isa<triton::ViewOp, triton::DotOp, triton::AtomicRMWOp,
+          triton::AtomicCASOp>(op))
     return true;
   return false;
 }
@@ -330,22 +223,11 @@ void LayoutPropagation::initAnchorLayout() {
           // back to mma further down to avoid generating reduction with MMA
           // layout that may have lower performance.
           // This can be improved with more aggressive backward propagation.
-          if (tensorType.getEncoding().isa<triton::gpu::MmaEncodingAttr>() &&
+          if ((tensorType.getEncoding().isa<triton::gpu::MmaEncodingAttr>() ||
+               tensorType.getEncoding().isa<triton::gpu::MfmaEncodingAttr>()) &&
               !hasConvertToMMATransisitiveUse(op, tensorType.getEncoding()))
             continue;
-#ifdef USE_ROCM
-          // Workaround to not propagate MFMA layout in case there are
-          // no chained dots MFMA layout is expensive to convert, so we want
-          // to convert it to something else as soon as possible.
-          // It saves LDS space in some cases.
-          //
-          // TODO: rework this heuristic if we can store MFMA layout directly
-          // into global memory.
-          if (tensorType.getEncoding().isa<triton::gpu::MfmaEncodingAttr>() &&
-              !hasConvertToMFMATransisitiveUse(op, tensorType.getEncoding()))
-            continue;
-#endif
-          layouts.insert({result, tensorType.getEncoding()});
+          layouts.insert({result, LayoutInfo(tensorType.getEncoding())});
         }
       }
     }
@@ -412,9 +294,6 @@ SmallVector<Value> LayoutPropagation::propagateToUsers(Value value,
       setEncoding({afterArg, result}, info, changed, user);
       continue;
     }
-    // Workaround: don't propagate through truncI
-    if (isa<arith::TruncIOp>(user))
-      continue;
     if (user->hasTrait<mlir::OpTrait::SameOperandsAndResultEncoding>() ||
         user->hasTrait<mlir::OpTrait::Elementwise>() ||
         isa<triton::ReduceOp, triton::ExpandDimsOp,
@@ -449,14 +328,21 @@ void LayoutPropagation::propagateLayout() {
 
 void LayoutPropagation::resolveConflicts() {
   for (auto &it : layouts) {
+    Operation *op = it.first.getDefiningOp();
     LayoutInfo &info = it.second;
     if (info.encodings.size() <= 1)
       continue;
     // Hacky resolve, prefer block encoding.
     // TODO: add a proper heuristic.
+    int maxSizePerThread = 1;
     Attribute encoding = *info.encodings.begin();
+    bool isLoadOrStore =
+        op && isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+                  triton::AtomicCASOp>(op);
     for (Attribute e : info.encodings) {
-      if (e.isa<triton::gpu::BlockedEncodingAttr>()) {
+      if ((isLoadOrStore && e.isa<triton::gpu::BlockedEncodingAttr>()) ||
+          (!isLoadOrStore && (e.isa<triton::gpu::MmaEncodingAttr>() ||
+                              e.isa<triton::gpu::MfmaEncodingAttr>()))) {
         encoding = e;
         break;
       }
@@ -569,6 +455,15 @@ Value LayoutPropagation::getValueAs(Value value, Attribute encoding) {
       return rewrittenValue;
     OpBuilder rewriter(value.getContext());
     rewriter.setInsertionPointAfterValue(rewrittenValue);
+    // Workaround: The pipeliner will insert async.wait after a pipelined loop
+    // to ensure that there is no pending copies and it is safe to re-use shared
+    // memory. We shouldn't insert ops that may use shared memory in between the
+    // loop and the async.wait. This is a hack until we fix the IR
+    // representation of async wait.
+    if (Operation *op = rewrittenValue.getDefiningOp()) {
+      if (isa<triton::gpu::AsyncWaitOp>(op->getNextNode()))
+        rewriter.setInsertionPointAfter(op->getNextNode());
+    }
     auto tmpType = RankedTensorType::get(tensorType.getShape(),
                                          tensorType.getElementType(), encoding);
     Value converted = rewriter.create<triton::gpu::ConvertLayoutOp>(
@@ -820,7 +715,7 @@ Operation *LayoutPropagation::rewriteOp(Operation *op) {
       map(oldResult, newResult);
     return newOp;
   }
-  assert(0 && "unexpected op in rewrite");
+  llvm::report_fatal_error("unexpected op in rewrite");
   return nullptr;
 }
 
@@ -835,35 +730,6 @@ static bool canBeRemat(Operation *op) {
     return false;
 
   return true;
-}
-
-// Replace ForOp with a new ForOp with extra operands. The YieldOp is not
-// updated and needs to be updated separatly for the loop to be correct.
-static scf::ForOp replaceForOpWithNewSignature(OpBuilder &rewriter,
-                                               scf::ForOp loop,
-                                               ValueRange newIterOperands) {
-  OpBuilder::InsertionGuard g(rewriter);
-  rewriter.setInsertionPoint(loop);
-
-  // Create a new loop before the existing one, with the extra operands.
-  rewriter.setInsertionPoint(loop);
-  auto operands = llvm::to_vector<4>(loop.getIterOperands());
-  operands.append(newIterOperands.begin(), newIterOperands.end());
-  scf::ForOp newLoop = rewriter.create<scf::ForOp>(
-      loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(), loop.getStep(),
-      operands);
-  newLoop.getBody()->erase();
-
-  newLoop.getLoopBody().getBlocks().splice(
-      newLoop.getLoopBody().getBlocks().begin(),
-      loop.getLoopBody().getBlocks());
-  for (Value operand : newIterOperands)
-    newLoop.getBody()->addArgument(operand.getType(), operand.getLoc());
-
-  for (auto it : llvm::zip(loop.getResults(), newLoop.getResults().take_front(
-                                                  loop.getNumResults())))
-    std::get<0>(it).replaceAllUsesWith(std::get<1>(it));
-  return newLoop;
 }
 
 static void rewriteSlice(SetVector<Value> &slice,
@@ -891,9 +757,9 @@ static void rewriteSlice(SetVector<Value> &slice,
       for (auto arg : forOp.getRegionIterArgs()) {
         if (slice.count(arg)) {
           OpOperand &initVal = forOp.getOpOperandForRegionIterArg(arg);
-          argMapping.push_back(
-              std::make_pair(*forOp.getIterArgNumberForOpOperand(initVal),
-                             forOp.getNumIterOperands() + newOperands.size()));
+          argMapping.push_back(std::make_pair(
+              forOp.getResultForOpOperand(initVal).getResultNumber(),
+              forOp.getInitArgs().size() + newOperands.size()));
           newOperands.push_back(mapping.lookup(initVal.get()));
         }
       }
@@ -1002,7 +868,7 @@ static void backwardRematerialization(ConvertLayoutOp convertOp) {
 
 // For convert left we try to hoist them above type extension to reduce the cost
 // of the convert.
-static void hoistConvertOnTopOfExt(ConvertLayoutOp convertOp) {
+static void hoistConvertOnTopOfExtOrBroadcast(ConvertLayoutOp convertOp) {
   // we don't want to rematerialize any conversion to/from shared
   if (triton::gpu::isSharedEncoding(convertOp.getResult()) ||
       triton::gpu::isSharedEncoding(convertOp.getOperand()))
@@ -1013,29 +879,35 @@ static void hoistConvertOnTopOfExt(ConvertLayoutOp convertOp) {
   if (targetType.getEncoding().isa<triton::gpu::DotOperandEncodingAttr>())
     return;
 
-  auto isExtOp = [](Operation *op) {
-    return isa<arith::ExtSIOp, arith::ExtUIOp, arith::ExtFOp>(op);
+  auto isExtOrBroadcastOp = [](Operation *op) {
+    return isa<arith::ExtSIOp, arith::ExtUIOp, arith::ExtFOp,
+               triton::BroadcastOp, triton::ExpandDimsOp>(op);
   };
+
   // 1. Take a backward slice of all the tensor dependencies.
   SetVector<Value> slice;
   DenseMap<Value, Attribute> layout;
-  LogicalResult result = getRematerializableSlice(
-      convertOp.getOperand(), targetType.getEncoding(), slice, layout, isExtOp);
+  LogicalResult result =
+      getRematerializableSlice(convertOp.getOperand(), targetType.getEncoding(),
+                               slice, layout, isExtOrBroadcastOp);
   if (result.failed())
     return;
 
-  Operation *extOp = nullptr;
+  Operation *extOrBroadcatOp = nullptr;
   unsigned sliceSize = slice.size();
   for (unsigned i = 0; i < sliceSize; i++) {
     Value v = slice[i];
     Operation *op = v.getDefiningOp();
     if (!op)
       continue;
-    if (isExtOp(op)) {
+    if (isExtOrBroadcastOp(op)) {
       SetVector<Value> tempSlice;
       DenseMap<Value, Attribute> tempLayout;
+      std::optional<Attribute> srcEncoding = inferSrcEncoding(op, layout[v]);
+      if (!srcEncoding)
+        return;
       LogicalResult result = getRematerializableSlice(
-          op->getOperand(0), layout[v], tempSlice, tempLayout);
+          op->getOperand(0), *srcEncoding, tempSlice, tempLayout);
       // If we can rematerialize the rest of the ext slice we can ignore this
       // ext as it won't need a convert.
       if (result.succeeded()) {
@@ -1045,24 +917,28 @@ static void hoistConvertOnTopOfExt(ConvertLayoutOp convertOp) {
       }
       // Only apply it if there is a single ext op otherwise we would have to
       // duplicate the convert.
-      if (extOp != nullptr)
+      if (extOrBroadcatOp != nullptr)
         return;
-      extOp = op;
+      extOrBroadcatOp = op;
     }
   }
 
-  if (extOp == nullptr)
+  if (extOrBroadcatOp == nullptr)
+    return;
+  std::optional<Attribute> srcEncoding =
+      inferSrcEncoding(extOrBroadcatOp, layout[extOrBroadcatOp->getResult(0)]);
+  if (!srcEncoding)
     return;
   // Move the convert before the ext op and rewrite the slice.
-  OpBuilder builder(extOp);
-  auto tensorType = extOp->getOperand(0).getType().cast<RankedTensorType>();
-  auto newType =
-      RankedTensorType::get(tensorType.getShape(), tensorType.getElementType(),
-                            layout[extOp->getResult(0)]);
+  OpBuilder builder(extOrBroadcatOp);
+  auto tensorType =
+      extOrBroadcatOp->getOperand(0).getType().cast<RankedTensorType>();
+  auto newType = RankedTensorType::get(
+      tensorType.getShape(), tensorType.getElementType(), *srcEncoding);
   auto newConvertOp = builder.create<ConvertLayoutOp>(
-      convertOp.getLoc(), newType, extOp->getOperand(0));
+      convertOp.getLoc(), newType, extOrBroadcatOp->getOperand(0));
   IRMapping mapping;
-  mapping.map(extOp->getOperand(0), newConvertOp.getResult());
+  mapping.map(extOrBroadcatOp->getOperand(0), newConvertOp.getResult());
   // 3. Rewrite the slice.
   rewriteSlice(slice, layout, convertOp, mapping);
 }
@@ -1081,7 +957,7 @@ static void hoistConvert(ModuleOp module) {
   module.walk(
       [&](ConvertLayoutOp convertOp) { convertOps.push_back(convertOp); });
   for (ConvertLayoutOp convertOp : convertOps) {
-    hoistConvertOnTopOfExt(convertOp);
+    hoistConvertOnTopOfExtOrBroadcast(convertOp);
   }
 }
 
@@ -1122,7 +998,6 @@ public:
     hoistConvert(m);
 
     mlir::RewritePatternSet decomposePatterns(context);
-    decomposePatterns.add<DecomposeDotOperand>(context);
     decomposePatterns.add<ConvertDotConvert>(context);
     if (mlir::applyPatternsAndFoldGreedily(m, std::move(decomposePatterns))
             .failed()) {

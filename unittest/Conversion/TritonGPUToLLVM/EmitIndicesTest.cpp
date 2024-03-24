@@ -22,6 +22,7 @@
  */
 
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 #include "DumpLayout.h"
 
@@ -208,7 +209,8 @@ private:
     if (elemTyStr == "F16")
       return FloatType::getF16(&context);
     else
-      assert(0 && "getElemTy not implemented");
+      llvm::report_fatal_error("getElemTy not implemented");
+    return nullptr;
   }
 
 protected:

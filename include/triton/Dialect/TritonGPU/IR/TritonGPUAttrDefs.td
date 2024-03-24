@@ -113,6 +113,17 @@ compared to 1*64 when the hasLeadingOffset is false.
                      "ArrayRef<unsigned>":$order,
                      "CTALayoutAttr":$CTALayout,
                      "unsigned":$typeWidthInBit), [{
+        bool needTrans = false; // default value
+        return get(context, dotOpEnc, shape, order, CTALayout, typeWidthInBit, needTrans);
+    }]>,
+
+
+    AttrBuilder<(ins "DotOperandEncodingAttr":$dotOpEnc,
+                     "ArrayRef<int64_t>":$shape,
+                     "ArrayRef<unsigned>":$order,
+                     "CTALayoutAttr":$CTALayout,
+                     "unsigned":$typeWidthInBit,
+                     "bool":$needTrans), [{
 
 #ifdef USE_ROCM
         // ---- begin GFX908/GFX90A ----
@@ -120,6 +131,8 @@ compared to 1*64 when the hasLeadingOffset is false.
 
         if (mfmaEnc) {
           int kDimNum = dotOpEnc.getOpIdx() == 0 ? 1 : 0;
+          if (needTrans)
+            kDimNum = 1 - kDimNum;
           bool isKDimInner = (order[0] == kDimNum);
           if (isKDimInner) {
             const int numBanks = 32;
@@ -131,21 +144,17 @@ compared to 1*64 when the hasLeadingOffset is false.
             int elemsPerOneBanksRow = (numBanks * bankBitWidth) / typeWidthInBit;
 
             int perPhase = std::max(1, elemsPerOneBanksRow / innerDimLength);
-            // Note: the following settings is customized to avoid
-            // **load** bank conflicts
-            //
-            // vecSize is set to k_base, which is the number of elements each
-            // workitem loads for one mfma instruction.
-            // For now, the k_base rules are as follows
-            // 1. All selected mfma instructions produce a single block
-            // 2. For f16 data type, 2 VGPRs are used for operand A --> k_base = 4
-            // 3. For non-f16 data types, 1 VGPR are used for operand A
-            //    k_base = 32 / elemTypeInBits
-            // 4. TODO: what about f64?
-            //
+            // vecSize is set to kWidth of the dotop layout
+            int vecSize = dotOpEnc.getKWidth();
             // maxPhase is set to SIMDWidth / perPhase
-            int vecSize = ((typeWidthInBit == 16) ? 64 : 32 ) / typeWidthInBit;
-            int maxPhase = SIMDWidth / perPhase;
+            int maxPhase = std::min(SIMDWidth / perPhase, innerDimLength / vecSize);
+            // TODO (zhanglx): figure out better parameters for mfma4
+            auto mDim = mfmaEnc.getMDim();
+            auto nDim = mfmaEnc.getNDim();
+            auto nonKDim = dotOpEnc.getOpIdx() == 0 ? mDim : nDim;
+            if (4 == nonKDim)
+               maxPhase = 4;
+            assert(maxPhase > 0);
 
             return get(context, vecSize, perPhase, maxPhase, order, CTALayout);
           } else {
@@ -194,16 +203,23 @@ compared to 1*64 when the hasLeadingOffset is false.
 
           // --- handle A operand ---
           if (opIdx == 0) { // compute swizzling for A operand
-              int vec = (order[0] == 1) ? matShape[2] : matShape[0]; // k : m
-              int mmaStride = (order[0] == 1) ? matShape[0] : matShape[2];
+              int m = (needTrans) ? matShape[2] : matShape[0];
+              int k = (needTrans) ? matShape[0] : matShape[2];
+              int vec = (order[0] == 1) ? k : m;
+              int mmaStride = (order[0] == 1) ? m : k;
               int maxPhase = mmaStride / perPhase;
               return get(context, vec, perPhase, maxPhase, order, CTALayout);
           }
 
           // --- handle B operand ---
           if (opIdx == 1) {
-              int vec = (order[0] == 1) ? matShape[1] : matShape[2]; // n : k
-              int mmaStride = (order[0] == 1) ? matShape[2] : matShape[1];
+              // we compute vec and maxPhase m, n and k size of the mma
+              // instruction. when matmul operands is transposed, we should
+              // consider that to get m, n and k.
+              int n = needTrans ? matShape[2] : matShape[1];
+              int k = needTrans ? matShape[1] : matShape[2];
+              int vec = (order[0] == 1) ? n : k;
+              int mmaStride = (order[0] == 1) ? k : n;
               int maxPhase = mmaStride / perPhase;
               return get(context, vec, perPhase, maxPhase, order, CTALayout);
           }
@@ -229,6 +245,16 @@ compared to 1*64 when the hasLeadingOffset is false.
                      "Type":$eltTy), [{
       unsigned bitwidth = eltTy.getIntOrFloatBitWidth();
       return get(context, dotOpEnc, shape, order, CTALayout, bitwidth);
+    }]>,
+
+    AttrBuilder<(ins "DotOperandEncodingAttr":$dotOpEnc,
+                     "ArrayRef<int64_t>":$shape,
+                     "ArrayRef<unsigned>":$order,
+                     "CTALayoutAttr":$CTALayout,
+                     "Type":$eltTy,
+                     "bool":$needTrans), [{
+      unsigned bitwidth = eltTy.getIntOrFloatBitWidth();
+      return get(context, dotOpEnc, shape, order, CTALayout, bitwidth, needTrans);
     }]>,
 
     AttrBuilder<(ins "ArrayRef<int64_t>":$shape,
@@ -647,12 +673,19 @@ def MfmaEncodingAttr : DistributedEncoding<"MfmaEncoding"> {
   let mnemonic = "mfma";
 
   let description = [{
-An encoding for tensors that have been produced by MI100 && MI200 tensor cores.
-It is characterized by parameters `warpsPerCTA` and `nonKDim` that indicates how data should be partitioned
-between waves (analogous to the term 'warp' used in NVIDIA's CUDA programming model).
+An encoding for tensors that have been produced by tensor cores of AMD MI GPUs.
+It is characterized by the following parameters:
+- `versionMajor` and `versionMinor` indicates the GPU arch
+  - 1.0: gfx908, i.e. MI100
+  - 2.0: gfx90a: i.e. MI200, MI210, MI250
+  - 3.0: gfx940, gfx941, gfx942: MI300
+- `warpsPerCTA` indicates the wave layout in the workgroup.
+- `MDim` and `NDim` indicate the dimension of the output of the mfma instruction.
+- `isTransposed` indicates the result tensor is transposed so that it can be converted to dotOperand layout
+without going to LDS. This is used in the case of chained dot (E.g. Flash-Attention kernel).
 
 Example 1:
-Suppose we have a tensor with a shape of [32, 64], warpsPerCTA set to [1, 2] and nonKDim set to 32.
+Suppose we have a tensor with a shape of [32, 64], warpsPerCTA set to [1, 2] and MDim=NDim=32.
 The data will be distributed between threads as follows:
 
                 wave 0                                 wave 1
@@ -691,7 +724,7 @@ The data will be distributed between threads as follows:
 [ 32  33  34  35 ...... 62  63 ]      [ 96  97  98  99 ...... 126  127 ]
 
 Example 2:
-Suppose we have a tensor with a shape of [16, 32], warpsPerCTA set to [1, 2] and nonKDim set to 16.
+Suppose we have a tensor with a shape of [16, 32], warpsPerCTA set to [1, 2] and MDim=NDim=16.
 The data will be distributed between threads as follows:
 
                 wave 0                                 wave 1
@@ -712,14 +745,76 @@ The data will be distributed between threads as follows:
 [ 48  49  50  51 ...... 62  63 ]      [ 112 113 114 115 ...... 126  127 ]
 [ 48  49  50  51 ...... 62  63 ]      [ 112 113 114 115 ...... 126  127 ]
 [ 48  49  50  51 ...... 62  63 ]      [ 112 113 114 115 ...... 126  127 ]
+
+Example 3:
+Suppose we have a tensor with a shape of [8, 8], warpsPerCTA set to [2, 2] and MDim=NDim=4.
+The data will be distributed between threads as follows(note that each element is duplicated in 16 threads):
+
+M  N ->                    wave 0                                                       wave 2
+| --------------------------/\--------------------------   ------------------------------/\------------------------------
+V [ 0,4,8...60   1,5...61     2,6...62     3,7...63    ]   [ 128,132...188  129,133...189  130,134...190  131,135...191 ]
+  [ 0,4,8...60   1,5...61     2,6...62     3,7...63    ]   [ 128,132...188  129,133...189  130,134...190  131,135...191 ]
+  [ 0,4,8...60   1,5...61     2,6...62     3,7...63    ]   [ 128,132...188  129,133...189  130,134...190  131,135...191 ]
+  [ 0,4,8...60   1,5...61     2,6...62     3,7...63    ]   [ 128,132...188  129,133...189  130,134...190  131,135...191 ]
+
+                           wave 1                                                       wave 3
+  --------------------------/\--------------------------   ------------------------------/\------------------------------
+  [ 64,68...124  65,69...125  66,70...126  67,71...127 ]   [ 192,196...252  193,197...253  194,198...254  195,199...255 ]
+  [ 64,68...124  65,69...125  66,70...126  67,71...127 ]   [ 192,196...252  193,197...253  194,198...254  195,199...255 ]
+  [ 64,68...124  65,69...125  66,70...126  67,71...127 ]   [ 192,196...252  193,197...253  194,198...254  195,199...255 ]
+  [ 64,68...124  65,69...125  66,70...126  67,71...127 ]   [ 192,196...252  193,197...253  194,198...254  195,199...255 ]
 }];
 
   let parameters = (
     ins
-    "unsigned":$nonKDim,
+    "unsigned": $versionMajor,
+    "unsigned": $versionMinor,
     ArrayRefParameter<"unsigned">:$warpsPerCTA,
-    "bool":$isTransposed,
-    "CTALayoutAttr":$CTALayout
+    "unsigned":$MDim,
+    "unsigned":$NDim,
+    "bool":$isTransposed
+  );
+
+  let hasCustomAssemblyFormat = 1;
+}
+
+def WmmaEncodingAttr : DistributedEncoding<"WmmaEncoding"> {
+  let mnemonic = "wmma";
+
+  let description = [{
+An encoding for tensors that have been produced by WMMA instructions,
+available on RDNA 3.
+A `warpsPerCTA` parameter characterizes data distribution between waves.
+An important limitation of WMMA for layout is a shape for tiles proccessed
+by a single wave. It is [16, 16].
+This encoding assumes specific access to matrix elements by threads.
+Example:
+Suppose we have a tensor with shape [32, 48], `warpsPerCTA` set to [2, 3].
+
+    wave 0 [16, 16]           wave 1 [16, 16]           wave 2 [16, 16]
+-----------/\----------   -----------/\----------   -----------/\----------
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+...                       ...                       ...
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+
+    wave 3 [16, 16]           wave 4 [16, 16]           wave 5 [16, 16]
+-----------/\----------   -----------/\----------   -----------/\----------
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+...                       ...                       ...
+[0   1   2  ... 14  15]   [0   1   2  ... 14  15]   [0   1   2  ... 14  15]
+[16  17  18 ... 30  31]   [16  17  18 ... 30  31]   [16  17  18 ... 30  31]
+  }];
+
+  let parameters = (
+    ins
+    ArrayRefParameter<"unsigned">:$warpsPerCTA
   );
 
   let hasCustomAssemblyFormat = 1;
@@ -768,7 +863,7 @@ def DotOperandEncodingAttr : DistributedEncoding<"DotOperandEncoding"> {
 In TritonGPU dialect, considering `d = tt.dot a, b, c`
 tt.dot's operands a and b must be of DotOperandEncodingAttr layout.
 a's opIdx is 0, b's opIdx is 1.
-The parend field in DotOperandEncodingAttr is the layout of d.
+The parent field in DotOperandEncodingAttr is the layout of d.
 
 For MMA v1, an additional attribute `isMMAv1Row` determines whether e.g. the a operand is used
 in the context of an mma.884.row.col or an mma.884.col.col operation. See the PTX ISA documentation
@@ -809,8 +904,7 @@ section 9.7.13.4.1 for more details.
                                      int bitwidth) const;
 #ifdef USE_ROCM
     SmallVector<int64_t> getMFMAElemsPerInstr() const;
-    SmallVector<int64_t> getMFMARep(ArrayRef<int64_t> operandShape,
-                                    Type elemType) const;
+    SmallVector<int64_t> getMFMARep(ArrayRef<int64_t> operandShape) const;
 #endif
   }];
 }

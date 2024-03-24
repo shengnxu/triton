@@ -33,7 +33,8 @@ jobs:
             echo '::set-output name=matrix-optional::["ubuntu-latest"]'
           fi
 
-  Integration-Tests-Nvidia:
+
+  Integration-Tests:
     needs: Runner-Preparation
 
     runs-on: ${{ matrix.runner }}
@@ -44,14 +45,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
-
+        uses: actions/checkout@v3
+        with:
+          submodules: 'true'
       - name: Set CUDA ENV
         if: ${{(matrix.runner[0] == 'self-hosted') && (matrix.runner[1] == 'V100' || matrix.runner[1] == 'A100' || matrix.runner[1] == 'H100')}}
         run: |
           echo "BACKEND=CUDA" >> "${GITHUB_ENV}"
           echo "ENABLE_TMA=0" >> "${GITHUB_ENV}"
-          echo "ENABLE_MMA_V3=0" >> "${GITHUB_ENV}"
           echo "TRITON_DISABLE_LINE_INFO=1" >> "${GITHUB_ENV}"
 
       - name: Clear cache
@@ -72,10 +73,10 @@ jobs:
         run: |
           cd python
           python3 -m pip install --upgrade pip
-          python3 -m pip install cmake==3.24
-          python3 -m pip install ninja
-          python3 -m pip install --no-build-isolation -vvv '.[tests]'
-          python3 -m pip install pytest-xdist
+          python3 -m pip install cmake==3.24 ninja pytest-xdist
+          sudo apt-get update -y
+          sudo apt-get install -y ccache clang lld
+          TRITON_BUILD_WITH_CLANG_LLD=true TRITON_BUILD_WITH_CCACHE=true python3 -m pip install --no-build-isolation -vvv '.[tests]'
 
       - name: Run lit tests
         if: ${{ env.BACKEND == 'CUDA'}}
@@ -88,24 +89,26 @@ jobs:
           fi
           lit -v "${LIT_TEST_DIR}"
 
-      - name: Enable MMAV3 and TMA
+      - name: Enable TMA
         if: ${{(matrix.runner[0] == 'self-hosted') && (matrix.runner[1] == 'H100')}}
         run: |
           echo "ENABLE_TMA=1" >> "${GITHUB_ENV}"
-          echo "ENABLE_MMA_V3=1" >> "${GITHUB_ENV}"
 
-      - name: Run python tests on CUDA with ENABLE_TMA=1 and ENABLE_MMA_V3=1
-        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '1' && env.ENABLE_MMA_V3 == '1'}}
+      - name: Run python tests on CUDA with ENABLE_TMA=1
+        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '1'}}
         run: |
           cd python/test/unit
-          python3 -m pytest -n 8 --ignore=runtime --ignore=operators --ignore=language/test_line_info.py
+          python3 -m pytest -n 8 --ignore=runtime --ignore=operators --ignore=language/test_line_info.py --ignore=language/test_subprocess.py
+          python3 -m pytest -n 8 language/test_subprocess.py
           # run runtime tests serially to avoid race condition with cache handling.
           python3 -m pytest runtime/
           # run test_line_info.py separately with TRITON_DISABLE_LINE_INFO=0
           TRITON_DISABLE_LINE_INFO=0 python3 -m pytest language/test_line_info.py
+          #run hopper/test_flashattention.py to avoid out of gpu memory
+          python3 -m pytest hopper/test_flashattention.py
 
-      - name: Run python tests on CUDA with ENABLE_TMA=0 and ENABLE_MMA_V3=0
-        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '0' && env.ENABLE_MMA_V3 == '0'}}
+      - name: Run python tests on CUDA with ENABLE_TMA=0
+        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '0'}}
         run: |
           cd python/test/unit
           python3 -m pytest -n 8 --ignore=runtime --ignore=hopper --ignore=operators --ignore=language/test_line_info.py
@@ -118,14 +121,22 @@ jobs:
         run: |
           rm -rf ~/.triton
 
-      - name: Run partial tests on CUDA with ENABLE_TMA=1 and ENABLE_MMA_V3=1
-        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '1' && env.ENABLE_MMA_V3 == '1'}}
+      - name: Run interpreter tests
+        env:
+          # TRITON_INTERPRET: "1"
+          CUA_VISIBLE_DEVICES: ""
+        run: |
+          cd python/test/unit
+          python3 -m pytest -vs operators/test_flash_attention.py
+
+      - name: Run partial tests on CUDA with ENABLE_TMA=1
+        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '1'}}
         run: |
           cd python/test/unit
           python3 -m pytest -n 8 operators
 
-      - name: Run partial tests on CUDA with ENABLE_TMA=0 and ENABLE_MMA_V3=0
-        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '0' && env.ENABLE_MMA_V3 == '0'}}
+      - name: Run partial tests on CUDA with ENABLE_TMA=0
+        if: ${{ env.BACKEND == 'CUDA' && env.ENABLE_TMA == '0'}}
         run: |
           cd python/test/unit
           python3 -m pytest -n 8 operators
@@ -160,96 +171,8 @@ jobs:
           python3 -m pytest -vs . --reruns 10
           sudo nvidia-smi -i 0 -rgc
 
-  Integration-Tests-Third-Party:
-    needs: Runner-Preparation
-    if: false
-
-    runs-on: ${{ matrix.runner }}
-
-    strategy:
-      matrix:
-        runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-optional)}}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-
-      - name: Set ROCM ENV
-        if: ${{(matrix.runner[0] == 'self-hosted') && (matrix.runner[1] == 'gfx908')}}
-        run: |
-          echo "BACKEND=ROCM" >> "${GITHUB_ENV}"
-
-      - name: Set XPU ENV
-        if: ${{(matrix.runner[0] == 'self-hosted') && (matrix.runner[1] == 'arc770')}}
-        run: |
-          echo "BACKEND=XPU" >> "${GITHUB_ENV}"
-
-      - name: Clear cache
-        run: |
-          rm -rf ~/.triton
-
-      - name: Update PATH
-        run: |
-          echo "PATH=${HOME}/.local/bin:${PATH}" >> "${GITHUB_ENV}"
-
-      - name: Check pre-commit
-        if: ${{ matrix.runner != 'macos-10.15' && (matrix.runner[1] != 'arc770') }}
-        run: |
-          python3 -m pip install --upgrade pre-commit
-          python3 -m pre_commit run --all-files --verbose
-
-      - name: Check pre-commit arc770
-        if: ${{ matrix.runner != 'macos-10.15' && (matrix.runner[1] == 'arc770') }}
-        run: |
-          source ${HOME}/triton_vars.sh
-          source ${HOME}/miniconda3/bin/activate
-          conda activate triton-xpu-ci
-          python3 -m pip install --upgrade pre-commit
-          python3 -m pre_commit run --all-files
-
-      - name: Install Triton on ROCM
-        if: ${{ env.BACKEND == 'ROCM'}}
-        run: |
-          git submodule update --init --recursive
-          cd python
-          python3 -m pip install --upgrade pip
-          python3 -m pip install cmake==3.24
-          python3 -m pip install torch==1.13.1 --index-url https://download.pytorch.org/whl/rocm5.2
-          export TRITON_CODEGEN_AMD_HIP_BACKEND=1
-          python3 -m pip install --no-build-isolation -vvv '.[tests]'
-
-      - name: Install Triton on XPU
-        if: ${{ env.BACKEND == 'XPU'}}
-        run: |
-          source ${HOME}/triton_vars.sh
-          source ${HOME}/miniconda3/bin/activate
-          conda activate triton-xpu-ci
-          git submodule update --init --recursive
-          cd python
-          python3 -m pip install --upgrade pip
-          python3 -m pip install cmake==3.24
-          export TRITON_CODEGEN_INTEL_XPU_BACKEND=1
-          python3 -m pip uninstall -y triton
-          python3 setup.py build
-          python3 -m pip install --no-build-isolation -vvv '.[tests]'
-
-      - name: Run python tests on ROCM
-        if: ${{ env.BACKEND == 'ROCM'}}
-        run: |
-          cd python/test/unit/language
-          python3 -m pytest --capture=tee-sys -rfs --verbose "test_core.py"
-
-      - name: Run python tests on XPU
-        if: ${{ env.BACKEND == 'XPU'}}
-        run: |
-          source ${HOME}/triton_vars.sh
-          source ${HOME}/miniconda3/bin/activate
-          conda activate triton-xpu-ci
-          cd python/test/backend/third_party_backends
-          python3 -m pytest --capture=tee-sys -rfs --verbose --backend xpu
-
   Compare-artifacts:
-    needs: Integration-Tests-Nvidia
+    needs: Integration-Tests
 
     runs-on: ubuntu-latest
 
@@ -278,7 +201,7 @@ jobs:
       - name: Download latest main artifacts
         env:
           ARTIFACT_NAME: artifacts A100
-          ARTIFACT_JOB_NAME: Integration-Tests-Nvidia
+          ARTIFACT_JOB_NAME: Integration-Tests
           MAX_NUM_ACTIONS_PAGES: 30
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

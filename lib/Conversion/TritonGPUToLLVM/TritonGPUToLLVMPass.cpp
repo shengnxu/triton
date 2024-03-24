@@ -18,6 +18,7 @@
 #include "triton/Analysis/Allocation.h"
 #include "triton/Analysis/AxisInfo.h"
 #include "triton/Analysis/Membar.h"
+#include "triton/Dialect/NVGPU/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #ifndef USE_ROCM
@@ -398,6 +399,16 @@ struct ConvertTritonGPUToLLVM
   using ConvertTritonGPUToLLVMBase<
       ConvertTritonGPUToLLVM>::ConvertTritonGPUToLLVMBase;
 
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<triton::nvgpu::NVGPUDialect, LLVM::LLVMDialect,
+                    NVVM::NVVMDialect, ROCDL::ROCDLDialect>();
+  }
+
+  ConvertTritonGPUToLLVM(int32_t computeCapability, Target target,
+                         mlir::triton::gpu::TMAMetadataTy *tmaMetadata)
+      : ConvertTritonGPUToLLVMBase({computeCapability, target}),
+        tmaMetadata(tmaMetadata) {}
+
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     ModuleOp mod = getOperation();
@@ -591,6 +602,7 @@ private:
   DenseMap<IndexCacheKeyT, SmallVector<SmallVector<Value>>,
            CacheKeyDenseMapInfo>
       indexCache;
+  mlir::triton::gpu::TMAMetadataTy *tmaMetadata = nullptr;
 
   void initSharedMemory(ModuleAllocation &allocation,
                         TritonGPUToLLVMTypeConverter &typeConverter) {
@@ -759,8 +771,9 @@ private:
     auto srcMfma =
         srcType.getEncoding().dyn_cast<triton::gpu::MfmaEncodingAttr>();
     auto newMfmaEnc = triton::gpu::MfmaEncodingAttr::get(
-        mod.getContext(), srcMfma.getNonKDim(), {warpsPerCtaX, warpsPerCtaY},
-        srcMfma.getIsTransposed(), srcMfma.getCTALayout());
+        mod.getContext(), srcMfma.getVersionMajor(), srcMfma.getVersionMinor(),
+        {warpsPerCtaX, warpsPerCtaY}, srcMfma.getMDim(), srcMfma.getNDim(),
+        srcMfma.getIsTransposed());
 
     auto newDstType = RankedTensorType::get(
         dstType.getShape(), dstType.getElementType(), dstType.getEncoding());
@@ -923,8 +936,10 @@ private:
       auto mask = insertSliceAsyncOp.getMask();
       auto srcTy = src.getType().cast<RankedTensorType>();
       auto dstTy = dst.getType().cast<RankedTensorType>();
-      auto srcBlocked =
-          srcTy.getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
+      auto srcLayout = srcTy.getEncoding();
+      assert((srcLayout.isa<BlockedEncodingAttr, SliceEncodingAttr>() &&
+              "Unexpected srcLayout"));
+
       auto resSharedLayout =
           dstTy.getEncoding().dyn_cast<triton::gpu::SharedEncodingAttr>();
       auto resElemTy = dstTy.getElementType();
@@ -954,7 +969,7 @@ private:
 
       // load
       auto tmpTy =
-          RankedTensorType::get(srcTy.getShape(), resElemTy, srcBlocked);
+          RankedTensorType::get(srcTy.getShape(), resElemTy, srcLayout);
       auto loadOp = builder.create<triton::LoadOp>(
           insertSliceAsyncOp.getLoc(), tmpTy, insertSliceAsyncOp.getSrc(),
           insertSliceAsyncOp.getMask(), insertSliceAsyncOp.getOther(),
@@ -987,8 +1002,12 @@ private:
     });
 
     mod.walk([&](triton::gpu::AsyncCommitGroupOp asyncCommitGroupOp) -> void {
+#ifdef USE_ROCM
+      asyncCommitGroupOp.erase();
+#else
       if (!triton::gpu::AsyncCommitGroupOp::isSupported(computeCapability))
         asyncCommitGroupOp.erase();
+#endif
     });
 
     mod.walk([&](triton::gpu::AsyncWaitOp asyncWaitOp) -> void {
@@ -1036,7 +1055,7 @@ private:
         bool isNativeHopperFP8 =
             AElType.isFloat8E5M2() || AElType.isFloat8E4M3FNUZ();
         bool isFP8 = isNativeHopperFP8 || AElType.isFloat8E5M2FNUZ() ||
-                     AElType.isFloat8E4M3FN();
+                     AElType.isFloat8E4M3FN() || AElType.isFloat8E4M3B11FNUZ();
         if (!isFP8 || (isNativeHopperFP8 && mmaLayout.isHopper()))
           return;
         promoteType = builder.getF16Type();
@@ -1090,9 +1109,11 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonGPUToLLVMPass() {
   return std::make_unique<ConvertTritonGPUToLLVM>();
 }
-std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonGPUToLLVMPass(const ConvertTritonGPUToLLVMOptions &options) {
-  return std::make_unique<ConvertTritonGPUToLLVM>(options);
+std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonGPUToLLVMPass(
+    int32_t computeCapability, Target target,
+    mlir::triton::gpu::TMAMetadataTy *tmaMetadata) {
+  return std::make_unique<ConvertTritonGPUToLLVM>(computeCapability, target,
+                                                  tmaMetadata);
 }
 
 } // namespace triton

@@ -12,13 +12,14 @@ std::unique_ptr<Pass> createTritonGPUPipelinePass(int numStages = 3,
                                                   int computeCapability = 80);
 
 std::unique_ptr<Pass> createTritonGPUStreamPipelinePass();
+std::unique_ptr<Pass> createTritonAMDGPUDotSlicingPass(int sliceKTile = 0);
 
 std::unique_ptr<Pass>
 createTritonGPUAccelerateMatmulPass(int computeCapability = 80);
 
-std::unique_ptr<Pass>
-createTritonAMDGPUAccelerateMatmulPass(int matrixCoreVersion = 0,
-                                       int matrixInstructionSize = 0);
+std::unique_ptr<Pass> createTritonAMDGPUAccelerateMatmulPass(
+    std::string archGenName = std::string(), int matrixInstructionSize = 0,
+    int kpack = 1, bool enableWmmaTransform = false);
 
 std::unique_ptr<Pass> createTritonGPUPrefetchPass();
 
@@ -37,6 +38,8 @@ std::unique_ptr<Pass> createTritonGPUVerifier();
 std::unique_ptr<Pass> createTritonGPUOptimizeDotOperandsPass();
 
 std::unique_ptr<Pass> createTritonGPUOptimizeEpiloguePass();
+
+std::unique_ptr<Pass> createTritonGPUOptimizeThreadLocalityPass();
 
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION

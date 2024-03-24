@@ -7,7 +7,6 @@
 #include "mlir/IR/Dialect.h"
 
 // TritonGPU depends on Triton
-#include "triton/Dialect/NVGPU/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Attributes.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h.inc"
@@ -106,9 +105,17 @@ unsigned getNumCTAs(Attribute layout);
 
 bool isaDistributedLayout(Attribute layout);
 
+bool sameBlockedEncodings(BlockedEncodingAttr blockedA,
+                          BlockedEncodingAttr blockedB);
+
+bool sameMfmaEncodings(MfmaEncodingAttr mfmaA, MfmaEncodingAttr mfmaB);
+
 bool isSharedEncoding(Value value);
 
 bool isExpensiveCat(CatOp cat, Attribute targetEncoding);
+
+// Return true if a view between the two types cannot be implemented as a no-op.
+bool isExpensiveView(Type srcType, Type dstType);
 
 } // namespace gpu
 } // namespace triton

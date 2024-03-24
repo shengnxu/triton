@@ -16,6 +16,7 @@
 #include <mutex>
 #include <optional>
 
+#include <memory>
 #include <mutex>
 #include <optional>
 
@@ -43,7 +44,8 @@ static bool findAndReplace(std::string &str, const std::string &begin,
   return true;
 }
 
-std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
+std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version,
+                                 bool enable_fp_fusion) {
   // LLVM version in use may not officially support target hardware.
   // Supported versions for LLVM 14 are here:
   // https://github.com/llvm/llvm-project/blob/f28c006a5895fc0e329fe15fead81e37457cb1d1/clang/include/clang/Basic/BuiltinsNVPTX.def
@@ -83,13 +85,15 @@ std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
   auto target =
       llvm::TargetRegistry::lookupTarget(module.getTargetTriple(), error);
   llvm::TargetOptions opt;
-  opt.AllowFPOpFusion = llvm::FPOpFusion::Fast;
+  if (enable_fp_fusion)
+    opt.AllowFPOpFusion = llvm::FPOpFusion::Fast;
   opt.UnsafeFPMath = false;
   opt.NoInfsFPMath = false;
   opt.NoNaNsFPMath = true;
-  llvm::TargetMachine *machine = target->createTargetMachine(
+  opt.TrapUnreachable = true;
+  std::unique_ptr<llvm::TargetMachine> machine{target->createTargetMachine(
       module.getTargetTriple(), proc, features, opt, llvm::Reloc::PIC_,
-      std::nullopt, llvm::CodeGenOpt::Aggressive);
+      std::nullopt, llvm::CodeGenOptLevel::Aggressive)};
   // set data layout
   if (layout.empty())
     module.setDataLayout(machine->createDataLayout());
@@ -105,7 +109,7 @@ std::string translateLLVMIRToPTX(llvm::Module &module, int cc, int version) {
     llvm::legacy::PassManager pass;
     // emit
     machine->addPassesToEmitFile(pass, pstream, nullptr,
-                                 llvm::CodeGenFileType::CGFT_AssemblyFile);
+                                 llvm::CodeGenFileType::AssemblyFile);
     pass.run(module);
   }
   // post-process

@@ -164,19 +164,11 @@ def matmul_kernel(
     else:
         offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
 
-    if torch.version.hip is None:
-        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-        a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-        b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-    else:
-        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
-        a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
-        b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
-    mask_a = offs_am[:, None] < M
-    mask_b = offs_bn[None, :] < N
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
@@ -187,12 +179,12 @@ def matmul_kernel(
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
-            a = tl.load(a_ptrs, mask=mask_a, other=0.0)
-            b = tl.load(b_ptrs, mask=mask_b, other=0.0)
+            a = tl.load(a_ptrs, other=0.0)
+            b = tl.load(b_ptrs, other=0.0)
         else:
             k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
-            a = tl.load(a_ptrs, mask=(offs_k[None, :] < k_remaining) and mask_a, other=0.0)
-            b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_remaining) and mask_b, other=0.0)
+            a = tl.load(a_ptrs, mask=(offs_k[None, :] < k_remaining), other=0.0)
+            b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_remaining), other=0.0)
 
         # We accumulate along the K dimension.
         accumulator += tl.dot(a, b)
@@ -265,11 +257,6 @@ def matmul(a, b, c, output_type, activation=""):
         ACTIVATION=activation,
         output_datatype=otype,
     )
-
-
-def get_best_config(M, N, K):
-    best_config = matmul_kernel.get_best_config(M = M, N = N, K = K)
-    return best_config
 
 
 def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
@@ -419,8 +406,8 @@ def main():
         perf_flops = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
 
         if args.compare:
-            test_correctness(m, n, k, dtype, fp8a, fp8b)
-        best_config = get_best_config(m, n, k)
+            test_correctness(m, n, k, dtype)
+        best_config = matmul_kernel.get_best_config()
 
         if use_rocprof:
             dtype_str = 'fp16' if (not args.specify_type) else args.dtype 

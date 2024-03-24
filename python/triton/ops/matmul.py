@@ -37,8 +37,9 @@ def get_configs_io_bound():
                                num_stages=num_stages, num_warps=num_warps))
                     # split_k
                     for split_k in [2, 4, 8, 16]:
-                        configs.append(Config({'BLOCK_M': block_m, 'BLOCK_N': block_n, 'BLOCK_K': block_k, 'SPLIT_K': split_k},
-                                              num_stages=num_stages, num_warps=num_warps, pre_hook=init_to_zero('C')))
+                        configs.append(
+                            Config({'BLOCK_M': block_m, 'BLOCK_N': block_n, 'BLOCK_K': block_k, 'SPLIT_K': split_k},
+                                   num_stages=num_stages, num_warps=num_warps, pre_hook=init_to_zero('C')))
     return configs
 
 
@@ -69,21 +70,22 @@ def get_configs_io_bound():
     prune_configs_by={
         'early_config_prune': early_config_prune,
         'perf_model': estimate_matmul_time,
-        'top_k': 10
+        'top_k': 10,
     },
 )
 @heuristics({
     'EVEN_K': lambda args: args['K'] % (args['BLOCK_K'] * args['SPLIT_K']) == 0,
 })
 @jit
-def _kernel(A, B, C, M, N, K,
-            stride_am, stride_ak,
-            stride_bk, stride_bn,
-            stride_cm, stride_cn,
-            dot_out_dtype: tl.constexpr,
-            allow_tf32: tl.constexpr,
-            BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
-            GROUP_M: tl.constexpr, SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr, AB_DTYPE: tl.constexpr
+def _kernel(A, B, C, M, N, K,  #
+            stride_am, stride_ak,  #
+            stride_bk, stride_bn,  #
+            stride_cm, stride_cn,  #
+            dot_out_dtype: tl.constexpr,  #
+            allow_tf32: tl.constexpr,  #
+            fp8_fast_accum: tl.constexpr,  #
+            BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,  #
+            GROUP_M: tl.constexpr, SPLIT_K: tl.constexpr, EVEN_K: tl.constexpr, AB_DTYPE: tl.constexpr  #
             ):
     # matrix multiplication
     pid = tl.program_id(0)
@@ -118,7 +120,10 @@ def _kernel(A, B, C, M, N, K,
         if AB_DTYPE:
             a = a.to(C.dtype.element_ty)
             b = b.to(C.dtype.element_ty)
-        acc += tl.dot(a, b, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+        if fp8_fast_accum:
+            acc = tl.dot(a, b, acc, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+        else:
+            acc += tl.dot(a, b, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
         A += BLOCK_K * SPLIT_K * stride_ak
         B += BLOCK_K * SPLIT_K * stride_bk
     acc = acc.to(C.dtype.element_ty)
@@ -140,7 +145,7 @@ class _matmul(torch.autograd.Function):
     _locks = {}
 
     @staticmethod
-    def _call(a, b, dot_out_dtype, allow_tf32):
+    def _call(a, b, dot_out_dtype, allow_tf32, fp8_fast_accum):
         device = a.device
         # handle non-contiguous inputs if necessary
         if a.stride(0) > 1 and a.stride(1) > 1:
@@ -155,6 +160,8 @@ class _matmul(torch.autograd.Function):
         if a.dtype in [tl.float8e4nv, tl.float8e4b15, tl.float8e5] or\
            b.dtype in [tl.float8e4nv, tl.float8e4b15, tl.float8e5]:
             c_dtype = torch.float16
+        elif a.dtype in [torch.int8] or b.dtype in [torch.int8]:
+            c_dtype = torch.int32
         else:
             c_dtype = get_higher_dtype(a.dtype, b.dtype)
         c = torch.empty((M, N), device=device, dtype=c_dtype)
@@ -174,20 +181,24 @@ class _matmul(torch.autograd.Function):
         ab_dtype = True
         if a.dtype in [tl.float8e4nv, tl.float8e5] and b.dtype in [tl.float8e4nv, tl.float8e5]:
             ab_dtype = False
+        if a.dtype in [torch.int8] and b.dtype in [torch.int8]:
+            ab_dtype = False
         # launch kernel
         grid = lambda META: (cdiv(M, META['BLOCK_M']) * cdiv(N, META['BLOCK_N']), META['SPLIT_K'])
-        _kernel[grid](a, b, c, M, N, K,
-                      a.stride(0), a.stride(1),
-                      b.stride(0), b.stride(1),
-                      c.stride(0), c.stride(1),
-                      dot_out_dtype=dot_out_dtype,
-                      allow_tf32=allow_tf32,
-                      GROUP_M=8, AB_DTYPE=ab_dtype)
+        _kernel[grid](
+            a, b, c, M, N, K,  #
+            a.stride(0), a.stride(1),  #
+            b.stride(0), b.stride(1),  #
+            c.stride(0), c.stride(1),  #
+            dot_out_dtype=dot_out_dtype,  #
+            allow_tf32=allow_tf32,  #
+            fp8_fast_accum=fp8_fast_accum,  #
+            GROUP_M=8, AB_DTYPE=ab_dtype)
         return c
 
     @staticmethod
-    def forward(ctx, a, b, dot_out_dtype=None, allow_tf32=True):
-        return _matmul._call(a, b, dot_out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+    def forward(ctx, a, b, dot_out_dtype=None, allow_tf32=True, fp8_fast_accum=True):
+        return _matmul._call(a, b, dot_out_dtype=dot_out_dtype, allow_tf32=allow_tf32, fp8_fast_accum=fp8_fast_accum)
 
 
 matmul = _matmul.apply

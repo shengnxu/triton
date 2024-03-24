@@ -70,10 +70,15 @@ warpsPerTileV2(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps) {
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };
-  auto slices = mlir::getSlice(dotOp, {filter});
+  auto slices = multiRootGetSlice(dotOp, {filter});
   for (Operation *op : slices)
-    if (isa<tt::DotOp>(op) && (op != dotOp))
-      return {(unsigned)numWarps, 1};
+    if (isa<tt::DotOp>(op) && (op != dotOp)) {
+      if (shape[0] >= shape[1]) {
+        return {(unsigned)numWarps, 1};
+      } else {
+        return {1, (unsigned)numWarps};
+      }
+    }
 
   SmallVector<unsigned, 2> ret = {1, 1};
   SmallVector<int64_t, 2> shapePerWarp = {16, 8};
@@ -124,8 +129,7 @@ warpsPerTileV3(tt::DotOp dotOp, const ArrayRef<int64_t> shape, int numWarps,
 class BlockedToMMA : public mlir::RewritePattern {
   int computeCapability;
   mutable int mmaV1Counter{}; // used to generate ID for MMAv1 encoding
-  mutable llvm::SmallVector<llvm::SetVector<Operation *>> dotOpSetVector;
-  mutable llvm::SmallVector<unsigned> mmaV3InstrNs;
+  mutable llvm::DenseMap<Operation *, unsigned> dotOpInstNs;
 
   static bool bwdFilter(Operation *op) {
     return op->getNumOperands() == 1 &&
@@ -134,18 +138,37 @@ class BlockedToMMA : public mlir::RewritePattern {
                 mlir::TypeID::get<arith::ArithDialect>());
   }
 
-  // finds the first different value bitwidth in the chain of
-  // shape-preserving unary ops  that x depends on
+  // Finds the first different bitwidth in the chain of shape-preserving
+  // unary ops that x depends on.
+  // There are two primary scenarios:
+  // (1) Upcasting: A sequence such as loading an fp16, followed by arithmetic
+  // operations, then bitcasting to fp32, and finally computing in fp32.
+  // (2) Downcasting: This might involve loading an fp32, performing arithmetic
+  // operations, bitcasting to fp16, and finally computing in fp16.
+  // In the upcasting scenario, element reordering converts the original
+  // elements distribution to the order of higher precision primitives. As a
+  // result, kwidth can be the bitwidth of the lower precision primitive.
+  // Conversely, in the downcasting scenario, no reordering is performed,
+  // making it directory use the lower precision primitive.
   static int computeOrigBitWidth(Value x) {
     int finalBitWidth = getElementTypeOrSelf(x).getIntOrFloatBitWidth();
     int origBitWidth = finalBitWidth;
     SetVector<Operation *> slice;
-    mlir::getBackwardSlice(x, &slice, bwdFilter);
-    Operation *firstOp = slice.empty() ? nullptr : *slice.begin();
-    if (firstOp)
-      if (Value arg = firstOp->getOperand(0))
-        if (RankedTensorType argTy = arg.getType().dyn_cast<RankedTensorType>())
-          origBitWidth = argTy.getElementType().getIntOrFloatBitWidth();
+    mlir::BackwardSliceOptions opt;
+    opt.omitBlockArguments = true;
+    opt.filter = bwdFilter;
+    getBackwardSlice(x, &slice, opt);
+    for (auto op : slice) {
+      if (Value arg = op->getOperand(0))
+        if (RankedTensorType argTy =
+                arg.getType().dyn_cast<RankedTensorType>()) {
+          auto argBitWidth = argTy.getElementType().getIntOrFloatBitWidth();
+          if (argBitWidth != origBitWidth) {
+            origBitWidth = std::min<int>(origBitWidth, argBitWidth);
+            break;
+          }
+        }
+    }
     return origBitWidth;
   }
 
@@ -168,40 +191,11 @@ public:
     }
   }
 
-  unsigned getMmaV3InstrN(tt::DotOp dotOp, unsigned currN) const {
-    auto type = dotOp.getResult().getType().cast<RankedTensorType>();
-    if (type.getEncoding().isa<MmaEncodingAttr>())
-      return currN;
-    for (size_t i = 0; i < dotOpSetVector.size(); ++i) {
-      if (dotOpSetVector[i].count(dotOp.getOperation()) > 0)
-        return mmaV3InstrNs[i];
-    }
-
-    SetVector<Operation *> slices;
-    mlir::getForwardSlice(dotOp.getResult(), &slices);
-    mlir::getBackwardSlice(dotOp.getOperation(), &slices);
-    unsigned N = currN;
-    llvm::SetVector<Operation *> dotOpSet;
-    for (Operation *iter : slices) {
-      if (auto nextDotOp = dyn_cast<tt::DotOp>(iter)) {
-        auto type = nextDotOp.getResult().getType().cast<RankedTensorType>();
-        auto AType = nextDotOp.getOperand(0).getType().cast<RankedTensorType>();
-        auto shapePerCTA = ttg::getShapePerCTA(type);
-        auto instrShape = mmaVersionToInstrShape(3, shapePerCTA, AType);
-        dotOpSet.insert(iter);
-        if (instrShape[1] < N)
-          N = instrShape[1];
-      }
-    }
-    mmaV3InstrNs.push_back(N);
-    dotOpSetVector.push_back(dotOpSet);
-    return N;
-  }
-
   static Value getMMAv3Operand(Value v, mlir::PatternRewriter &rewriter,
                                int opIdx) {
-    auto cvtOp = dyn_cast_or_null<ttg::ConvertLayoutOp>(v.getDefiningOp());
-    auto arg = cvtOp.getSrc();
+    Value arg = v;
+    if (auto cvtOp = v.getDefiningOp<ttg::ConvertLayoutOp>())
+      arg = cvtOp.getSrc();
     auto argType = arg.getType().cast<RankedTensorType>();
     auto eltType = argType.getElementType();
     assert(argType.getEncoding() && "unexpected tensor type");
@@ -255,9 +249,6 @@ public:
 
     auto instrShape =
         mmaVersionToInstrShape(versionMajor, retShapePerCTA, AType);
-    if (versionMajor == 3)
-      instrShape[1] = getMmaV3InstrN(dotOp, instrShape[1]);
-
     // operands
     Value a = dotOp.getA();
     Value b = dotOp.getB();
@@ -268,8 +259,11 @@ public:
     if (versionMajor == 1) {
       SetVector<Operation *> aBwdSlices, bBwdSlices;
       auto isCvt = [](Operation *op) { return isa<ConvertLayoutOp>(op); };
-      getBackwardSlice(a, &aBwdSlices, {isCvt});
-      getBackwardSlice(b, &bBwdSlices, {isCvt});
+      mlir::BackwardSliceOptions opt;
+      opt.omitBlockArguments = true;
+      opt.filter = isCvt;
+      getBackwardSlice(a, &aBwdSlices, opt);
+      getBackwardSlice(b, &bBwdSlices, opt);
       // get the source of the first conversion found in slices
       auto getCvtArgOrder = [](Operation *op) {
         return cast<ConvertLayoutOp>(op)
@@ -338,7 +332,8 @@ public:
     }
     // convert dot instruction
     auto newDot = rewriter.create<tt::DotOp>(dotOp.getLoc(), newRetType, a, b,
-                                             newAcc, dotOp.getAllowTF32());
+                                             newAcc, dotOp.getAllowTF32(),
+                                             dotOp.getMaxNumImpreciseAcc());
 
     rewriter.replaceOpWithNewOp<ttg::ConvertLayoutOp>(op, oldRetType,
                                                       newDot.getResult());

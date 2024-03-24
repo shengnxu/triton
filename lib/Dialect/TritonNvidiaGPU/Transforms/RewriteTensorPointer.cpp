@@ -55,7 +55,7 @@ bool isDivisible(Value v, unsigned divisor) {
     auto func = dyn_cast<tt::FuncOp>(parentOp);
     assert(func);
     if (auto attr = func.getArgAttrOfType<IntegerAttr>(blockArg.getArgNumber(),
-                                                       "tt.max_divisibility"))
+                                                       "tt.divisibility"))
       return attr.getValue().getZExtValue() % divisor == 0;
     return false;
   } else if (v.getParentBlock()->isEntryBlock() && (!v.isa<BlockArgument>())) {
@@ -72,7 +72,7 @@ bool isDivisible(Value v, unsigned divisor) {
 }
 
 bool shouldRemove(tt::MakeTensorPtrOp &op, int computeCapability) {
-  if (computeCapability < 90 || !::triton::tools::getBoolEnv("ENABLE_TMA"))
+  if (computeCapability < 90 || !mlir::triton::tools::getBoolEnv("ENABLE_TMA"))
     return true;
   auto resType = op.getResult()
                      .getType()
@@ -94,17 +94,12 @@ bool shouldRemove(tt::MakeTensorPtrOp &op, int computeCapability) {
   if (stride.size() == 2)
     strideDivisible =
         isDivisible(stride[ord[1]], 128 / elemType.getIntOrFloatBitWidth());
-  bool enableTMA = ::triton::tools::getBoolEnv("ENABLE_TMA");
+  bool enableTMA = mlir::triton::tools::getBoolEnv("ENABLE_TMA");
   return !(boxDimSwizzle && strideDivisible && enableTMA);
 }
 
-// TODO: When encoding exists use triton::gpu::CmpIOp as arith::CmpIOp doesn't
-// play well with encoding attributes. Move back to arith::CmpIOp when this pass
-// moves back to triton IR level.
 Value createCmpOp(OpBuilder &builder, Location loc, RankedTensorType type,
                   arith::CmpIPredicate pred, Value lhs, Value rhs) {
-  if (type.getEncoding())
-    return builder.create<ttg::CmpIOp>(loc, type, pred, lhs, rhs);
   return builder.create<arith::CmpIOp>(loc, type, pred, lhs, rhs);
 }
 
@@ -358,12 +353,17 @@ class TritonGPURewriteTensorPointerPass
     : public TritonGPURewriteTensorPointerBase<
           TritonGPURewriteTensorPointerPass> {
 private:
-  int computeCapability;
+  // int computeCapability;
   DenseMap<Value, RewritedInfo> rewritedInfo;
 
 public:
-  explicit TritonGPURewriteTensorPointerPass(int computeCapability)
-      : computeCapability(computeCapability) {}
+  // explicit TritonGPURewriteTensorPointerPass(int computeCapability)
+  //     : computeCapability(computeCapability) {}
+
+  TritonGPURewriteTensorPointerPass() = default;
+  TritonGPURewriteTensorPointerPass(int computeCapability) {
+    this->computeCapability = computeCapability;
+  }
 
   static bool needRewrite(Operation *op, const DenseSet<Value> &valueToRemove) {
     if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
@@ -523,9 +523,9 @@ public:
                           std::stack<Operation *> &eraser,
                           DenseSet<Value> &valueToRemove) {
     // Generate new iteration operands and set rewrited information
-    SmallVector<Value> oldIterOperands = op.getIterOperands();
-    SmallVector<Value> newIterOperands = op.getIterOperands();
-    for (unsigned i = 0, oldI = 0, size = op.getNumIterOperands(); i < size;
+    SmallVector<Value> oldIterOperands = llvm::to_vector(op.getInitArgs());
+    SmallVector<Value> newIterOperands = llvm::to_vector(op.getInitArgs());
+    for (unsigned i = 0, oldI = 0, size = op.getInitArgs().size(); i < size;
          ++i, ++oldI) {
       if (!tt::isTensorPointerType(newIterOperands[i].getType()))
         continue;
@@ -550,7 +550,7 @@ public:
     // mapping. It may refer to a value in the old loop, but we will rewrite it
     // later
     IRMapping mapping;
-    for (unsigned i = 0, oldI = 0; oldI < op.getNumIterOperands();
+    for (unsigned i = 0, oldI = 0; oldI < op.getInitArgs().size();
          ++i, ++oldI) {
       auto oldRegionIterArg = op.getRegionIterArg(oldI);
       if (tt::isTensorPointerType(oldRegionIterArg.getType()) &&
@@ -586,7 +586,7 @@ public:
         valueToRemove.insert(v);
 
     // Replace later usages
-    assert(op.getNumResults() == op.getNumIterOperands());
+    assert(op.getNumResults() == op.getInitArgs().size());
     for (unsigned i = 0, oldI = 0; oldI < op.getNumResults(); ++i, ++oldI) {
       auto oldResult = op.getResult(oldI);
       if (tt::isTensorPointerType(oldResult.getType()) &&
@@ -763,17 +763,16 @@ public:
     ModuleOp mod = getOperation();
 
     DenseSet<Value> valueToRemove;
-    mod.walk([&valueToRemove,
-              computeCapability = this->computeCapability](Operation *op) {
+    mod.walk([&valueToRemove, this](Operation *op) {
       if (auto makeTensorPtrOp = dyn_cast<tt::MakeTensorPtrOp>(op)) {
-        if (shouldRemove(makeTensorPtrOp, computeCapability))
+        if (shouldRemove(makeTensorPtrOp, this->computeCapability))
           valueToRemove.insert(op->getResult(0));
       }
       if (llvm::isa<tt::AdvanceOp>(op)) {
         auto src = op->getOperand(0);
         if (tt::isTensorPointerType(src.getType())) {
           auto makeTensorPtrOp = getMakeTensorPtrOp(src);
-          if (shouldRemove(makeTensorPtrOp, computeCapability)) {
+          if (shouldRemove(makeTensorPtrOp, this->computeCapability)) {
             valueToRemove.insert(op->getResult(0));
           }
         }
@@ -782,16 +781,16 @@ public:
         auto src = op->getOperand(0);
         if (tt::isTensorPointerType(src.getType())) {
           auto makeTensorPtrOp = getMakeTensorPtrOp(src);
-          if (shouldRemove(makeTensorPtrOp, computeCapability))
+          if (shouldRemove(makeTensorPtrOp, this->computeCapability))
             valueToRemove.insert(src);
         }
       }
       if (auto forOp = dyn_cast<scf::ForOp>(op)) {
-        SmallVector<Value> iterOperands = forOp.getIterOperands();
-        for (unsigned i = 0, size = forOp.getNumIterOperands(); i < size; ++i) {
+        SmallVector<Value> iterOperands = llvm::to_vector(forOp.getInitArgs());
+        for (unsigned i = 0, size = forOp.getInitArgs().size(); i < size; ++i) {
           if (tt::isTensorPointerType(iterOperands[i].getType())) {
             auto makeTensorPtrOp = getMakeTensorPtrOp(iterOperands[i]);
-            if (shouldRemove(makeTensorPtrOp, computeCapability))
+            if (shouldRemove(makeTensorPtrOp, this->computeCapability))
               valueToRemove.insert(iterOperands[i]);
           }
         }
@@ -800,7 +799,7 @@ public:
         for (unsigned i = 0, size = yieldOp.getNumOperands(); i < size; ++i) {
           if (tt::isTensorPointerType(operands[i].getType())) {
             auto makeTensorPtrOp = getMakeTensorPtrOp(operands[i]);
-            if (shouldRemove(makeTensorPtrOp, computeCapability))
+            if (shouldRemove(makeTensorPtrOp, this->computeCapability))
               valueToRemove.insert(operands[i]);
           }
         }

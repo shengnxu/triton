@@ -1358,14 +1358,17 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
                          [(4, 48, 1024, 64),
-                          #(4, 48, 2048, 64),
-                          #(4, 48, 4096, 64),
-                          #(1, 16, 8192, 64),
+                          (4, 48, 2048, 64),
+                          (4, 48, 4096, 64),
+                          (1, 16, 8192, 64),
+                          (1, 16, 128, 32),
                           ])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [None])
-def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, dtype=torch.float16):
+@pytest.mark.parametrize('torch_sdpa_test', [False])
+def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, torch_sdpa_test, dtype=torch.bfloat16):
     torch.manual_seed(20)
-    causal = True # TODO:: Debug and parameterize
+    causal = True
+    dropout_p = 0
     q = (torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
     k = (torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
     v = (torch.empty((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
@@ -1390,16 +1393,28 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, dtype=torch.floa
 
     dout = torch.randn_like(q)
     # reference implementation
-    M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
-    p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-    if causal:
-        p[:, :, M == 0] = float("-inf")
-    p = torch.softmax(p.float(), dim=-1).half()
-    ref_out = torch.matmul(p, v)
-    ref_out.backward(dout)
-    ref_dv, v.grad = v.grad.clone(), None
-    ref_dk, k.grad = k.grad.clone(), None
-    ref_dq, q.grad = q.grad.clone(), None
+    if torch_sdpa_test:
+        ref_out, ref_softmax = torch.ops.aten._scaled_dot_product_attention_math(q, k, v,
+                                                                                 dropout_p=dropout_p,
+                                                                                 is_causal=causal,
+                                                                                 scale=sm_scale,
+                                                                                 dropout_mask=None)
+        ref_out.backward(dout.to(device=ref_out.device, dtype=ref_out.dtype))
+        ref_dv, v.grad = v.grad.clone(), None
+        ref_dk, k.grad = k.grad.clone(), None
+        ref_dq, q.grad = q.grad.clone(), None
+    else:
+        M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
+        p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+        if causal:
+            p[:, :, M == 0] = float("-inf")
+        p = torch.softmax(p.float(), dim=-1).type(dtype=p.dtype)
+        ref_out = torch.matmul(p, v)
+        ref_out.backward(dout)
+        ref_dv, v.grad = v.grad.clone(), None
+        ref_dk, k.grad = k.grad.clone(), None
+        ref_dq, q.grad = q.grad.clone(), None
+
     # # triton implementation
     tri_out, _ = attention(q, k, v, o, input_metadata)
     tri_out.backward(dout)
@@ -1407,17 +1422,27 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, dtype=torch.floa
     tri_dk, k.grad = k.grad.clone(), None
     tri_dq, q.grad = q.grad.clone(), None
     # test
-    print("reference")
-    print(ref_dv)
-    print("tri")
-    print(tri_dv)
+    #print("reference")
+    #print(ref_dv)
+    #print("tri")
+    #print(tri_dv)
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=0)
     # The current block size for MI200 series is 64x64. This results in
     # larger differences in float results due to rounding.
-    torch.testing.assert_close(ref_dv, tri_dv, atol=5e-2, rtol=2e-2)
-    torch.testing.assert_close(ref_dk, tri_dk, atol=5e-2, rtol=2e-2)
-    torch.testing.assert_close(ref_dq, tri_dq, atol=5e-2, rtol=2e-2)
+
+    if dtype == torch.bfloat16:
+        ATOL = 1e-1 * max(1.0, (seqlen_q + D_HEAD) / 64.0)
+    if dtype == torch.float32:
+        ATOL = 1e-3 * max(1.0, (seqlen_q + D_HEAD) / 64.0)
+    else:
+        ATOL = 1e-1 * max(1.0, (seqlen_q + D_HEAD) / 64.0)
+
+    RTOL = 0
+
+    torch.testing.assert_close(ref_dv, tri_dv, atol=ATOL, rtol=RTOL)
+    torch.testing.assert_close(ref_dk, tri_dk, atol=ATOL, rtol=RTOL)
+    torch.testing.assert_close(ref_dq, tri_dq, atol=ATOL, rtol=RTOL)
 
 def nonvarlen_benchmark_configs():
     configs=[(16, 16, 16, 1024, 1024),
@@ -1532,7 +1557,7 @@ def run_benchmark(custom):
         o = torch.empty_like(q)
         fn = lambda: attention(q, k, v, o, input_metadata)
         if mode == 'bwd':
-            o = fn()
+            o, _ = fn()
             do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)

@@ -164,7 +164,7 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
     pm.add_tritongpu_remove_layout_conversions_pass()
     pm.add_tritongpu_decompose_conversions_pass()
     pm.add_tritongpu_ws_fixup_missing_attrs_pass()
-    if is_hip() and num_stages != 0:
+    if is_hip():
         pm.add_tritonamdgpu_reorder_instructions_pass()
     else:
         pm.add_tritongpu_reorder_instructions_pass()

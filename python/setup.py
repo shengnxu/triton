@@ -315,27 +315,27 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
 
 
-download_and_copy(
-    src_path="bin/ptxas",
-    variable="TRITON_PTXAS_PATH",
-    version="12.1.105",
-    url_func=lambda arch, version:
-    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvcc-{version}-0.tar.bz2",
-)
-download_and_copy(
-    src_path="bin/cuobjdump",
-    variable="TRITON_CUOBJDUMP_PATH",
-    version="12.1.111",
-    url_func=lambda arch, version:
-    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-cuobjdump-{version}-0.tar.bz2",
-)
-download_and_copy(
-    src_path="bin/nvdisasm",
-    variable="TRITON_NVDISASM_PATH",
-    version="12.1.105",
-    url_func=lambda arch, version:
-    f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvdisasm-{version}-0.tar.bz2",
-)
+# download_and_copy(
+#     src_path="bin/ptxas",
+#     variable="TRITON_PTXAS_PATH",
+#     version="12.1.105",
+#     url_func=lambda arch, version:
+#     f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvcc-{version}-0.tar.bz2",
+# )
+# download_and_copy(
+#     src_path="bin/cuobjdump",
+#     variable="TRITON_CUOBJDUMP_PATH",
+#     version="12.1.111",
+#     url_func=lambda arch, version:
+#     f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-cuobjdump-{version}-0.tar.bz2",
+# )
+# download_and_copy(
+#     src_path="bin/nvdisasm",
+#     variable="TRITON_NVDISASM_PATH",
+#     version="12.1.105",
+#     url_func=lambda arch, version:
+#     f"https://conda.anaconda.org/nvidia/label/cuda-12.1.1/linux-{arch}/cuda-nvdisasm-{version}-0.tar.bz2",
+# )
 
 setup(
     name="triton",

@@ -532,7 +532,9 @@ CTALayoutAttr getCTALayout(Attribute layout) {
     return mmaLayout.getCTALayout();
 #ifdef USE_ROCM
   else if (auto mfmaLayout = layout.dyn_cast<MfmaEncodingAttr>())
-    return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(mfmaLayout), getCTASplitNum(mfmaLayout), getCTAOrder(mfmaLayout));
+    return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(mfmaLayout),
+                              getCTASplitNum(mfmaLayout),
+                              getCTAOrder(mfmaLayout));
 #endif
   else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
     return CTALayoutAttr::get(layout.getContext(), getCTAsPerCGA(dotLayout),

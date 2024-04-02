@@ -166,6 +166,7 @@ def _attn_fwd_inner(
     K_block_ptr, V_block_ptr,
     start_m,
     actual_seqlen_k,
+    actual_seqlen_q,
     dropout_p,
     philox_seed,
     batch_philox_offset,
@@ -199,7 +200,7 @@ def _attn_fwd_inner(
     # loop over k, v, and update accumulator
     print_batch = 0
     print_head = 0
-    print_m = 1
+    print_m = 0
 
     for start_n in range (block_min, block_max, BLOCK_N):
         # debug(start_n, print_m, print_head, print_batch)
@@ -252,9 +253,8 @@ def _attn_fwd_inner(
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
 
             # Compute the relative position using the global positions
-            relative_pos_block = global_m_positions[:,None] - global_n_positions[None,:]
-            relative_pos_block = tl.where(relative_pos_block < 0, 0, relative_pos_block)
-            # relative_pos_block = tl.where(relative_pos_block < 0, float("-inf"), relative_pos_block)
+            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
+            relative_pos_block = tl.abs(relative_pos_block)
             # debug(relative_pos_block, print_m, print_head, print_batch)
 
  
@@ -537,7 +537,7 @@ def attn_fwd(
         block_max = (n_blocks - masked_blocks) * BLOCK_N
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             # _, _, offs_n_causal, masked_blocks, n_extra_tokens, _
             block_min, block_max, 0, 0, 0, bias_ptr, alibi_slopes_ptr,
@@ -568,7 +568,7 @@ def attn_fwd(
                                                    (0, n_full_blocks))
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             block_min, block_max, offs_n_causal, masked_blocks,  n_extra_tokens, bias_ptr, alibi_slopes_ptr,
             IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
@@ -1068,13 +1068,12 @@ attention = _attention.apply
                             # (2, 2, 2, 2, 1),
                             # (2, 2, 2, 2, 2),
                             # (2, 2, 16, 16, 2),
+                            # (1, 1, 32, 32, 1), # fails
                             # (1, 2, 32, 32, 1), # fails
                             # (2, 2, 32, 32, 2), # fails
                           (4, 48, 1024, 1024, 64),
                           (1, 24, 8192, 8192, 64),
                           (1, 4, 16384, 16384, 128),
-                        #   (4, 48, 8192, 8192, 64),
-                        #   (2, 16, 16384, 16384, 128),
                           (2, 16, 1020, 987, 128),
                           (2, 16, 15498, 2, 128),
                           (2, 16, 7, 16219, 64),
@@ -1084,16 +1083,14 @@ attention = _attention.apply
                           (4, 48, 1001, 990, 64),
                           (1, 8, 8081, 7099, 64),
                           (1, 4, 16330, 15989, 128),
-                        #   (1, 8, 16330, 15989, 128),
                           (4, 4, 1024, 1024, 33),
                           (4, 4, 65, 1019, 65),
                           (4, 4, 128, 128, 65),
                           (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False])
-@pytest.mark.parametrize('use_alibi', [True])
-@pytest.mark.parametrize('dtype', [torch.float16]) #, torch.float32
-def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype):
+@pytest.mark.parametrize('causal', [True, False])
+@pytest.mark.parametrize('use_alibi', [True, False])
+def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
     DEBUG = False
     if DEBUG:
         print()
@@ -1159,14 +1156,14 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype):
         # ref computation
         q_idx = torch.arange(N_CTX_Q, dtype=torch.int32, device="cuda").unsqueeze(-1)
         k_idx = torch.arange(N_CTX_K, dtype=torch.int32, device="cuda").unsqueeze(0)
-        relative_pos = torch.tril(k_idx - q_idx) # outer add and remove matrix top # NOTE: might not need to do remove top half matrix
+        relative_pos = torch.abs(q_idx + N_CTX_K - N_CTX_Q - k_idx) # outer add and remove matrix top # NOTE: might not need to do remove top half matrix
 
         if DEBUG:
             # print("alibi_slopes",alibi_slopes[batch, head], alibi_slopes.shape)
             print("alibi_slopes",alibi_slopes, alibi_slopes.shape)
             print("relative_pos", relative_pos, relative_pos.shape)
         
-        alibi = alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
+        alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
         scores+= alibi
         
         if DEBUG:

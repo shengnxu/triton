@@ -155,6 +155,7 @@ def _attn_fwd_inner(
     K_block_ptr, V_block_ptr,
     start_m,
     actual_seqlen_k,
+    actual_seqlen_q,
     dropout_p,
     philox_seed,
     batch_philox_offset,
@@ -220,13 +221,12 @@ def _attn_fwd_inner(
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
 
             # Compute the relative position using the global positions
-            relative_pos_block = global_m_positions[:,None] - global_n_positions[None,:]
-            relative_pos_block = tl.where(relative_pos_block < 0, 0, relative_pos_block)
+            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
+            relative_pos_block = tl.abs(relative_pos_block)
 
 
             alibi_block = -1 * alibi_slopes_block  * relative_pos_block
 
-            # debug(qk)
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
         # softmax
@@ -484,7 +484,7 @@ def attn_fwd(
         block_max = (n_blocks - masked_blocks) * BLOCK_N
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             # _, _, offs_n_causal, masked_blocks, n_extra_tokens, _
             block_min, block_max, 0, 0, 0, bias_ptr, alibi_slopes_ptr,
@@ -512,7 +512,7 @@ def attn_fwd(
                                                    (0, n_full_blocks))
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             block_min, block_max, offs_n_causal, masked_blocks,  n_extra_tokens, bias_ptr, alibi_slopes_ptr,
             IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
@@ -1023,8 +1023,8 @@ attention = _attention.apply
                           (4, 4, 128, 128, 65),
                           (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False, True])
-@pytest.mark.parametrize('use_alibi', [True])
+@pytest.mark.parametrize('causal', [True, False])
+@pytest.mark.parametrize('use_alibi', [True, False])
 def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
     torch.manual_seed(20)
     sm_scale = D_HEAD ** -0.5
@@ -1061,8 +1061,8 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.f
     if use_alibi:
         q_idx = torch.arange(N_CTX_Q, dtype=torch.int32, device="cuda").unsqueeze(-1)
         k_idx = torch.arange(N_CTX_K, dtype=torch.int32, device="cuda").unsqueeze(0)
-        relative_pos = torch.tril(k_idx - q_idx)
-        alibi = alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
+        relative_pos = torch.abs(q_idx + N_CTX_K - N_CTX_Q - k_idx)
+        alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
         scores+= alibi
 
 

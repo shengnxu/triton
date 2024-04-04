@@ -165,7 +165,7 @@ def _attn_fwd_inner(
     masked_blocks,
     n_extra_tokens,
     bias_ptr,
-    alibi_slopes_ptr,
+    alibi_slope,
     IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
@@ -213,9 +213,7 @@ def _attn_fwd_inner(
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += (bias * 1.44269504089)
            
-        if alibi_slopes_ptr is not None:
-            alibi_slopes_block = load_fn(alibi_slopes_ptr, False, MASK_STEPS and (n_extra_tokens != 0), "zero")
-
+        if alibi_slope is not None:
             # Compute the global position of each token within the sequence
             global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
@@ -225,7 +223,7 @@ def _attn_fwd_inner(
             relative_pos_block = tl.abs(relative_pos_block)
 
 
-            alibi_block = -1 * alibi_slopes_block  * relative_pos_block
+            alibi_block = -1 * alibi_slope  * relative_pos_block
 
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
@@ -422,16 +420,10 @@ def attn_fwd(
         bias_ptr = None
 
     if USE_ALIBI != 0:
-        alibi_slopes_ptr = tl.make_block_ptr(
-            base=alibi_slopes,  # The base pointer to the parent tensor
-            shape=(BATCH_SIZE, hq),  # The shape of the parent tensor
-            strides=(stride_az, stride_ah), #  The strides of the parent tensor
-            offsets=(off_z, off_h_q), # The offsets to the block
-            block_shape=(1, 1), # The shape of the block
-            order=(0, 1), # The order of the original data format
-        )
+        a_offset = off_z * stride_az +  off_h_q * stride_ah 
+        alibi_slope = tl.load(alibi_slopes + a_offset)
     else:
-        alibi_slopes_ptr = None
+        alibi_slope = None
 
     if ENABLE_DROPOUT:
         batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
@@ -487,7 +479,7 @@ def attn_fwd(
             start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             # _, _, offs_n_causal, masked_blocks, n_extra_tokens, _
-            block_min, block_max, 0, 0, 0, bias_ptr, alibi_slopes_ptr,
+            block_min, block_max, 0, 0, 0, bias_ptr, alibi_slope,
             # IS_CAUSAL, ....
             False, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
@@ -514,7 +506,7 @@ def attn_fwd(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
             start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-            block_min, block_max, offs_n_causal, masked_blocks,  n_extra_tokens, bias_ptr, alibi_slopes_ptr,
+            block_min, block_max, offs_n_causal, masked_blocks, n_extra_tokens, bias_ptr, alibi_slope,
             IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
             PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head

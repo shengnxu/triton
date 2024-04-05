@@ -52,9 +52,9 @@ class MetaData():
         assert seqlen_q > 0 and seqlen_k > 0
         self.x, self.y = seqlen_k, seqlen_q
 
-    def convert_window_coord_to_xy(seqlen_q, seqlen_k, window_left, window_right, causal):
+    def convert_window_coord_to_xy(self, seqlen_q, seqlen_k, window_left, window_right, causal):
         # We should not call this function if we do not want to use SWA.
-        assert window_left != -1 or window_right != -1
+        assert window_left != -1 or window_right != -1 or causal
         # We don't have an implementation for negative window coords.
         assert window_left >= -1 and window_right >= -1
         # This is the traditional SWA case. For this, x and y have the same coordinates
@@ -63,7 +63,19 @@ class MetaData():
             y, x = window_left, window_right
         # We just want to apply causal mask, no windowing here.
         elif causal and window_left == -1 and window_right == -1:
-            y, x = seqlen_q, 0
+            # If causal and no window, then there is no left mask
+            y = seqlen_q
+            if seqlen_q == seqlen_k:
+                x = 0
+            elif seqlen_q < seqlen_k:
+                # X is this value because when causal=True, the mask is bottom right aligned.
+                # It ends on the top edge as q < k. Its intercept is the height it traveled
+                # which is q.
+                x = seqlen_k - seqlen_q
+            # seqlen_q > seqlen_k
+            else:
+                x = -1 * (seqlen_q - seqlen_k)
+            print(f"y = {y}, x = {x}")
         else:
             # If causal masking is enabled and the attn scores are square, causal mask
             # is the lower triangular of the square matrix. 
@@ -77,14 +89,11 @@ class MetaData():
                 # We multiply by -1 because a positive value means we are still on the top edge
                 # which makes y negative. A negative value puts y on left edge, making it positive.
                 y = -1 * (k_minus_q - window_left) 
-                # X is this value because when causal=True, the mask is bottom right aligned.
-                # It ends on the top edge as q < k. Its intercept is the height it traveled
-                # which is q.
                 x = k_minus_q
             # seqlen q > seqlen k
             else:
                 y = seqlen_q - seqlen_k + window_left
-                x = seqlen_q - seqlen_k
+                x = -1 * (seqlen_q - seqlen_k)
         # Depending on window left size, y can exceed seqlen_q. In this case we
         # assume nothing is masked on left.
         if y > 0:
@@ -92,7 +101,7 @@ class MetaData():
         # However, none of the decisions above should set x > seqlen_k.
         assert x <= seqlen_k
         self.enable_masking = True
-        return x, y
+        self.x, self.y = x, y
 
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
@@ -219,7 +228,8 @@ def _attn_fwd_inner(
     PADDED_SEQLEN_K: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
-    PADDED_HEAD: tl.constexpr
+    PADDED_HEAD: tl.constexpr,
+    z, h
 ):
     # loop over k, v, and update accumulator
     for start_n in range (block_min, block_max, BLOCK_N):
@@ -252,6 +262,7 @@ def _attn_fwd_inner(
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
+        tl.device_print("qk = ", qk)
         if bias_ptr is not None:
             bias = load_fn(bias_ptr, False, PADDED_SEQLEN_K and (n_extra_tokens != 0), "zero")
             # While bias is added after multiplying qk with sm_scale,
@@ -296,7 +307,7 @@ def _attn_fwd_inner(
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
@@ -356,17 +367,10 @@ def attn_fwd(
     # on those M rows.
     n_blocks = cdiv_fn(seqlen_k, BLOCK_N)
     begin_block = 0
-    end_block = n_blocks - 1
     if (ENABLE_MASKING):
-        begin_block = max(0, (start_m * BLOCK_M - Y)) // BLOCK_N
-        end_block = max(seqlen_k, ((start_m + 1) * BLOCK_M + tl.abs(X))) // BLOCK_N
-        if X > (start_m + 1) * BLOCK_M:
-            n_blocks = 0
-        else:
-            # The begin/end blocks start at 0. So end_block N
-            # implies N+1 num blocks
-            n_blocks = end_block - begin_block + 1
-        if n_blocks == 0:
+        begin_block = max_fn(0, (start_m * BLOCK_M - Y)) // BLOCK_N
+        n_blocks = min(n_blocks, cdiv_fn((start_m + 1) * BLOCK_M + X, BLOCK_N))
+        if n_blocks <= 0:
             o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
             O_block_ptr = tl.make_block_ptr(
                 base=Out + o_offset,
@@ -470,15 +474,13 @@ def attn_fwd(
     q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
-    padded_block_k = n_extra_tokens != 0
-    is_modulo_mn = not padded_block_k and (seqlen_q % BLOCK_M == 0)
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
         n_masked_blocks = BLOCK_M // BLOCK_N + 1
     else:
         # Padding on Q does not need to be masked in the FA loop.
-        n_masked_blocks = padded_block_k
+        n_masked_blocks = n_extra_tokens != 0
     # if masked, we might end up with an additional block.
     # In this case we might exceed n_blocks so pick the min.
     n_masked_blocks = min(n_masked_blocks, n_blocks)
@@ -493,30 +495,32 @@ def attn_fwd(
     # beginning. But if there are no full blocks or end masked blocks after it
     # then we just handle this as part of the full and end masked blocks cases.
     beginning_masked_blocks = (begin_block + n_masked_blocks < n_blocks) and begin_masked
-    if beginning_masked_blocks > 0:
-        n_full_blocks = n_full_blocks - n_masked_blocks
-        block_max = block_min + n_masked_blocks * BLOCK_N
-        if ENABLE_MASKING:
-            offs_n_masked = -1 * (offs_n + tl.abs(Y))
-        else:
-            offs_n_masked = 0
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-        # acc, l_i, m_i = _attn_fwd_inner(
-        #     acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-        #     start_m, seqlen_k,
-        #     dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-        #     # _, _, offs_n_masked, n_extra_tokens, _
-        #     block_min, block_max, offs_n_masked, 0, bias_ptr,
-        #     # ENABLE_MASKING, MASKING_DIR, ....
-        #     True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
-        #     # _, PADDED_SEQLEN_K, ...
-        #     PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head
-        # )
-        # block_min = block_max
-        # block_max = n_blocks * BLOCK_N
-        tl.device_print("Hello")
+    K_block_ptr = tl.advance(K_block_ptr, (0, begin_block*BLOCK_N))
+    V_block_ptr = tl.advance(V_block_ptr, (begin_block*BLOCK_N, 0))
+    if ENABLE_MASKING:
+        if beginning_masked_blocks > 0:
+            n_full_blocks = n_full_blocks - n_masked_blocks
+            block_max = block_min + n_masked_blocks * BLOCK_N
+            if ENABLE_MASKING:
+                offs_n_masked = -1 * (offs_n + tl.abs(Y))
+            else:
+                offs_n_masked = 0
+            acc, l_i, m_i = _attn_fwd_inner(
+                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+                start_m, seqlen_k,
+                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+                # _, _, offs_n_masked, n_extra_tokens, _
+                block_min, block_max, offs_n_masked, 0, bias_ptr,
+                # ENABLE_MASKING, MASKING_DIR, ....
+                True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
+                # _, PADDED_SEQLEN_K, ...
+                PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
+                off_z, off_h_q
+            )
+            block_min = block_max
+            block_max = n_blocks * BLOCK_N
 
+    tl.debug_barrier()
     # # Compute for full blocks. Here we set causal to false regardless of its actual
     # # value because there is no masking. Similarly we do not need padding.
     if n_full_blocks > 0:
@@ -530,7 +534,8 @@ def attn_fwd(
             # ENABLE_MASKING, MASKING_DIR, ....
             False, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
-            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head
+            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
+            off_z, off_h_q
         )
         block_min = block_max
         block_max = n_blocks * BLOCK_N
@@ -559,7 +564,8 @@ def attn_fwd(
             # _, MASKING_DIR, ...
             ENABLE_MASKING, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
-            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head
+            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
+            off_z, off_h_q
         )
     # epilogue
     acc = acc / l_i[:, None]
@@ -571,7 +577,7 @@ def attn_fwd(
     # and store 0s where there are NaNs as these rows should've been zeroed out.
     end_m_idx = (start_m + 1) * BLOCK_M
     acc = acc.to(Out.type.element_ty)
-    if X < 0:
+    if X <= 0:
         start_m_idx = start_m * BLOCK_M
         causal_start_idx = seqlen_q - seqlen_k
         if causal_start_idx > start_m_idx and causal_start_idx < end_m_idx:
@@ -1014,7 +1020,7 @@ class _attention(torch.autograd.Function):
             BLOCK_N=BLOCK,
             CAUSAL=ctx.causal,
             ENABLE_DROPOUT=ctx.dropout_p > 0.0,
-            num_warps=4,num_stages=1,
+            num_warps=1,num_stages=1,
         )
         DQ_BLOCK_M = min(seqlen_q, BLOCK)
         _bwd_kernel_dq[ctx.grid](
@@ -1043,10 +1049,10 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 16, 1024, 1024, 128),
+                        #  [(4, 16, 1024, 865, 128),
                         #   (4, 48, 8192, 8192, 64),
                         #   (2, 16, 16384, 16384, 128),
-                        #   (2, 16, 1020, 987, 128),
+                          [(2, 16, 1020, 987, 128),
                         #   (2, 16, 15498, 2, 128),
                         #   (2, 16, 7, 16219, 64),
                         #   (4, 48, 1, 1, 64),
@@ -1060,7 +1066,7 @@ attention = _attention.apply
                         #   (4, 4, 128, 128, 65),
                         #   (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False])
+@pytest.mark.parametrize('causal', [True])
 @pytest.mark.parametrize('use_bias', [False])
 @pytest.mark.parametrize('sliding_window', [(-1, -1)])
 def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window, dtype=torch.float16):
@@ -1079,8 +1085,10 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
 
     # Convert window coord to xy. The kernel uses this as it is more flexible.
     swa = window_left != -1 or window_right != -1
-    if swa:
-        convert_window_coord_to_xy(N_CTX_Q, N_CTX_K, window_left, window_right, causal)
+    if swa or causal:
+        input_metadata.convert_window_coord_to_xy(N_CTX_Q, N_CTX_K, window_left, window_right, causal)
+    print(f"swa = {swa}")
+    print(f"causal = {causal}")
 
     q = torch.randn((Z, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
@@ -1118,8 +1126,12 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[0][0][0][0]}")
-    print(f"ref_out = {ref_out[0][0][0][0]}")
+    print(f"tri_out = {tri_out[0][0][896][57]}")
+    print(f"ref_out = {ref_out[0][0][1019][57]}")
+    print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
+    print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")
+    nan_mask = torch.isnan(tri_out)
+    # print(f" nan idx = {tri_out[nan_mask.nonzero()[:, 0].unique(sorted=True)]}")
     # compare
     #torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
 

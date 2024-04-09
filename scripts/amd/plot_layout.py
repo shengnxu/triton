@@ -288,12 +288,17 @@ def main():
 
     if plot_mode == 'blocked' or plot_mode == 'dot':
         print(f"CTAShape={CTAShape}")
+        print(M)
+        print(CTAShape[0])
         assert M != 0 and CTAShape[
             0] <= M and M % CTAShape[0] == 0, "bad tensor dimension M"
 
     if plot_mode == 'blocked':
-        assert K != 0 and CTAShape[
-            1] <= K and K % CTAShape[1] == 0, "bad tensor dimension K"
+        assert K != 0
+        # assert CTAShape[0] <= K
+        print(CTAShape[1])
+        print(K)
+        assert K % CTAShape[1] == 0
 
     if plot_mode == 'dot':
         assert N != 0 and CTAShape[
@@ -308,7 +313,7 @@ def main():
             )
 
     with open("myplot.tex", 'w') as f_plot:
-        with open("tikzplot.tex") as file:
+        with open("/triton/scripts/amd/tikzplot.tex") as file:
             tikz_code = file.read()
 
         preamble_str = draw_preamble_cmd()

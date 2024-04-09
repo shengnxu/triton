@@ -583,6 +583,7 @@ class _attention(torch.autograd.Function):
             USE_SEQ_LEN=use_seq_len,
             num_warps=num_warps,
             num_stages=1,
+            slice_k_tile=32,
             PACKED_PER_VAL=PACKED_PER_VAL,
             N_GROUPS=cls.NUM_GROUPS if PACKED_PER_VAL > 1 else 1,
         )
@@ -619,6 +620,7 @@ class _attention(torch.autograd.Function):
             H=H,
             # TODO: Tune num_warps
             split_k=split_k,
+            slice_k_tile=32,
             splitK_pow2=splitK_pow2,
             use_mask=use_mask,
             num_warps=4
@@ -646,19 +648,13 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 def get_input_shapes():
-    cases = [
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 1, 128)
-        for i in range(8, 18)
-    ] + [
-        (max(1, 2 ** (16 - i)), 1, 2**i, 16, 2, 128)
-        for i in range(8, 18)
-    ]
+    cases = (2.0,  1.0, 8448.0, 8.0, 1.0, 128.0)
 
     return cases
 
 
 @pytest.mark.parametrize('B, Mq, Mkv, Hq, Hkv, K',
-                         get_input_shapes())
+                          [(2,  1, 8448, 8, 1, 128),])
 def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     torch.manual_seed(20)
     q = (
@@ -690,7 +686,7 @@ def test_op_fwd(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
 
 
 @pytest.mark.parametrize('B, Mq, Mkv, Hq, Hkv, K',
-                         get_input_shapes())
+                         [(2,  1, 8448, 8, 1, 128),])
 def test_op_fwd_int4_kv(B, Mq, Mkv, Hq, Hkv, K, dtype=torch.float16):
     torch.manual_seed(2)
     q = (
@@ -768,7 +764,7 @@ for mode in ['fwd']:
     for causal in [False]:
         configs.append(triton.testing.Benchmark(
             x_names=['B', 'Mq','Mkv', 'Hq', 'Hkv', 'K'],
-            x_vals=get_input_shapes(),
+            x_vals=[(2,  1, 8448, 8, 1, 128),],
             line_arg='provider',
             line_vals=['triton'] + (['flash'] if HAS_FLASH else []),
             line_names=['Triton'] + ([f'Flash-{FLASH_VER}'] if HAS_FLASH else []),

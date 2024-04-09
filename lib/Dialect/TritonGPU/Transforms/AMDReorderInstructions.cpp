@@ -406,16 +406,16 @@ public:
     // TODO: Add some of these variables as autotunable parameters if needed.
     // At present, the optimal performance of FA fwd pass is achieved using the
     // following setup:
-    int stages = 4;
-    bool sinkLDSRd = false;
-    bool sinkLDSWr = false;
-    bool interleaveLoadWithLDSOps = false;
+    // int stages = 4;
+    // bool sinkLDSRd = false;
+    // bool sinkLDSWr = false;
+    // bool interleaveLoadWithLDSOps = false;
 
     // For CK-like FA fwd pass schedule of sliced dots use following configuration:
-    // int stages = 2;
-    // bool sinkLDSRd = true;
-    // bool sinkLDSWr = true;
-    // bool interleaveLoadWithLDSOps = true;
+    int stages = 2;
+    bool sinkLDSRd = true;
+    bool sinkLDSWr = true;
+    bool interleaveLoadWithLDSOps = true;
     scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr,
                       interleaveLoadWithLDSOps);
   }

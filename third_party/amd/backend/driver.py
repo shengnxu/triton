@@ -6,16 +6,41 @@ from triton.runtime.build import _build
 from triton.runtime.cache import get_cache_manager
 from triton.backends.driver import GPUDriver
 
-dirname = os.path.dirname(os.path.realpath(__file__))
-sysdirname = "/opt/rocm-5.7.0/"
-include_dir = [os.path.join(sysdirname, "include"), os.path.join(dirname, "include")]
-library_dir = [os.path.join(sysdirname, "lib"), os.path.join(dirname, "lib")]
+
 libraries = ['amdhip64']
+    
+def get_rocm_dirnames():
+    dirname = os.path.dirname(os.path.realpath(__file__))
+    sysdirname = "/opt/rocm/"
+    userdirname = os.getenv('ROCM_HOME')
+    
+
+    # Locate ROCM libs and headers
+    # Locations:
+    #            1) User defined: $ROCM_PATH
+    #            2) System installed: /opt/rocm
+    #            3) Triton pack-in 
+    if userdirname:
+        include_dir = [os.path.join(userdirname, "include"),
+                       os.path.join(sysdirname, "include"), 
+                       os.path.join(dirname, "include")]
+        library_dir = [os.path.join(userdirname, "lib"),
+                       os.path.join(sysdirname, "lib"), 
+                       os.path.join(dirname, "lib")]
+    else:
+        include_dir = [os.path.join(sysdirname, "include"),
+                       os.path.join(dirname, "include")]
+        library_dir = [os.path.join(sysdirname, "lib"),
+                       os.path.join(dirname, "lib")]
+
+
+    return library_dir, include_dir
 
 def compile_module_from_src(src, name):
     key = hashlib.sha256(src.encode("utf-8")).hexdigest()
     cache = get_cache_manager(key)
     cache_path = cache.get_file(f"{name}.so")
+    library_dir, include_dir = get_rocm_dirnames()
     if cache_path is None:
         with tempfile.TemporaryDirectory() as tmpdir:
             src_path = os.path.join(tmpdir, "main.c")
@@ -38,7 +63,8 @@ class HIPUtils(object):
         return cls.instance
 
     def __init__(self):
-        mod = compile_module_from_src(Path(os.path.join(dirname, "driver.c")).read_text(), "hip_utils")
+        mod = compile_module_from_src(Path(os.path.join(os.path.dirname(os.path.realpath(__file__)), "driver.c")).read_text(), "hip_utils")
+        #mod = compile_module_from_src(Path(os.path.join(dirname, "driver.c")).read_text(), "hip_utils")
         self.load_binary = mod.load_binary
         self.get_device_properties = mod.get_device_properties
 

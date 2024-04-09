@@ -9,21 +9,22 @@ from triton.language import core
 #   - the exponent bias is 15 instead of 7
 #   - 0xff and 0x7f are mapped to +-1.750 instead of +-nan
 @core.builtin
-def convert_fp8e4b15_to_float16(x, _builder=None):
-    int8 = _builder.create_bitcast(x.handle, core.int8.to_ir(_builder))
-    uint16 = _builder.create_int_cast(int8, core.uint16.to_ir(_builder), False)
-    sign_mask = _builder.create_splat(_builder.get_uin16(0x08), x.shape)
-    mask = _builder.create_splat(_builder.get_uin16(0xf7), x.shape)
-    shift8 = _builder.create_splat(_builder.get_uin16(8), x.shape)
-    shift7 = _builder.create_splat(_builder.get_uin16(7), x.shape)
-    exp_man = _builder.create_and(uint16.handle, mask.handle)
-    sign = _builder.create_and(uint16.handle, sign_mask.handle)
-    return core.tensor(_builder.create_bitcast(
-        _builder.create_or(
-            _builder.create_shl(sign, shift8),
-            _builder.create_shl(exp_man, shift7),
-        )
-    ), core.float16.to_ir(_builder))
+def convert_fp8e4b15_to_float16(x: core.tensor, _builder=None):
+    # bitcast the fp8e4b15 to uint16
+    x = x.to(core.uint8, bitcast=True, _builder=_builder)
+    x = x.to(core.uint16, _builder=_builder)
+    # get sign and exponent + mantissa individually
+    num_mask = core.tensor(_builder.get_uint16((1 << 7) - 1), core.uint16)
+    num = x.__and__(num_mask, _builder=_builder)
+    sign = x.__rshift__(core.tensor(_builder.get_uint16(7), core.uint16), _builder=_builder)
+    # left shift signa and exponent + mantissa
+    sign = sign.__lshift__(core.tensor(_builder.get_uint16(15), core.uint16), _builder=_builder)
+    num = num.__lshift__(core.tensor(_builder.get_uint16(7), core.uint16), _builder=_builder)
+    # cast back to float16
+    y = num.__or__(sign, _builder=_builder)
+    y = y.to(core.float16, bitcast=True, _builder=_builder)
+    return y
+
 
 @core.builtin
 def convert_custom_float8(arg, dst_ty, fp_downcast_rounding, _builder=None):

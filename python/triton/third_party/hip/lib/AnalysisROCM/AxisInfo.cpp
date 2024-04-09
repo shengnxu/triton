@@ -499,6 +499,31 @@ public:
   }
 };
 
+class ViewSliceOpAxisInfoVisitor final : public AxisInfoVisitorImpl<triton::gpu::ViewSliceOp> {
+public:
+  using AxisInfoVisitorImpl<triton::gpu::ViewSliceOp>::AxisInfoVisitorImpl;
+
+  AxisInfo
+  getAxisInfo(triton::gpu::ViewSlice op,
+              ArrayRef<const dataflow::Lattice<AxisInfo> *> operands) override {
+    // If pointers and mask both have constancy properties, those properties
+    // will also extend to output.
+    AxisInfo ptrInfo = operands[0]->getValue();
+    AxisInfo::DimVectorT contiguity;
+    AxisInfo::DimVectorT divisibility;
+    AxisInfo::DimVectorT constancy;
+
+    for (int d = 0; d < ptrInfo.getRank(); ++d) {
+      contiguity.push_back(ptrInfo.getContiguity[d]);
+      divisibility.push_back(ptrInfo.getDivisibility[d]);
+      constancy.push_back(ptrInfo.getConstancy[d]);
+    }
+
+    return AxisInfo(contiguity, divisibility, constancy);
+  }
+};
+
+
 class ExpandDimsOpAxisInfoVisitor final
     : public AxisInfoVisitorImpl<triton::ExpandDimsOp> {
 public:
@@ -884,6 +909,7 @@ AxisInfoAnalysis::AxisInfoAnalysis(DataFlowSolver &solver)
   visitors.append<BroadcastOpAxisInfoVisitor>();
   visitors.append<SplatOpAxisInfoVisitor>();
   visitors.append<ExpandDimsOpAxisInfoVisitor>();
+  visitors.append<ViewSliceOpAxisInfoVisitor>();
   visitors.append<CmpOpAxisInfoVisitor<arith::CmpIOp>,
                   CmpOpAxisInfoVisitor<triton::gpu_rocm::CmpIOp>>();
   visitors.append<LogicalOpAxisInfoVisitor<arith::AndIOp>,

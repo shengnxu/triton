@@ -55,7 +55,7 @@ def convert_custom_float8(arg, dst_ty, fp_downcast_rounding, _builder=None):
         upcast_val = convert_fp8e4b15_to_float16(arg, _builder=_builder)
         if dst_ty.scalar.is_fp32():
             upcast_val = upcast_val.to(core.float32, _builder=_builder)
-            return upcast_val
+        return upcast_val
 
     assert arg.type.scalar.is_fp16() or arg.type.scalar.is_fp32()
     downcast_val = arg

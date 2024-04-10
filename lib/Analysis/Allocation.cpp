@@ -185,10 +185,67 @@ private:
   using BufferT = Allocation::BufferT;
 
   /// Value -> Liveness Range
+  using IntervalT = Interval<size_t>;
   /// Use MapVector to ensure determinism.
-  using BufferRangeMapT = llvm::MapVector<BufferT *, Interval<size_t>>;
+  using BufferRangeMapT = llvm::MapVector<BufferT *, IntervalT>;
   /// Nodes -> Nodes
   using GraphT = DenseMap<BufferT *, DenseSet<BufferT *>>;
+
+  /// Set of Liveness Intervals
+  class LivenessR : public SmallVector<IntervalT, 4> {
+  public:
+    LivenessR() = default;
+    LivenessR(const LivenessR &) = default;
+
+    /// Disjointness
+    bool isDisjoint() const {
+      if (size() < 2)
+        return false;
+      // sorted so the first OOB proves disjoint
+      auto maxId = (*this)[0].end();
+      for (auto rng : *this) {
+        if (rng.start() <= maxId) { // overlap? < vs <=
+          // adjoining
+          maxId = std::max(maxId, rng.end());
+        } else
+          return true;
+      }
+      return false;
+    }
+
+    void sort() {
+      llvm::sort(*this, [](const auto &lhs, const auto &rhs) {
+        return lhs.start() <= rhs.start();
+      });
+    }
+
+    bool addAdjacent(size_t id) {
+      bool isAdjacent = false;
+      for (auto &interval : *this) {
+        if (interval.adjacent(id)) {
+          isAdjacent = true;
+          interval = interval.merge(IntervalT(id));
+        }
+      }
+      return isAdjacent;
+    }
+
+    void add(size_t id) {
+      if (!addAdjacent(id))
+        push_back(IntervalT(id));
+    }
+    IntervalT unionize() const {
+      IntervalT res;
+      if (size()) {
+        res = front();
+        for (auto &I : *this)
+          res = res.merge(I);
+      }
+      return res;
+    }
+  };
+
+  typedef function_ref<LivenessR(Value value)> LivenessF;
 
   void run() {
     getValuesAndSizes();
@@ -376,33 +433,53 @@ private:
 
   /// Computes the liveness range of the allocated value.
   /// Each buffer is allocated only once.
-  void resolveExplicitBufferLiveness(
-      function_ref<Interval<size_t>(Value value)> getLiveness) {
+  void resolveExplicitBufferLiveness(LivenessF getLiveness) {
     for (auto valueBufferIter : allocation->valueBuffer) {
       auto value = valueBufferIter.first;
       auto *buffer = valueBufferIter.second;
-      bufferRange[buffer] = getLiveness(value);
+      auto ranges = getLiveness(value);
+      bufferRange[buffer] = ranges.unionize();
     }
   }
 
   /// Extends the liveness range by unionizing the liveness range of the aliased
   /// values because each allocated buffer could be an alias of others, if block
   /// arguments are involved.
-  void resolveAliasBufferLiveness(
-      function_ref<Interval<size_t>(Value value)> getLiveness) {
+  /// Only unionize adjacent live ranges to account for loop-carried buffers
+  /// that are mutually exclusive. Example from stream pipeliner:
+  ///  3    %b0 = convert_layout %g0                  -+
+  ///  4    %fr = for (.., %arg0 = %b0) {              |
+  ///  5        %gn = load %pc                         |
+  ///  6        %bc = convert_layout %arg0            -+
+  ///  7        %v = add %bc, ...
+  ///  8        %bn = convert_layout %gn              -+
+  ///  9        %pn = addptr %pc, %cst                 |
+  ///  10   }                                          |
+  ///  11   %be = convert_layout %fr#1                -+
+  ///  12   %ve = add %be
+  void resolveAliasBufferLiveness(LivenessF getLiveness) {
     for (auto aliasBufferIter : allocation->aliasBuffer) {
       auto value = aliasBufferIter.first;
       auto buffers = aliasBufferIter.second;
-      auto range = getLiveness(value);
+      auto aranges = getLiveness(value);
+      bool disjoint = aranges.isDisjoint();
       for (auto *buffer : buffers) {
-        auto minId = range.start();
-        auto maxId = range.end();
+        auto range = aranges[0];
         if (bufferRange.count(buffer)) {
-          // Extend the allocated buffer's range
-          minId = std::min(minId, bufferRange[buffer].start());
-          maxId = std::max(maxId, bufferRange[buffer].end());
+          auto brange = bufferRange[buffer];
+          if (disjoint) {
+            // find adjacent/intersecting
+            for (auto arange : aranges) {
+              if (arange.adjacent(brange) || arange.intersects(brange))
+                brange = arange.merge(brange);
+            }
+            range = brange;
+          } else {
+            // Extend the allocated buffer's range
+            range = range.merge(brange);
+          }
         }
-        bufferRange[buffer] = Interval(minId, maxId);
+        bufferRange[buffer] = range;
       }
     }
   }
@@ -419,8 +496,7 @@ private:
         // range.
         auto *op = opScratchIter.first;
         auto *buffer = opScratchIter.second;
-        bufferRange.insert({buffer, Interval(operationId.lookup(op),
-                                             operationId.lookup(op) + 1)});
+        bufferRange.insert({buffer, IntervalT(operationId.lookup(op))});
       }
     };
     processScratchMemory(allocation->opScratch);
@@ -452,19 +528,13 @@ private:
     // Analyze liveness of explicit buffers
     Liveness liveness(operation);
     auto getValueLivenessRange = [&](Value value) {
+      LivenessR ranges;
       auto liveOperations = liveness.resolveLiveness(value);
-      auto minId = std::numeric_limits<size_t>::max();
-      auto maxId = std::numeric_limits<size_t>::min();
-      std::for_each(liveOperations.begin(), liveOperations.end(),
-                    [&](Operation *liveOp) {
-                      if (operationId[liveOp] < minId) {
-                        minId = operationId[liveOp];
-                      }
-                      if ((operationId[liveOp] + 1) > maxId) {
-                        maxId = operationId[liveOp] + 1;
-                      }
-                    });
-      return Interval(minId, maxId);
+      std::for_each(
+          liveOperations.begin(), liveOperations.end(),
+          [&](Operation *liveOp) { ranges.add(operationId[liveOp]); });
+      ranges.sort();
+      return ranges;
     };
 
     resolveExplicitBufferLiveness(getValueLivenessRange);
@@ -519,9 +589,9 @@ private:
     // If the available triple's range is less than a given buffer range,
     // we won't know if there has been an overlap without using graph coloring.
     // Start -> Liveness Range
-    using TripleMapT = std::multimap<size_t, Interval<size_t>>;
+    using TripleMapT = std::multimap<size_t, IntervalT>;
     TripleMapT tripleMap;
-    tripleMap.insert(std::make_pair(0, Interval<size_t>()));
+    tripleMap.insert(std::make_pair(0, IntervalT()));
     SmallVector<BufferT *> xBuffers = buffers;
     while (!xBuffers.empty()) {
       auto tripleIt = tripleMap.begin();

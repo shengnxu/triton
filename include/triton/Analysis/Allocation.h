@@ -31,6 +31,7 @@ SmallVector<unsigned> getRepShapeForCvtLayout(triton::gpu::ConvertLayoutOp op);
 template <typename T> class Interval {
 public:
   Interval() {}
+  Interval(T S) : Start(S), End(S + 1) {}
   Interval(T S, T E) : Start(S), End(E) { assert(Start <= End); }
   T start() const { return Start; }
   T end() const { return End; }
@@ -45,6 +46,12 @@ public:
   bool operator!=(const Interval &R) const { return !(*this == R); }
   bool operator<(const Interval &R) const {
     return std::make_pair(Start, End) < std::make_pair(R.Start, R.End);
+  }
+  bool adjacent(const Interval &R) const {
+    return R.End == Start || R.Start == End;
+  }
+  Interval merge(const Interval &R) const {
+    return Interval(std::min(Start, R.Start), std::max(End, R.End));
   }
 
 private:

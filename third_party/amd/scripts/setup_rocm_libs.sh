@@ -9,11 +9,11 @@ fi
 
 # Check TRITON_ROCM_DIR is set
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
-  export TRITON_ROCM_DIR=third_party/amd/backend/
+  export TRITON_ROCM_DIR=third_party/amd/backend
 fi
 
 # Remove packaged libs and headers
-rm $TRITON_ROCM_DIRlib/libamdhip64.so
+rm $TRITON_ROCM_DIR/lib/libamdhip64.so
 rm -rf $TRITON_ROCM_DIR/include
 
 LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"

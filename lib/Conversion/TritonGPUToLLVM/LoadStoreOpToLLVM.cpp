@@ -37,18 +37,18 @@ static CUtensorMapDataType getCUtensorMapDataType(Type ty) {
 }
 
 static LLVM::AtomicOrdering llvmMemoryOrdering(MemSemantic memOrdering) {
-  const static std::map<MemSemantic, LLVM::AtomicOrdering> memOrderingMap = {
-    {MemSemantic::RELAXED, LLVM::AtomicOrdering::monotonic},
-    {MemSemantic::ACQUIRE, LLVM::AtomicOrdering::acquire},
-    {MemSemantic::RELEASE, LLVM::AtomicOrdering::release},
-    {MemSemantic::ACQUIRE_RELEASE, LLVM::AtomicOrdering::acq_rel}
-  };
-
-  if (memOrderingMap.count(memOrdering) > 0) {
-    return memOrderingMap.at(memOrdering);
+  switch (memOrdering) {
+  case MemSemantic::RELAXED:
+    return LLVM::AtomicOrdering::monotonic;
+  case MemSemantic::ACQUIRE:
+    return LLVM::AtomicOrdering::acquire;
+  case MemSemantic::RELEASE:
+    return LLVM::AtomicOrdering::release;
+  case MemSemantic::ACQUIRE_RELEASE:
+    return LLVM::AtomicOrdering::acq_rel;
+  default:
+    return LLVM::AtomicOrdering::acq_rel;
   }
-
-  return LLVM::AtomicOrdering::acq_rel;
 }
 
 // Contains some helper functions for both Load and Store conversions.

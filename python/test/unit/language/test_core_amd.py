@@ -831,7 +831,6 @@ def test_atomic_cas(sem, num_ctas, device):
         tl.store(ptrs, tl.load(ptrs) + 1.0)
 
         # release lock
-        # tl.atomic_cas(Lock, 1, 0)
         tl.atomic_xchg(Lock, 0)
 
     Lock = torch.zeros((1, ), device=device, dtype=torch.int32)

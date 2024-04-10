@@ -36,7 +36,7 @@ static CUtensorMapDataType getCUtensorMapDataType(Type ty) {
   }
 }
 
-static LLVM::AtomicOrdering llvmMemoryOrdering(MemSemantic memOrdering) {
+static LLVM::AtomicOrdering getMemoryOrdering(MemSemantic memOrdering) {
   switch (memOrdering) {
   case MemSemantic::RELAXED:
     return LLVM::AtomicOrdering::monotonic;
@@ -1047,7 +1047,7 @@ struct AtomicCASOpConversion
         loc, llVal, rewriter, op.getVal().getType());
 
     auto memOrdering = op.getSem();
-    auto llvmMemOrdering = llvmMemoryOrdering(memOrdering);
+    auto llvmMemOrdering = getMemoryOrdering(memOrdering);
 
     // deal with tensor or scalar
     auto valueTy = op.getResult().getType();
@@ -1351,7 +1351,7 @@ struct AtomicRMWOpConversion
                 icmp_slt(mul(tid, i32_val(elemsPerThread)), i32_val(numElems)));
 
     auto memOrdering = op.getSem();
-    auto llvmMemOrdering = llvmMemoryOrdering(memOrdering);
+    auto llvmMemOrdering = getMemoryOrdering(memOrdering);
 
     auto vecTy = vec_ty(valueElemTy, vec);
     auto retType = vec == 1 ? valueElemTy : vecTy;

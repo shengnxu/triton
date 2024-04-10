@@ -9,11 +9,12 @@ fi
 
 # Check TRITON_ROCM_DIR is set
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
-  export TRITON_ROCM_DIR=python/triton/third_party/hip
+  export TRITON_ROCM_DIR=third_party/amd/backend/
 fi
 
-# Remove current libhsa included to avoid confusion
-rm $TRITON_ROCM_DIR/lib/hsa/libhsa-runtime*
+# Remove packaged libs and headers
+rm $TRITON_ROCM_DIR/lib/*.so.*
+rm -rf $TRITON_ROCM_DIR/include
 
 LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
@@ -30,16 +31,27 @@ do
     cp $lib $TRITON_ROCM_DIR/lib/
 done
 
-# Required ROCm libraries 
+# Required ROCm libraries
+if [[ "${MAJOR_VERSION}" == "6" ]]; then
+    libamdhip="libamdhip64.so.6"
+else
+    libamdhip="libamdhip64.so.5"
+fi
+
+
+# Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
+    "${libamdhip}"
     "libhsa-runtime64.so.1"
-    "libamdhip64.so.5"
     "libamd_comgr.so.2"
     "libdrm.so.2"
     "libdrm_amdgpu.so.1"
 )
 
-# Find the SO libs dynamically
+if [[ $ROCM_INT -ge 60100 ]]; then
+    ROCM_SO+=("librocprofiler-register.so.0")
+fi
+
 for lib in "${ROCM_SO[@]}"
 do
     file_path=($(find $ROCM_HOME/lib/ -name "$lib")) # First search in lib
@@ -66,7 +78,7 @@ do
 done
 
 # Copy Include Files
-cp -r $ROCM_HOME/include $TRITON_ROCM_DIR/
+cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/
 
 # Copy linker
 mkdir -p $TRITON_ROCM_DIR/llvm/bin

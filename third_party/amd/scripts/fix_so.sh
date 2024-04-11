@@ -2,7 +2,7 @@
 #From https://github.com/pytorch/builder/blob/main/manywheel/build_common.sh
 WHEELHOUSE_DIR=/artifacts
 PATCHELF_BIN=patchelf
-ROCM_LIB=third_party/amd/backend/lib
+ROCM_LIB=backends/amd/lib
 #ROCM_LD=third_party/hip/llvm/bin
 PREFIX=triton
 
@@ -30,7 +30,6 @@ replace_needed_sofiles() {
 
 mkdir  -p "/tmp_dir"
 pushd /tmp_dir
-#for pkg in /$WHEELHOUSE_DIR/*triton*linux*.whl; do
 for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
     echo "Modifying $pkg"
     rm -rf tmp

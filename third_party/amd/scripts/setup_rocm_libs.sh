@@ -14,7 +14,7 @@ fi
 
 # Remove packaged libs and headers
 rm $TRITON_ROCM_DIR/lib/libamdhip64.so
-rm -rf $TRITON_ROCM_DIR/include
+rm -rf $TRITON_ROCM_DIR/include/*
 
 LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
@@ -78,7 +78,7 @@ do
 done
 
 # Copy Include Files
-cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/
+cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/include
 
 # Copy linker
 mkdir -p $TRITON_ROCM_DIR/llvm/bin

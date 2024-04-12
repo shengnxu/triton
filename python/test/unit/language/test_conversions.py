@@ -76,6 +76,8 @@ def launch_exhaustive_populate(dst_dtype, offset, numel, force_odd, output_bits,
     assert(numel % BLOCK_SIZE == 0)
     dst = torch.empty((numel,), dtype=matching_int(dst_dtype), device='cuda')
     exhaustive_populate[(numel // BLOCK_SIZE,)](triton.reinterpret(dst, dst_dtype), offset, BLOCK_SIZE, force_odd, output_bits, max_repr)
+    if dst_dtype == tl.float8e4b8 or dst_dtype == tl.float8e5b16:
+        dst = torch.where(dst == 0x80, 0, dst)
     return dst
 
 
@@ -252,6 +254,12 @@ def upcast_test(src_dtype, dst_dtype, exponent_bits, mantissa_bits, exponent_bia
     ('float8e4nv', 'float16'),
     ('float8e4nv', 'bfloat16'),
     ('float8e4nv', 'float32'),
+
+    ('float8e4b8', 'float32'),
+    ('float8e4b8', 'float16'),
+
+    ('float8e5b16', 'float32'),
+    ('float8e5b16', 'float16'),
 ])
 def test_typeconvert_upcast(src_dtype, dst_dtype):
 
@@ -266,6 +274,8 @@ def test_typeconvert_upcast(src_dtype, dst_dtype):
         'float8e4b15': (4, 3, 15, 0x7e),
         'float8e4nv': (4, 3, 7, 0x7e),
         'float8e5': (5, 2, 15, 0x7b),
+        'float8e4b8': (4, 3, 8, 0x7f),
+        'float8e5b16': (5, 2, 16, 0x7f),
         'float16': (5, 10, 15, 0x7bff),
         'bfloat16': (8, 7, 127, 0x7f7f),
     }[src_dtype]

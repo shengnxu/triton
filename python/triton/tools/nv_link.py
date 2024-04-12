@@ -133,7 +133,7 @@ def gen_signature(m):
 # generate declarations of kernels with meta-parameter and constant values
 def make_algo_decls(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
     return f"""
-hipError_t {name}(hipStream_t stream, {gen_signature_with_full_args(metas[-1])});
+CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])});
 void load_{name}();
 void unload_{name}();
     """
@@ -142,8 +142,8 @@ void unload_{name}();
 # generate declarations of kernels with meta-parameter and constant values
 def make_global_decl(meta: KernelLinkerMeta) -> str:
     return f"""
-hipError_t {meta.orig_kernel_name}_default(hipStream_t stream, {gen_signature_with_full_args(meta)});
-hipError_t {meta.orig_kernel_name}(hipStream_t stream, {gen_signature_with_full_args(meta)}, int algo_id);
+CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)});
+CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id);
 void load_{meta.orig_kernel_name}();
 void unload_{meta.orig_kernel_name}();
     """
@@ -151,7 +151,7 @@ void unload_{meta.orig_kernel_name}();
 
 # generate dispatcher function for kernels with different meta-parameter and constant values
 def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
-    src = f"hipError_t {meta.orig_kernel_name}_default(hipStream_t stream, {gen_signature_with_full_args(meta)}){{\n"
+    src = f"CUresult {meta.orig_kernel_name}_default(CUstream stream, {gen_signature_with_full_args(meta)}){{\n"
     src += (f"  return {meta.orig_kernel_name}(stream, {', '.join(meta.arg_names)}, 0);\n")
     src += "}\n"
     return src
@@ -161,10 +161,10 @@ def make_default_algo_kernel(meta: KernelLinkerMeta) -> str:
 def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -> str:
     src = f"// launcher for: {name}\n"
     for meta in sorted(metas, key=lambda m: -m.num_specs):
-        src += f"hipError_t {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(hipStream_t stream, {gen_signature(meta)});\n"
+        src += f"CUresult {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(CUstream stream, {gen_signature(meta)});\n"
     src += "\n"
 
-    src += (f"hipError_t {name}(hipStream_t stream, {gen_signature_with_full_args(metas[-1])}){{")
+    src += (f"CUresult {name}(CUstream stream, {gen_signature_with_full_args(metas[-1])}){{")
     src += "\n"
     for meta in sorted(metas, key=lambda m: -m.num_specs):
         cond_fn = (  #
@@ -183,7 +183,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
         arg_names = [arg for arg, hint in zip(meta.arg_names, meta.sizes) if hint != 1]
         src += f"    return {meta.orig_kernel_name}_{meta.sig_hash}_{meta.suffix}(stream, {', '.join(arg_names)});\n"
     src += "\n"
-    src += "  return HIP_ERROR_INVALID_VALUE;\n"
+    src += "  return CUDA_ERROR_INVALID_VALUE;\n"
     src += "}\n"
 
     for mode in ["load", "unload"]:
@@ -200,7 +200,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
 
 # generate dispatcher function for kernels with different meta-parameter and constant values
 def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
-    src = f"hipError_t {meta.orig_kernel_name}(hipStream_t stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
+    src = f"CUresult {meta.orig_kernel_name}(CUstream stream, {gen_signature_with_full_args(meta)}, int algo_id){{\n"
     src += f"  assert (algo_id < (int)sizeof({meta.orig_kernel_name}_kernels));\n"
     src += f"  return {meta.orig_kernel_name}_kernels[algo_id](stream, {', '.join(meta.arg_names)});\n"
     src += "}\n"
@@ -210,7 +210,7 @@ def make_kernel_meta_const_dispatcher(meta: KernelLinkerMeta) -> str:
 # generate definition of function pointers of kernel dispatchers based on meta-parameter and constant values
 def make_func_pointers(names: str, meta: KernelLinkerMeta) -> str:
     # the table of hint dispatchers
-    src = f"typedef hipError_t (*kernel_func_t)(hipStream_t stream, {gen_signature_with_full_args(meta)});\n"
+    src = f"typedef CUresult (*kernel_func_t)(CUstream stream, {gen_signature_with_full_args(meta)});\n"
     src += f"kernel_func_t {meta.orig_kernel_name}_kernels[] = {{\n"
     for name in names:
         src += f"  {name},\n"
@@ -286,8 +286,7 @@ if __name__ == "__main__":
     get_num_algos_decl = make_get_num_algos_decl(meta)
     global_decl = make_global_decl(meta)
     with args.out.with_suffix(".h").open("w") as fp:
-        out = "#define __HIP_PLATFORM_AMD__\n"
-        out += "#include <hip/hip_runtime.h>\n"
+        out = "#include <cuda.h>\n"
         out += "\n".join(algo_decls)
         out += "\n"
         out += get_num_algos_decl
@@ -305,8 +304,7 @@ if __name__ == "__main__":
     default_algo_kernel = make_default_algo_kernel(meta)
     with args.out.with_suffix(".c").open("w") as fp:
         out = ""
-        out += "#define __HIP_PLATFORM_AMD__\n"
-        out += "#include <hip/hip_runtime.h>\n"
+        out += "#include <cuda.h>\n"
         out += "#include <stdint.h>\n"
         out += "#include <assert.h>\n"
         out += "\n"

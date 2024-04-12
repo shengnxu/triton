@@ -7,7 +7,8 @@ import tempfile
 import numpy as np
 
 import triton
-from triton.backends.nvidia.driver import include_dir, library_dirs
+#from triton.backends.nvidia.driver import include_dir, library_dirs
+from triton.backends.amd.driver import get_rocm_dirnames
 
 kernel_utils_src = """
 import triton
@@ -60,7 +61,8 @@ def kernel(C, A, B, M, N, K,
 """
 
 test_utils_src = """
-#include <cuda.h>
+#define __HIP_PLATFORM_AMD__
+#include <hip/hip_runtime.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -98,6 +100,7 @@ static void read_csv_to_buffer(char *filename, int16_t *buffer, int size) {
 
 def gen_kernel_library(dir, libname):
     c_files = glob.glob(os.path.join(dir, "*.c"))
+    library_dirs, include_dir = get_rocm_dirnames()
     subprocess.run(
         ["gcc"] + c_files + ["-I", include_dir[0], "-c", "-fPIC"],
         check=True,
@@ -106,7 +109,7 @@ def gen_kernel_library(dir, libname):
     o_files = glob.glob(os.path.join(dir, "*.o"))
 
     command = ["gcc", *o_files, "-shared", "-o", libname]
-    for lib_dir in library_dirs():
+    for lib_dir in library_dirs:
         command.extend(["-L", lib_dir])
     subprocess.run(command, check=True, cwd=dir)
 
@@ -116,19 +119,18 @@ def gen_test_bin(dir, M, N, K, exe="test", algo_id=0):
 int main(int argc, char **argv) {{
   int M = {M}, N = {N}, K = {K};
 
-  // initialize CUDA handles
-  CUdevice dev;
-  CUcontext ctx;
-  CUstream stream;
-  CUdeviceptr A, B, C;
-  CUresult err = 0;
-  cuInit(0);
-  cuDeviceGet(&dev, 0);
-  cuCtxCreate(&ctx, 0, dev);
-  cuMemAlloc(&A, M * K * 2);
-  cuMemAlloc(&B, K * N * 2);
-  cuMemAlloc(&C, M * N * 4);
-  cuStreamCreate(&stream, 0);
+  // initialize hip handles
+  hipDevice_t dev;
+  hipCtx_t ctx;
+  hipStream_t stream;
+  hipDeviceptr_t A, B, C;
+  hipError_t err = 0;
+  hipInit(0);
+  hipDeviceGet(&dev, 0);
+  hipMalloc(&A, M * K * 2);
+  hipMalloc(&B, K * N * 2);
+  hipMalloc(&C, M * N * 4);
+  hipStreamCreate(&stream);
   load_matmul_fp16();
 
   // initialize input data
@@ -138,12 +140,12 @@ int main(int argc, char **argv) {{
   memset(hB, 0, K*N*2);
   read_csv_to_buffer(argv[1], hA, M*K);
   read_csv_to_buffer(argv[2], hB, K*N);
-  cuMemcpyHtoD(A, hA, M*K*2);
-  cuMemcpyHtoD(B, hB, K*N*2);
+  hipMemcpyHtoD(A, hA, M*K*2);
+  hipMemcpyHtoD(B, hB, K*N*2);
 
   // launch kernel
-  cuStreamSynchronize(stream);
-  CUresult ret;
+  hipStreamSynchronize(stream);
+  hipError_t ret;
   int algo_id = {algo_id};
   if (algo_id == 0) {{
     ret = matmul_fp16_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
@@ -153,41 +155,46 @@ int main(int argc, char **argv) {{
   if (ret != 0) fprintf(stderr, "kernel launch failed\\n");
   assert(ret == 0);
 
-  cuStreamSynchronize(stream);
+  hipStreamSynchronize(stream);
 
   // read data
   int32_t hC[M*N];
   memset(hC, 0, M*N*4);
-  cuMemcpyDtoH(hC, C, M*N*4);
+  hipMemcpyDtoH(hC, C, M*N*4);
   write_buffer_to_csv(argv[3], hC, M*N);
 
   // free cuda handles
   unload_matmul_fp16();
-  cuMemFree(A);
-  cuMemFree(B);
-  cuMemFree(C);
-  cuCtxDestroy(ctx);
+  hipFree(A);
+  hipFree(B);
+  hipFree(C);
 }}
 """
     src = test_utils_src + test_src
     with open(os.path.join(dir, "test.c"), "w") as file:
         file.write(src)
 
-    command = ["gcc", "test.c"]
+    library_dirs, include_dir = get_rocm_dirnames()
+    command = ["hipcc", "test.c"]
     for inc_dir in include_dir:
         command.extend(["-I", inc_dir])
-    for lib_dir in library_dirs():
+    for lib_dir in library_dirs:
         command.extend(["-L", lib_dir])
-    command.extend(["-l", "cuda", "-L", dir, "-l", "kernel", "-o", exe])
+    #command.extend(["-l", "cuda", "-L", dir, "-l", "kernel", "-o", exe])
+    #command.extend(["-l", "hip", "-L", dir, "-l", "kernel", "-o", exe])
+    command.extend(["-L", dir, "-l", "kernel", "-o", exe])
     subprocess.run(command, check=True, cwd=dir)
 
 
 def write_triton_kernels(dir, src, util_src):
+    print("write triton kernel")
     kernel_path = os.path.join(dir, "kernel.py")
+    print(f'{kernel_path=}')
     with open(kernel_path, "w") as file:
         file.write(src)
 
     kernel_utils_path = os.path.join(dir, "kernel_utils.py")
+    print(f'{kernel_utils_path=}')
     with open(kernel_utils_path, "w") as file:
         file.write(util_src)
 
@@ -223,9 +230,13 @@ def _compile_kernel(dir, signature, kernel_name, out_name, out_path, num_warps, 
 # Edge case kernel with no specialization
 def compile_aot_kernel_no_specialization(dir, kernel_path, dtype, BM, BN, BK):
     # compile all desired configs
+    print("compile aot kernel")
     sig = f"*fp32, *{dtype}, *{dtype}, i32, i32, i32, i32, i32, i32, i32, i32, i32, {BM}, {BN}, {BK}"
     name = f"matmul_{dtype}"
     grid = f"M/{BM}, N/{BN}, 1"
+    print(f'{sig=}')
+    print(f'{name=}')
+    print(f'{grid=}')
     _compile_kernel(
         dir=dir,
         signature=sig,
@@ -309,7 +320,7 @@ def test_compile_link_matmul_no_specialization():
 
 
 def test_compile_link_matmul():
-    np.random.seed(3)
+    #np.random.seed(3)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         dtype = "fp16"

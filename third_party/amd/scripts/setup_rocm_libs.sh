@@ -2,6 +2,14 @@
 
 set -ex
 
+# Check if ROCM_VERSION argument is provided
+if [[ -z "$1" ]]; then
+    echo "ROCM_VERSION argument not provided setting to default."
+    ROCM_VERSION="6.0"
+else
+    ROCM_VERSION="$1"
+fi
+
 # Set ROCM_HOME if not set
 if [[ -z "${ROCM_HOME}" ]]; then
     export ROCM_HOME=/opt/rocm

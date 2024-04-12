@@ -15,6 +15,11 @@ if [[ -z "${ROCM_HOME}" ]]; then
     export ROCM_HOME=/opt/rocm
 fi
 
+# Extract major and minor version numbers
+MAJOR_VERSION=$(echo "${ROCM_VERSION}" | cut -d '.' -f 1)
+MINOR_VERSION=$(echo "${ROCM_VERSION}" | cut -d '.' -f 2)
+ROCM_INT=$(($MAJOR_VERSION * 10000 + $MINOR_VERSION * 100)) # Add patch later
+
 # Check TRITON_ROCM_DIR is set
 if [[ -z "${TRITON_ROCM_DIR}" ]]; then
   export TRITON_ROCM_DIR=third_party/amd/backend

@@ -3,9 +3,8 @@
 WHEELHOUSE_DIR=/artifacts
 PATCHELF_BIN=patchelf
 ROCM_LIB=backends/amd/lib
-ROCM_LD=backends/llvm/bin
+ROCM_LD=backends/amd/llvm/bin
 PREFIX=triton
-
 fname_without_so_number() {
     LINKNAME=$(echo $1 | sed -e 's/\.so.*/.so/g')
     echo "$LINKNAME"

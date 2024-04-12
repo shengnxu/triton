@@ -3,7 +3,7 @@
 WHEELHOUSE_DIR=/artifacts
 PATCHELF_BIN=patchelf
 ROCM_LIB=backends/amd/lib
-#ROCM_LD=third_party/hip/llvm/bin
+ROCM_LD=backends/llvm/bin
 PREFIX=triton
 
 fname_without_so_number() {
@@ -38,8 +38,8 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
     cp $pkg .
     unzip -q $(basename $pkg)
     rm -f $(basename $pkg)
-    #$PATCHELF_BIN --set-rpath ${LD_SO_RPATH:-'$ORIGIN:$ORIGIN/../../lib'} $PREFIX/$ROCM_LD/ld.lld
-    #$PATCHELF_BIN --print-rpath $PREFIX/$ROCM_LD/ld.lld
+    $PATCHELF_BIN --set-rpath ${LD_SO_RPATH:-'$ORIGIN:$ORIGIN/../../lib'} $PREFIX/$ROCM_LD/ld.lld
+    $PATCHELF_BIN --print-rpath $PREFIX/$ROCM_LD/ld.lld
     # Modify libtriton.so as it sits in _C directory apart from it'd dependencies
     find $PREFIX/_C -type f -name "*.so*" | while read sofile; do
         echo "Setting rpath of $sofile"
@@ -80,8 +80,7 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
         echo "replacing "${deps_soname[i]} ${patched[i]}
         replace_needed_sofiles $PREFIX/$ROCM_LIB ${deps_soname[i]} ${patched[i]}
         replace_needed_sofiles $PREFIX/_C ${deps_soname[i]} ${patched[i]}
-        #replace_needed_sofiles $PREFIX/$ROCM_LD ${deps_soname[i]} ${patched[i]}
-
+        replace_needed_sofiles $PREFIX/$ROCM_LD ${deps_soname[i]} ${patched[i]}
     done
 
     # Re-bundle whl with so adjustments

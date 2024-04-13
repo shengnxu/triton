@@ -32,7 +32,7 @@ namespace mlir::triton {
 const std::set<std::string> ENV_VARS = {
     "DISABLE_MMA_V3",     "TRITON_DISABLE_LINE_INFO", "DISABLE_FAST_REDUCTION",
     "ENABLE_TMA",         "MLIR_ENABLE_DUMP",         "LLVM_IR_ENABLE_DUMP",
-    "AMDGCN_ENABLE_DUMP", "TRUNCATE_F32_TO_BF16",     "LLVM_FLAG"};
+    "AMDGCN_ENABLE_DUMP", "TRUNCATE_F32_TO_BF16",     "TRITON_LLVM_FLAG"};
 
 namespace tools {
 

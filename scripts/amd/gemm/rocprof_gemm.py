@@ -62,19 +62,11 @@ def matmul_kernel(
     else:
         offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
 
-    if torch.version.hip is None:
-        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-        a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-        b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-    else:
-        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
-        a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
-        b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
-    mask_a = offs_am[:, None] < M
-    mask_b = offs_bn[None, :] < N
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
@@ -85,12 +77,12 @@ def matmul_kernel(
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
-            a = tl.load(a_ptrs, mask=mask_a, other=0.0)
-            b = tl.load(b_ptrs, mask=mask_b, other=0.0)
+            a = tl.load(a_ptrs)
+            b = tl.load(b_ptrs)
         else:
             k_remaining = K - k * (BLOCK_SIZE_K * SPLIT_K)
-            a = tl.load(a_ptrs, mask=(offs_k[None, :] < k_remaining) and mask_a, other=0.0)
-            b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_remaining) and mask_b, other=0.0)
+            a = tl.load(a_ptrs, mask=(offs_k[None, :] < k_remaining), other=0.0)
+            b = tl.load(b_ptrs, mask=(offs_k[:, None] < k_remaining), other=0.0)
 
         # We accumulate along the K dimension.
         accumulator += tl.dot(a, b)
@@ -122,16 +114,6 @@ def leaky_relu(x):
     return tl.where(x >= 0, x, 0.01 * x)
 
 
-# convert fp8 to fp16 for testing
-@triton.jit
-def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    input = tl.load(input_ptr + offsets, mask=mask)
-    output = input
-    tl.store(output_ptr + offsets, output, mask=mask)
-
-
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
@@ -139,23 +121,16 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
 def matmul(a, b, c, output_type, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
-    # assert a.is_contiguous(), "Matrix A must be contiguous"
-    # assert b.is_contiguous(), "Matrix B must be contiguous"
+    assert a.is_contiguous(), "Matrix A must be contiguous"
+    assert b.is_contiguous(), "Matrix B must be contiguous"
     M, K = a.shape
     K, N = b.shape
-    # 1D launch kernel where each block gets its own program.
-
-    otype = tl.float32
-    if output_type == torch.float16:
-        otype = tl.float16
-    elif output_type == torch.bfloat16:
-        otype = tl.bfloat16
 
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']),
         META['SPLIT_K']
     )
-    for _ in range(1):
+    for _ in range(10):
         matmul_kernel[grid](
             a, b, c,
             M, N, K,
@@ -170,37 +145,95 @@ def matmul(a, b, c, output_type, block_m, block_n, block_k, group_m, split_k, nu
             num_warps = num_warps,
             num_stages = num_stages,
             ACTIVATION=activation,
-            output_datatype=otype,
+            output_datatype=output_type,
         )
 
 
-def gen_input(M, N, d_type, isFp8, seed, device='cuda'):
+TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E4B8 = hasattr(torch, 'float8_e4m3fnuz')
+tl_to_torch_types = {
+    tl.float16: torch.float16,
+    tl.bfloat16: torch.bfloat16,
+    tl.float32: torch.float32,
+}
+
+if TORCH_HAS_FP8E5B16:
+    tl_to_torch_types[tl.float8e5b16] = torch.float8_e5m2fnuz
+if TORCH_HAS_FP8E4B8:
+    tl_to_torch_types[tl.float8e4b8] = torch.float8_e4m3fnuz
+
+tl_types = {
+    "fp16": tl.float16,
+    "fp32": tl.float32,
+    "fp8e4": tl.float8e4b8,
+    "fp8e5": tl.float8e5b16,
+    "bf16": tl.bfloat16,
+}
+
+def gen_input(M, N, d_type, seed, device='cuda'):
+    @triton.jit
+    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        input = tl.load(input_ptr + offsets, mask=mask)
+        output = input
+        tl.store(output_ptr + offsets, output, mask=mask)
+
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    if isFp8: # convert fp8 to fp16 for ref input
-        fp8_type = tl.float8e4
-        f8_tensor = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
-        f8_tensor = f8_tensor.to(torch.int8)
-        # keep only two bits of exponent to avoid overflow
-        f8_tensor = f8_tensor & 0b00111111
-        input = triton.reinterpret(f8_tensor, fp8_type)
-        input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
-        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
-        n_elements = f8_tensor.numel()
-        copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
-    else: # other data type
-        input = torch.randn((M, N), dtype=d_type, device=device)
+    if d_type == tl.float16:
+        input = torch.randn((M, N), dtype=torch.float16, device=device)
         input_f16 = input
+    else: # d_type is float8
+        raw_data = torch.randn((M, N), dtype=torch.float32, device='cuda') * 10
+        if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
+            (d_type == tl.float8e5b16 and TORCH_HAS_FP8E5B16) :
+            input = raw_data.to(tl_to_torch_types[d_type])
+            input_f16 = input.to(torch.float16)
+        else:
+            f8_tensor = raw_data.to(torch.int8)
+            # keep only two bits of exponent to avoid overflow
+            f8_tensor = f8_tensor & 0b00111111
+            input = triton.reinterpret(f8_tensor, d_type)
+            input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
+            grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+            n_elements = raw_data.numel()
+            copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
     return input, input_f16
 
 
-def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype, fp8a, fp8b):
-    a, a_f16 = gen_input(M, K, d_type=dtype, isFp8=fp8a, seed=10, device='cuda')
-    b, b_f16 = gen_input(K, N, d_type=dtype, isFp8=fp8b, seed=11, device='cuda')
+def get_output_type(dtype):
+    otype = tl.float16
+    if dtype == torch.float32:
+        otype = tl.float32
+    elif dtype == torch.bfloat16:
+        otype = tl.bfloat16
+    elif dtype == torch.int8:
+        otype = tl.int32
+
+    return otype
+
+
+def test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype):
+    a, a_f16 = gen_input(M, K, d_type=dtype, seed=10, device='cuda')
+    b, b_f16 = gen_input(K, N, d_type=dtype, seed=11, device='cuda')
+
+
+    ctype = get_output_type(dtype)
+    ctorch_type = tl_to_torch_types[ctype]
 
     # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=dtype)
-    matmul(a, b, c, dtype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
+    c = torch.zeros((M, N), device=a.device, dtype=ctorch_type)
+    matmul(a, b, c, ctype, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps)
+
+
+tl_types = {
+    "fp16": tl.float16,
+    "fp32": tl.float32,
+    "fp8e4": tl.float8e4b8,
+    "fp8e5": tl.float8e5b16,
+    "bf16": tl.bfloat16,
+}
 
 
 def main(args=None):
@@ -226,25 +259,7 @@ def main(args=None):
     parser.add_argument("-dtype", type=str, default='fp16', help="Input/output data type")
     parsed_args = parser.parse_args(args)
 
-    fp8a = False
-    fp8b = False
-    dtype = torch.float16
-    if parsed_args.dtype == "fp8a":
-        dtype = torch.float16
-        fp8a = True
-    elif parsed_args.dtype == 'fp8b':
-        dtype = torch.float16
-        fp8b = True
-    elif parsed_args.dtype == 'fp16':
-        dtype = torch.float16
-    elif parsed_args.dtype == 'fp32':
-        dtype = torch.float32
-    elif parsed_args.dtype == 'bf16':
-        dtype = torch.bfloat16
-    else:
-        print(f"Unsupported datatype {args.dtype}")
-        sys.exit(1)
-
+    dtype = tl_types[parsed_args.dtype]
     M = parsed_args.m
     N = parsed_args.n
     K = parsed_args.k
@@ -255,7 +270,7 @@ def main(args=None):
     split_k = parsed_args.split_k
     num_stages = parsed_args.num_stages
     num_warps = parsed_args.num_warps
-    test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype, fp8a, fp8b)
+    test_gemm(M, N, K, block_m, block_n, block_k, group_m, split_k, num_stages, num_warps, dtype)
 
 
 if __name__ == '__main__':

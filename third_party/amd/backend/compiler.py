@@ -84,14 +84,7 @@ class HIPBackend(BaseBackend):
         return HIPOptions(**args)
 
     def pack_metadata(self, metadata):
-        return (
-            metadata.num_warps,
-            metadata.num_ctas,
-            metadata.shared,
-            metadata.cluster_dims[0],
-            metadata.cluster_dims[1],
-            metadata.cluster_dims[2],
-        )
+        return metadata
 
     def get_codegen_implementation(self):
         codegen_fns = {}

@@ -1896,6 +1896,10 @@ void init_triton_ir(py::module &&m) {
            [](mlir::PassManager &self) {
              self.addPass(mlir::createTritonGPUReorderInstructionsPass());
            })
+      .def("add_tritonamdgpu_reorder_instructions_pass",
+           [](mlir::PassManager &self) {
+             self.addPass(mlir::createTritonAMDGPUReorderInstructionsPass());
+           })
       .def("add_tritongpu_rewrite_tensor_pointer_pass",
            [](mlir::PassManager &self, int computeCapability) {
              self.addPass(mlir::createTritonGPURewriteTensorPointerPass(
@@ -1995,10 +1999,7 @@ void init_triton_translation(py::module &m) {
       ret::take_ownership);
 
   m.def(
-      "get_warp_size",
-      []() {
-        return std::get<1>(getArchInfo());
-      },
+      "get_warp_size", []() { return std::get<1>(getArchInfo()); },
       ret::take_ownership);
 
   m.def(

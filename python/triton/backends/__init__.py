@@ -15,7 +15,10 @@ def _load_module(name, path):
 
 def _find_concrete_subclasses(module, base_class):
     ret = []
+    print(base_class)
+    print("===")
     for attr_name in dir(module):
+        print(attr_name)
         attr = getattr(module, attr_name)
         if isinstance(attr, type) and issubclass(attr, base_class) and not inspect.isabstract(attr):
             ret.append(attr)

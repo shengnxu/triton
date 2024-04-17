@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import List
 
 import triton
+from triton.tools.driver import driver
 from triton.compiler.code_generator import kernel_suffix
 #from triton.backends.nvidia.driver import ty_to_cpp
-from triton.backends.amd.driver import ty_to_cpp
+#from triton.backends.amd.driver import ty_to_cpp
+#from driver import ty_to_cpp2
 
 desc = """
 Triton ahead-of-time compiler:
@@ -131,15 +133,16 @@ if __name__ == "__main__":
     func_name = '_'.join([out_name, sig_hash, suffix])
     triton_kernel_name = '_'.join([args.kernel_name, suffix])
     #hex_ = str(binascii.hexlify(ccinfo.asm["cubin"]))[2:-1]
-    hex_ = str(binascii.hexlify(ccinfo.asm["hsaco"]))[2:-1]
+    #hex_ = str(binascii.hexlify(ccinfo.asm["hsaco"]))[2:-1]
+    hex_ = str(binascii.hexlify(ccinfo.asm[driver.active.get_bin_name()]))[2:-1]
     print(f'{hex_}')
     params = {
         "kernel_name": func_name,
         "triton_kernel_name": triton_kernel_name,
         "bin_size": len(hex_),
         "bin_data": ", ".join([f"0x{x}{y}" for x, y in zip(hex_[::2], hex_[1::2])]),
-        "signature": ", ".join([f"{ty_to_cpp(ty)} {name}" for name, ty in zip(arg_names, arg_types)]),
-        "full_signature": ", ".join([f"{ty_to_cpp(signature[i])} {kernel.arg_names[i]}" for i in signature.keys()]),
+        "signature": ", ".join([f"{driver.active.type_to_cpp_type(ty)} {name}" for name, ty in zip(arg_names, arg_types)]),
+        "full_signature": ", ".join([f"{driver.active.type_to_cpp_type(signature[i])} {kernel.arg_names[i]}" for i in signature.keys()]),
         "arg_pointers": ", ".join([f"&{arg}" for arg in arg_names]),
         "num_args": len(arg_names),
         "kernel_docstring": doc_string,
@@ -152,24 +155,6 @@ if __name__ == "__main__":
         "_placeholder": "",
     }
     for ext in ['h', 'c']:
-        template_path = Path(__file__).parent / f"compile.{ext}"
+        template_path = Path(__file__).parent / f"{driver.active.get_bin_name()}_compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
-    hsaco_path = ccinfo.asm.get('hsaco', None)
-    #if args.verbose:
-    print(dir(ccinfo))
-    print(f'{ccinfo.asm.keys()=}')
-    #print(f'{ccinfo.fn=}')
-#    print(f'{hsaco_path=}')
-
-#    if hsaco_path is not None:
-#        print("not none")
-#        if args.nostrip:
-#            shutil.copy(hsaco_path, out_path.with_suffix('.hsaco'))
-#        else:
-#            subprocess.run(['/opt/rocm/llvm/bin/llvm-objcopy', '--remove-section', '.debug_*', str(hsaco_path), str(out_path.with_suffix('.hsaco'))])
-#    else:
-#        print("none")
-#
-#    with out_path.with_suffix('.json').open("w") as fp:
-#        json.dump(ccinfo.metadata, fp, indent=2)

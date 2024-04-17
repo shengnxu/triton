@@ -40,12 +40,14 @@ class MetaData():
     max_seqlens_q = 0
     max_seqlens_k = 0
     bias = None
+    alibi_slopes = None
     causal = False
     num_contexts = 0
     varlen = False
     dropout_p, return_encoded_softmax = 0.0, False
     x, y = None, None
     enable_masking = False
+    swa = False
 
     def __init__(self, seqlen_q, seqlen_k, sm_scale=1.0):
         self.sm_scale = sm_scale
@@ -62,28 +64,29 @@ class MetaData():
         if not causal:
             y, x = window_left, window_right
         # We just want to apply causal mask, no windowing here.
-        elif causal and window_left == -1 and window_right == -1:
+        elif window_left == -1 and window_right == -1:
             # If causal and no window, then there is no left mask
             y = seqlen_q
             if seqlen_q == seqlen_k:
                 x = 0
-            elif seqlen_q < seqlen_k:
-                # X is this value because when causal=True, the mask is bottom right aligned.
-                # It ends on the top edge as q < k. Its intercept is the height it traveled
-                # which is q.
-                x = seqlen_k - seqlen_q
-            # seqlen_q > seqlen_k
             else:
-                x = -1 * (seqlen_q - seqlen_k)
+                # X is this value because when causal=True, and q < k, 
+                # the mask is bottom right aligned. It ends on the top edge 
+                # as q < k. Its intercept is the height it traveled which is q.
+                # When q > k, the intercept is on the left edge. It travels
+                # seqlen k (so again, q - k), but because it is the right mask 
+                # on the left edge, x should be negative.
+                x = seqlen_k - seqlen_q
             print(f"y = {y}, x = {x}")
+        # This is for causal + SWA
         else:
             # If causal masking is enabled and the attn scores are square, causal mask
-            # is the lower triangular of the square matrix. 
+            # is the lower triangular of the square matrix, until the left window edge. 
             if seqlen_q == seqlen_k:
                 y, x = window_left, 0
             elif seqlen_q < seqlen_k:
                 k_minus_q = seqlen_k - seqlen_q
-                # If k is much larger than q, then the window starts on the top edge of
+                # If k is larger than q, then the window starts on the top edge of
                 # the scores. This makes y negative (y axis is vertical / left edge). If
                 # the delta is small, y might start on the left edge. Detect that here.
                 # We multiply by -1 because a positive value means we are still on the top edge
@@ -122,8 +125,18 @@ class MetaData():
         assert bias.shape[2:] == (seqlen_q, seqlen_k)
         self.bias = bias
 
+    def need_alibi(self, alibi_slopes, batch, nheads):
+        assert alibi_slopes.is_cuda
+        assert alibi_slopes.dim() == 2
+        assert alibi_slopes.shape[0] == batch
+        assert alibi_slopes.shape[1] == nheads
+        self.alibi_slopes = alibi_slopes
+
     def need_causal(self):
         self.causal = True
+
+    def need_swa(self):
+        self.swa = True
 
     def need_dropout(dropout_p, return_encoded_softmax):
         self.dropout_p = dropout_p
@@ -162,6 +175,14 @@ class MetaData():
         # the left edge. This would result in >= 1 row of all NaNs in the
         # output if Y is not a multiple of BLOCK_N.
         assert not (q.shape[2] > k.shape[2] and y < 0)
+        if x < 0:
+            window_width = y - abs(x)
+        else:
+            window_width = x + y
+        # We cannot currently handle the case where BLOCK_M == window_width.
+        assert window_width > 256
+
+
 
 
 
@@ -209,6 +230,7 @@ def _attn_fwd_inner(
     K_block_ptr, V_block_ptr,
     start_m,
     actual_seqlen_k,
+    actual_seqlen_q,
     dropout_p,
     philox_seed,
     batch_philox_offset,
@@ -217,6 +239,7 @@ def _attn_fwd_inner(
     offs_n_masked,
     n_extra_tokens,
     bias_ptr,
+    alibi_slope,
     ENABLE_MASKING: tl.constexpr,
     MASKING_DIR: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -262,13 +285,28 @@ def _attn_fwd_inner(
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
-        tl.device_print("qk = ", qk)
         if bias_ptr is not None:
             bias = load_fn(bias_ptr, False, PADDED_SEQLEN_K and (n_extra_tokens != 0), "zero")
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += (bias * 1.44269504089)
+           
+        if alibi_slope is not None:
+            # Compute the global position of each token within the sequence
+            global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
+            global_n_positions = start_n + tl.arange(0, BLOCK_N)
+
+            # Compute the relative position using the global positions
+            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
+            relative_pos_block = tl.abs(relative_pos_block)
+
+
+            alibi_block = -1 * alibi_slope  * relative_pos_block
+
+            qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
+
+        # softmax
         m_ij = tl.maximum(m_i, tl.max(qk,1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
@@ -325,17 +363,23 @@ def attn_fwd(
     stride_vz, stride_vh, stride_vk, stride_vn,
     stride_oz, stride_oh, stride_om, stride_on,
     stride_bz, stride_bh, stride_bm, stride_bn,
+    stride_az, stride_ah,
     cu_seqlens_q, cu_seqlens_k,
     dropout_p, philox_seed, philox_offset_base, encoded_softmax,
     hq, hk,
-    X: tl.constexpr, Y: tl.constexpr, ENABLE_MASKING: tl.constexpr,
+    alibi_slopes,
+    X: tl.constexpr, Y: tl.constexpr,
+    SWA: tl.constexpr, ENABLE_MASKING: tl.constexpr,
     ACTUAL_BLOCK_DMODEL:tl.constexpr,
     MAX_SEQLENS_Q:tl.constexpr, MAX_SEQLENS_K:tl.constexpr,
     VARLEN: tl.constexpr,
     BLOCK_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr,
     PRE_LOAD_V: tl.constexpr,
     BIAS_TYPE: tl.constexpr,
-    ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_ENCODED_SOFTMAX: tl.constexpr,
+    USE_ALIBI: tl.constexpr,
+    BATCH_SIZE: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
@@ -444,6 +488,13 @@ def attn_fwd(
         )
     else:
         bias_ptr = None
+
+    if USE_ALIBI != 0:
+        a_offset = off_z * stride_az +  off_h_q * stride_ah 
+        alibi_slope = tl.load(alibi_slopes + a_offset)
+    else:
+        alibi_slope = None
+
     if ENABLE_DROPOUT:
         batch_philox_offset = philox_offset_base + off_hz * seqlen_q * seqlen_k
     else:
@@ -479,7 +530,8 @@ def attn_fwd(
         # when x and y are multiples of BLOCK_M/N.
         n_masked_blocks = BLOCK_M // BLOCK_N + 1
     else:
-        # Padding on Q does not need to be masked in the FA loop.
+        # If we need padding due to irregular seqlen, we only need to
+        # use masking on the last block.
         n_masked_blocks = n_extra_tokens != 0
     # if masked, we might end up with an additional block.
     # In this case we might exceed n_blocks so pick the min.
@@ -490,21 +542,15 @@ def attn_fwd(
 
     # If there is a left edge, we want to detect if the intercept for y is
     # in this WG.
-    begin_masked = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
-    # If there is a left edge to the window, then we also have masked blocks at the
-    # beginning. But if there are no full blocks or end masked blocks after it
-    # then we just handle this as part of the full and end masked blocks cases.
-    beginning_masked_blocks = (begin_block + n_masked_blocks < n_blocks) and begin_masked
     K_block_ptr = tl.advance(K_block_ptr, (0, begin_block*BLOCK_N))
     V_block_ptr = tl.advance(V_block_ptr, (begin_block*BLOCK_N, 0))
-    if ENABLE_MASKING:
-        if beginning_masked_blocks > 0:
+    # Left edge masking is only possible in SWA.
+    if SWA:
+        begin_masked = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
+        if begin_masked:
             n_full_blocks = n_full_blocks - n_masked_blocks
             block_max = block_min + n_masked_blocks * BLOCK_N
-            if ENABLE_MASKING:
-                offs_n_masked = -1 * (offs_n + tl.abs(Y))
-            else:
-                offs_n_masked = 0
+            offs_n_masked = -1 * (offs_n + tl.abs(Y))
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
                 start_m, seqlen_k,
@@ -527,10 +573,10 @@ def attn_fwd(
         block_max = (n_blocks - n_masked_blocks) * BLOCK_N
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
             # _, _, offs_n_masked, n_extra_tokens, _
-            block_min, block_max, 0, 0, bias_ptr,
+            block_min, block_max, 0, 0, bias_ptr, alibi_slope,
             # ENABLE_MASKING, MASKING_DIR, ....
             False, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
@@ -558,9 +604,9 @@ def attn_fwd(
                                                    (0, n_full_blocks))
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-            start_m, seqlen_k,
+            start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-            block_min, block_max, offs_n_masked, n_extra_tokens, bias_ptr,
+            block_min, block_max, offs_n_masked, n_extra_tokens, bias_ptr, alibi_slope,
             # _, MASKING_DIR, ...
             ENABLE_MASKING, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
@@ -941,28 +987,37 @@ class _attention(torch.autograd.Function):
                             metadata.bias.stride(2), metadata.bias.stride(3))
         else:
             bias_strides = (0,0,0,0)
+        
+        if metadata.alibi_slopes is not None:
+            alibi_strides = (metadata.alibi_slopes.stride(0), metadata.alibi_slopes.stride(1))
+        else:
+            alibi_strides = (0, 0)
 
         print(f"x = {metadata.x}")
         print(f"y = {metadata.y}")
         
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
-            *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides,
+            *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides, *alibi_strides,
             metadata.cu_seqlens_q, metadata.cu_seqlens_k,
             dropout_p=metadata.dropout_p,
             philox_seed=philox_seed,
             philox_offset_base=philox_offset,
             encoded_softmax=encoded_softmax,
             hq=nheads_q, hk=nheads_k,
-            X=metadata.x, Y=metadata.y, ENABLE_MASKING=metadata.enable_masking,
+            alibi_slopes = metadata.alibi_slopes,
+            X=metadata.x, Y=metadata.y, 
+            SWA=metadata.swa, ENABLE_MASKING=metadata.enable_masking,
             ACTUAL_BLOCK_DMODEL=head_size,
             MAX_SEQLENS_Q=metadata.max_seqlens_q,
             MAX_SEQLENS_K=metadata.max_seqlens_k,
             VARLEN=metadata.varlen,
             BLOCK_DMODEL=padded_d_model,
             BIAS_TYPE=0 if metadata.bias is None else 1,
+            USE_ALIBI=0 if metadata.alibi_slopes is None else 1,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
-            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax
+            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
+            BATCH_SIZE= q.shape[0]
         )
 
         ctx.save_for_backward(q, k, v, o, M)
@@ -1067,14 +1122,11 @@ attention = _attention.apply
                         #   (4, 4, 113, 123, 1),
                           ])
 @pytest.mark.parametrize('causal', [True])
-@pytest.mark.parametrize('use_bias', [False])
+@pytest.mark.parametrize('use_alibi', [False])
 @pytest.mark.parametrize('sliding_window', [(-1, -1)])
-def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window, dtype=torch.float16):
-    # TODO: using bias causes coredump for certain configs and must be fixed.
-    if use_bias:
-        pytest.skip()
-    window_left, window_right = sliding_window[0], sliding_window[1]
+def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
+    window_left, window_right = sliding_window[0], sliding_window[1]
     sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
@@ -1085,10 +1137,18 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
 
     # Convert window coord to xy. The kernel uses this as it is more flexible.
     swa = window_left != -1 or window_right != -1
+    if swa:
+        input_metadata.need_swa()
     if swa or causal:
         input_metadata.convert_window_coord_to_xy(N_CTX_Q, N_CTX_K, window_left, window_right, causal)
-    print(f"swa = {swa}")
-    print(f"causal = {causal}")
+    print(f"swa = {input_metadata.swa}")
+    print(f"causal = {input_metadata.causal}")
+    if use_alibi:
+        # for n heads the set of slopes is the geometric sequence that starts 2^(-8/n)
+        alibi_slopes = torch.tensor([2**(-8/H*i) for i in range(1, H+1)], dtype=torch.float32, device="cuda").repeat(Z, 1)
+        input_metadata.need_alibi(alibi_slopes, Z, H)
+    else:
+        alibi = None
 
     q = torch.randn((Z, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
@@ -1110,7 +1170,12 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
         mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
                           diagonal=N_CTX_K-N_CTX_Q)
         scores[:, :, mask==0] = float("-inf")
-
+    if use_alibi:
+        q_idx = torch.arange(N_CTX_Q, dtype=torch.int32, device="cuda").unsqueeze(-1)
+        k_idx = torch.arange(N_CTX_K, dtype=torch.int32, device="cuda").unsqueeze(0)
+        relative_pos = torch.abs(q_idx + N_CTX_K - N_CTX_Q - k_idx)
+        alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
+        scores+= alibi
     if swa:
         mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=-window_left+1)
@@ -1126,12 +1191,10 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[0][0][896][57]}")
-    print(f"ref_out = {ref_out[0][0][1019][57]}")
+    print(f"tri_out = {tri_out[0][0][33][57]}")
+    print(f"ref_out = {ref_out[0][0][33][57]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")
-    nan_mask = torch.isnan(tri_out)
-    # print(f" nan idx = {tri_out[nan_mask.nonzero()[:, 0].unique(sorted=True)]}")
     # compare
     #torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
 

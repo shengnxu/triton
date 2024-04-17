@@ -739,7 +739,7 @@ except BaseException:
 
 # vary seq length for fixed head and batch=4
 configs = []
-for mode in ['fwd', 'bwd']:
+for mode in ['fwd']:
     for D_HEAD in [128, 64]:
         for causal in [False, True]:
             if mode == 'bwd' and causal == False:

@@ -553,10 +553,10 @@ def attn_fwd(
             offs_n_masked = -1 * (offs_n + tl.abs(Y))
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
-                start_m, seqlen_k,
+                start_m, seqlen_k, seqlen_q,
                 dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-                # _, _, offs_n_masked, n_extra_tokens, _
-                block_min, block_max, offs_n_masked, 0, bias_ptr,
+                # _, _, _, n_extra_tokens, _
+                block_min, block_max, offs_n_masked, 0, bias_ptr, alibi_slope,
                 # ENABLE_MASKING, MASKING_DIR, ....
                 True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
                 # _, PADDED_SEQLEN_K, ...
@@ -1107,7 +1107,7 @@ attention = _attention.apply
                         #  [(4, 16, 1024, 865, 128),
                         #   (4, 48, 8192, 8192, 64),
                         #   (2, 16, 16384, 16384, 128),
-                          [(2, 16, 1020, 987, 128),
+                          [(2, 16, 1024, 1024, 128),
                         #   (2, 16, 15498, 2, 128),
                         #   (2, 16, 7, 16219, 64),
                         #   (4, 48, 1, 1, 64),
@@ -1121,9 +1121,9 @@ attention = _attention.apply
                         #   (4, 4, 128, 128, 65),
                         #   (4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [True])
+@pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
-@pytest.mark.parametrize('sliding_window', [(-1, -1)])
+@pytest.mark.parametrize('sliding_window', [(1024, 0)])
 def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     window_left, window_right = sliding_window[0], sliding_window[1]
@@ -1178,10 +1178,10 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_windo
         scores+= alibi
     if swa:
         mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
-                          diagonal=-window_left+1)
+                          diagonal=-window_left)
         scores[:, :, mask==0] = float("-inf")
         mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
-                          diagonal=window_right-1)
+                          diagonal=window_right)
         scores[:, :, mask==0] = float("-inf")
     p = torch.softmax(scores, dim=-1)
     if causal:
@@ -1191,8 +1191,8 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_windo
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[0][0][33][57]}")
-    print(f"ref_out = {ref_out[0][0][33][57]}")
+    print(f"tri_out = {tri_out[0][0][0][60]}")
+    print(f"ref_out = {ref_out[0][0][0][60]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")
     # compare

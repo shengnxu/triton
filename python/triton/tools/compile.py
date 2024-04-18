@@ -134,7 +134,9 @@ if __name__ == "__main__":
     triton_kernel_name = '_'.join([args.kernel_name, suffix])
     #hex_ = str(binascii.hexlify(ccinfo.asm["cubin"]))[2:-1]
     #hex_ = str(binascii.hexlify(ccinfo.asm["hsaco"]))[2:-1]
-    hex_ = str(binascii.hexlify(ccinfo.asm[driver.active.get_bin_name()]))[2:-1]
+    bin_name = driver.active.get_bin_name()
+    backend_name = "amd" if bin_name=="hsaco" else "nvidia"
+    hex_ = str(binascii.hexlify(ccinfo.asm[bin_name]))[2:-1]
     print(f'{hex_}')
     params = {
         "kernel_name": func_name,
@@ -155,6 +157,7 @@ if __name__ == "__main__":
         "_placeholder": "",
     }
     for ext in ['h', 'c']:
-        template_path = Path(__file__).parent / f"{driver.active.get_bin_name()}_compile.{ext}"
+        #template_path = Path(__file__).parent / f"{driver.active.get_bin_name()}_compile.{ext}"
+        template_path = Path(__file__).parent.parent / "backends" / f"{backend_name}" / "tools" / f"compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))

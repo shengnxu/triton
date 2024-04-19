@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+
+import argparse
+import subprocess
+import yaml
+import sys
+import os
+import csv
+
+def set_default_config(config: dict):
+    if 'transA' not in config: config['transA'] = 'N'
+    if 'transB' not in config: config['transB'] = 'N'
+    if 'lda' not in config: config['lda'] = config['M'] if config['transA'] == 'N' else config['K']
+    if 'ldb' not in config: config['ldb'] = config['K'] if config['transB'] == 'N' else config['N']
+    if 'ldc' not in config: config['ldc'] = config['M']
+    if 'ldd' not in config: config['ldd'] = config['M']
+    if 'a_type' not in config: config['a_type'] = 'f16_r'
+    if 'b_type' not in config: config['b_type'] = 'f16_r'
+    if 'c_type' not in config: config['c_type'] = 'f16_r'
+    if 'd_type' not in config: config['d_type'] = 'f16_r'
+    if 'alpha' not in config: config['alpha'] = 1
+    if 'beta' not in config: config['beta'] = 0
+    if 'batch_count' not in config: config['batch_count'] = 1
+    if 'compute_type' not in config: config['compute_type'] = 'f32_r'
+    if 'cold_iters' not in config: config['cold_iters'] = 100
+    if 'iters' not in config: config['iters'] = 1000
+    if 'datatype' not in config: config['datatype'] = 'f16'
+    if 'rotating' not in config: config['rotating'] = 512
+
+    # special handling for strided batched gemm
+    if config['batch_count'] != 1:
+        if 'stride_a' not in config: config['stride_a'] = config['M'] * config['K']
+        if 'stride_b' not in config: config['stride_b'] = config['K'] * config['N']
+        if 'stride_c' not in config: config['stride_c'] = config['M'] * config['N']
+        if 'stride_d' not in config: config['stride_d'] = config['M'] * config['N']
+
+    # this overrides both default and yaml configs
+    if args.iters > 0:
+        config['iters'] = args.iters
+    if args.cold_iters > 0:
+        config['cold_iters'] = args.cold_iters
+
+def run_bash_command(commandstring):
+    print( commandstring )
+    proc = subprocess.run(commandstring, shell=True, check=False, executable='/bin/bash', stdout = subprocess.PIPE)
+    output = proc.stdout.splitlines()
+    for line in output:
+        print( line.decode('utf-8') )
+    return output
+
+def run_hipblas_lt(org_config: dict):
+    config = org_config.copy()
+
+    HIPBLASLT_DIR = os.getenv('HIPBLASLT_DIR')
+    HIPBLASLT_BIN = os.getenv('HIPBLASLT_BIN', False)
+
+    set_default_config(config)
+
+    profiler = "./build/release/clients/staging/hipblaslt-bench"
+    if HIPBLASLT_DIR:
+        profiler = HIPBLASLT_DIR + "/build/release/clients/staging/hipblaslt-bench"
+    if HIPBLASLT_BIN:
+        profiler = HIPBLASLT_BIN
+    commandstring = profiler + " " + \
+        "--initialization trig_float " + \
+        "-m " + str( config['M'] ) + " " + \
+        "-n " + str( config['N'] ) + " " + \
+        "-k " + str( config['K'] ) + " " + \
+        "--a_type " + str( config['a_type'] ) + " " + \
+        "--b_type " + str( config['b_type'] ) + " " + \
+        "--c_type " + str( config['c_type'] ) + " " + \
+        "--d_type " + str( config['d_type'] ) + " " + \
+        "--compute_type " + str( config['compute_type'] ) + " " + \
+        "--lda " + str( config['lda'] ) + " " + \
+        "--ldb " + str( config['ldb'] ) + " " +  \
+        "--ldc " + str( config['ldc'] ) + " " + \
+        "--ldd " + str( config['ldd'] ) + " " + \
+        "--transA " + str( config['transA'] ) + " " + \
+        "--transB " + str( config['transB'] ) + " " + \
+        "--alpha " + str( config['alpha'] ) + " " + \
+        "--beta " + str( config['beta'] ) + " " + \
+        "--algo_method all -i 10 -j 100 --print_kernel_info"
+#        " --bias_vector " + \
+
+    if config['batch_count'] != 1:
+        commandstring += "--stride_a " + str( config['stride_a'] ) + " " + \
+                         "--stride_b " + str( config['stride_b'] ) + " " + \
+                         "--stride_c " + str( config['stride_c'] ) + " " + \
+                         "--stride_d " + str( config['stride_d'] ) + " " + \
+                         "--batch_count " + str( config['batch_count'] )
+
+    # if not args.novalidate:
+    #     commandstring += " -v"
+
+    terminal_output = run_bash_command(commandstring)
+    # print(f"output = {terminal_output}")
+
+    perf_vals = []
+    for line in terminal_output:
+        # print(f"line = {line}")
+        index = line.decode('utf-8').find('transA,transB')
+        if index != -1:
+            headers = line.decode('utf-8').split(',')
+            values = terminal_output[terminal_output.index(line) + 1].decode('utf-8').split(',')
+            perf = float( values[headers.index('us')] )
+            perf_vals.append(perf)
+            # break
+
+    # perf = float( values[headers.index('us')] )
+    # print(f"perf_vals = {perf_vals}")
+    org_config['perf'] = min(perf_vals)
+
+
+def main(yaml_filename, output_filename):
+    with open(yaml_filename) as file:
+        configs = yaml.safe_load(file)
+
+    for config in configs:
+        run_hipblas_lt(config)
+    with open(output_filename, 'w') as f:
+        csvfile = csv.DictWriter(f, configs[0].keys())
+        csvfile.writeheader()
+        for config in configs:
+            csvfile.writerow(config)
+    return True
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description = 'yaml frontend to math libraries')
+    parser.add_argument('filename')
+    parser.add_argument('--iters', type=int, default=-1, help="number of iterations")
+    parser.add_argument('--cold_iters', type=int, default=-1, help="number of cold iterations for warmup")
+    parser.add_argument('--novalidate', action='store_true', help="Disable validation")
+    parser.add_argument('-o', '--output', default='output.csv')
+
+    global args
+    args = parser.parse_args()
+
+    sys.exit( main(args.filename, args.output) == False )
+

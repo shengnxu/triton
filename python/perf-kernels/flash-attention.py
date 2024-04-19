@@ -62,7 +62,8 @@ class MetaData():
         # This is the traditional SWA case. For this, x and y have the same coordinates
         # as window left/right.
         if not causal:
-            y, x = window_left, window_right
+            y = seqlen_q if window_left == -1 else window_left
+            x = seqlen_k if window_right == -1 else window_right
         # We just want to apply causal mask, no windowing here.
         elif window_left == -1 and window_right == -1:
             # If causal and no window, then there is no left mask
@@ -181,10 +182,6 @@ class MetaData():
             window_width = x + y
         # We cannot currently handle the case where BLOCK_M == window_width.
         assert window_width > 256
-
-
-
-
 
 @triton.jit
 def cdiv_fn(x,y):
@@ -550,7 +547,7 @@ def attn_fwd(
         if begin_masked:
             n_full_blocks = n_full_blocks - n_masked_blocks
             block_max = block_min + n_masked_blocks * BLOCK_N
-            offs_n_masked = -1 * (offs_n + tl.abs(Y))
+            offs_n_masked = offs_n + Y
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
                 start_m, seqlen_k, seqlen_q,
@@ -563,6 +560,8 @@ def attn_fwd(
                 PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
                 off_z, off_h_q
             )
+            K_block_ptr = tl.advance(K_block_ptr, (0, block_max))
+            V_block_ptr = tl.advance(V_block_ptr, (block_max, 0))
             block_min = block_max
             block_max = n_blocks * BLOCK_N
 
@@ -583,6 +582,8 @@ def attn_fwd(
             PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
             off_z, off_h_q
         )
+        K_block_ptr = tl.advance(K_block_ptr, (0, block_max))
+        V_block_ptr = tl.advance(V_block_ptr, (block_max, 0))
         block_min = block_max
         block_max = n_blocks * BLOCK_N
 
@@ -595,8 +596,6 @@ def attn_fwd(
             offs_n_masked = offs_n - X
         else:
             offs_n_masked = 0
-        K_block_ptr = tl.advance(K_block_ptr, (0, n_full_blocks*BLOCK_N))
-        V_block_ptr = tl.advance(V_block_ptr, (n_full_blocks*BLOCK_N, 0))
         if bias_ptr is not None:
             bias_ptr = tl.advance(bias_ptr, (0, n_full_blocks*BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
@@ -995,6 +994,9 @@ class _attention(torch.autograd.Function):
 
         print(f"x = {metadata.x}")
         print(f"y = {metadata.y}")
+        print(f"swa = {metadata.swa}")
+        print(f"causal = {metadata.causal}")
+        print(f"enable masking = {metadata.enable_masking}")
         
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
@@ -1107,7 +1109,7 @@ attention = _attention.apply
                         #  [(4, 16, 1024, 865, 128),
                         #   (4, 48, 8192, 8192, 64),
                         #   (2, 16, 16384, 16384, 128),
-                          [(2, 16, 1024, 1024, 128),
+                          [(2, 16, 128, 1024, 128),
                         #   (2, 16, 15498, 2, 128),
                         #   (2, 16, 7, 16219, 64),
                         #   (4, 48, 1, 1, 64),
@@ -1123,10 +1125,11 @@ attention = _attention.apply
                           ])
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
-@pytest.mark.parametrize('sliding_window', [(1024, 0)])
+@pytest.mark.parametrize('sliding_window', [(126, -1)])
 def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
-    window_left, window_right = sliding_window[0], sliding_window[1]
+    window_left = N_CTX_Q if sliding_window[0] == -1 else sliding_window[0]
+    window_right = N_CTX_K if sliding_window[1] == -1 else sliding_window[1]
     sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
@@ -1141,8 +1144,6 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_windo
         input_metadata.need_swa()
     if swa or causal:
         input_metadata.convert_window_coord_to_xy(N_CTX_Q, N_CTX_K, window_left, window_right, causal)
-    print(f"swa = {input_metadata.swa}")
-    print(f"causal = {input_metadata.causal}")
     if use_alibi:
         # for n heads the set of slopes is the geometric sequence that starts 2^(-8/n)
         alibi_slopes = torch.tensor([2**(-8/H*i) for i in range(1, H+1)], dtype=torch.float32, device="cuda").repeat(Z, 1)
@@ -1191,8 +1192,8 @@ def test_op_fwd(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_windo
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[0][0][0][60]}")
-    print(f"ref_out = {ref_out[0][0][0][60]}")
+    print(f"tri_out = {tri_out[0][0][0][0]}")
+    print(f"ref_out = {ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")
     # compare

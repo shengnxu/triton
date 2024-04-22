@@ -30,7 +30,7 @@ import triton.language as tl
 
 torch_dtype:tl.constexpr = torch.float16
 
-TORCH_HAS_FP8E5 = False #hasattr(torch, 'float8_e5m2fnuz')
+TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
@@ -1281,20 +1281,18 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [#(4, 48, 1024, 64),
-                          #(4, 48, 2048, 64),
-                          #(4, 48, 4096, 64),
+                         [(4, 48, 1024, 64),
+                          (4, 48, 2048, 64),
+                          (4, 48, 4096, 64),
                           (1, 16, 1024, 64),
+                          (1, 16, 1024, 128),
                           #(1, 16, 8192, 63),
                           #(1, 16, 1022, 64),
-                          #(1, 16, 128, 32), # TODO Debug failure, appears to be from small input size
                           ])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [None])
 @pytest.mark.parametrize('torch_sdpa_test', [True])
 @pytest.mark.parametrize('causal', [True])
 def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sdpa_test, dtype=torch.float16):
-    torch.manual_seed(20)
-        
     torch.manual_seed(20)
     if qseqlen_not_equal_kseqlen is not None:
         seqlen_q = qseqlen_not_equal_kseqlen

@@ -34,14 +34,6 @@ TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
 if TORCH_HAS_FP8E5:
     torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
-# Helper function, but not always usable due to compiler bugs (esp. used with tl.trans)
-@triton.jit
-def dot(BLOCK_M : tl.constexpr, QDIM : tl.constexpr, KDIM : tl.constexpr, q, k):
-    if BLOCK_M == 1:
-        return tl.sum(tl.view(q, [QDIM]) * tl.view(k, [KDIM]))
-    else:
-        return tl.dot(q, k)
-
 class MetaData():
     cu_seqlens_q = None
     cu_seqlens_k = None

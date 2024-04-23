@@ -67,7 +67,6 @@ if __name__ == "__main__":
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     kernel = getattr(mod, args.kernel_name)
-    print(f"{kernel=}")
     grid = args.grid.split(",")
     assert len(grid) == 3
 
@@ -99,7 +98,6 @@ if __name__ == "__main__":
     hints = {k: v for k, v in hints.items() if v is not None}
     constants = {i: constexpr(s) for i, s in enumerate(signature)}
     constants = {k: v for k, v in constants.items() if v is not None}
-    print(f"{constants=}")
     signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
     const_sig = 'x'.join([str(v) for v in constants.values()])
     doc_string = [f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()]
@@ -113,13 +111,8 @@ if __name__ == "__main__":
     attrs = triton.compiler.AttrsDescriptor(divisible_by_16=divisible_by_16, equal_to_1=equal_to_1)
     for i in equal_to_1:
         constants.update({i: 1})
-    print(f'{kernel=}')
-    print(f'{signature=}')
-    print(f'{attrs=}')
     src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
-    print(f'{src=}')
     opts = {"num_warps": args.num_warps, "num_stages": args.num_stages}
-    print(f'{opts=}')
     ccinfo = triton.compile(src, options=opts)
     arg_names = []
     arg_types = []
@@ -132,12 +125,9 @@ if __name__ == "__main__":
     suffix = kernel_suffix(signature.values(), attrs)
     func_name = '_'.join([out_name, sig_hash, suffix])
     triton_kernel_name = '_'.join([args.kernel_name, suffix])
-    #hex_ = str(binascii.hexlify(ccinfo.asm["cubin"]))[2:-1]
-    #hex_ = str(binascii.hexlify(ccinfo.asm["hsaco"]))[2:-1]
     bin_name = driver.active.get_bin_name()
     backend_name = "amd" if bin_name=="hsaco" else "nvidia"
     hex_ = str(binascii.hexlify(ccinfo.asm[bin_name]))[2:-1]
-    print(f'{hex_}')
     params = {
         "kernel_name": func_name,
         "triton_kernel_name": triton_kernel_name,
@@ -157,7 +147,6 @@ if __name__ == "__main__":
         "_placeholder": "",
     }
     for ext in ['h', 'c']:
-        #template_path = Path(__file__).parent / f"{driver.active.get_bin_name()}_compile.{ext}"
         template_path = Path(__file__).parent.parent / "backends" / f"{backend_name}" / "tools" / f"compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))

@@ -4,11 +4,21 @@ import subprocess
 import sys
 import tempfile
 
+import torch
 import numpy as np
 
 import triton
 #from triton.backends.nvidia.driver import include_dir, library_dirs
 from triton.backends.amd.driver import get_rocm_dirnames
+
+def is_interpreter():
+    return os.environ.get('TRITON_INTERPRET', '0') == '1'
+
+def is_cuda():
+    return not is_interpreter() and triton.runtime.driver.active.get_current_target()[0] == "cuda"
+
+def is_hip():
+    return not is_interpreter() and triton.runtime.driver.active.get_current_target()[0] == "hip"
 
 kernel_utils_src = """
 import triton
@@ -60,7 +70,17 @@ def kernel(C, A, B, M, N, K,
   tl.store(c_ptrs, c)
 """
 
-test_utils_src = """
+test_includes_src_cuda = """
+#include <cuda.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <assert.h>
+#include "kernel.h"
+
+"""
+
+test_includes_src_hip = """
 #define __HIP_PLATFORM_AMD__
 #include <hip/hip_runtime.h>
 #include <stdio.h>
@@ -69,6 +89,9 @@ test_utils_src = """
 #include <assert.h>
 #include "kernel.h"
 
+"""
+
+test_utils_src = """
 static void write_buffer_to_csv(char *filename, int32_t *buffer, int size) {
     FILE *file = fopen(filename, "w");
     if (file == NULL) {
@@ -115,7 +138,7 @@ def gen_kernel_library(dir, libname):
 
 
 def gen_test_bin(dir, M, N, K, exe="test", algo_id=0):
-    test_src = f"""
+    test_src_hip = f"""
 int main(int argc, char **argv) {{
   int M = {M}, N = {N}, K = {K};
 
@@ -170,31 +193,92 @@ int main(int argc, char **argv) {{
   hipFree(C);
 }}
 """
-    src = test_utils_src + test_src
+    test_src_cuda = f"""
+int main(int argc, char **argv) {{
+  int M = {M}, N = {N}, K = {K};
+
+   // initialize CUDA handles
+  CUdevice dev;
+  CUcontext ctx;
+  CUstream stream;
+  CUdeviceptr A, B, C;
+  CUresult err = 0;
+  cuInit(0);
+  cuDeviceGet(&dev, 0);
+  cuCtxCreate(&ctx, 0, dev);
+  cuMemAlloc(&A, M * K * 2);
+  cuMemAlloc(&B, K * N * 2);
+  cuMemAlloc(&C, M * N * 4);
+  cuStreamCreate(&stream, 0);
+  load_matmul_fp16();
+
+  // initialize input data
+  int16_t hA[M*K];
+  int16_t hB[K*N];
+  memset(hA, 0, M*K*2);
+  memset(hB, 0, K*N*2);
+  read_csv_to_buffer(argv[1], hA, M*K);
+  read_csv_to_buffer(argv[2], hB, K*N);
+  cuMemcpyHtoD(A, hA, M*K*2);
+  cuMemcpyHtoD(B, hB, K*N*2);
+
+  // launch kernel
+  cuStreamSynchronize(stream);
+  CUresult ret;
+  int algo_id = {algo_id};
+  if (algo_id == 0) {{
+    ret = matmul_fp16_default(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1);
+  }} else {{
+    ret = matmul_fp16(stream, C, A, B, M, N, K, N, 1, K, 1, N, 1, {algo_id});
+  }}
+  if (ret != 0) fprintf(stderr, "kernel launch failed\\n");
+  assert(ret == 0);
+
+  cuStreamSynchronize(stream);
+
+  // read data
+  int32_t hC[M*N];
+  memset(hC, 0, M*N*4);
+  cuMemcpyDtoH(hC, C, M*N*4);
+  write_buffer_to_csv(argv[3], hC, M*N);
+
+  // free cuda handles
+  unload_matmul_fp16();
+  cuMemFree(A);
+  cuMemFree(B);
+  cuMemFree(C);
+  cuCtxDestroy(ctx);
+}}
+"""
+    if is_cuda():
+        src = test_includes_src_cuda + test_utils_src + test_src_cuda
+    elif is_hip():
+        src = test_includes_src_hip + test_utils_src + test_src_hip
     with open(os.path.join(dir, "test.c"), "w") as file:
         file.write(src)
 
-    library_dirs, include_dir = get_rocm_dirnames()
-    command = ["hipcc", "test.c"]
+    if is_cuda():
+        command = ["gcc", "test.c"]
+    elif is_hip():
+        library_dirs, include_dir = get_rocm_dirnames()
+        command = ["hipcc", "test.c"]
     for inc_dir in include_dir:
         command.extend(["-I", inc_dir])
     for lib_dir in library_dirs:
         command.extend(["-L", lib_dir])
-    #command.extend(["-l", "cuda", "-L", dir, "-l", "kernel", "-o", exe])
-    #command.extend(["-l", "hip", "-L", dir, "-l", "kernel", "-o", exe])
-    command.extend(["-L", dir, "-l", "kernel", "-o", exe])
+    if is_cuda():
+        command.extend(["-l", "cuda", "-L", dir, "-l", "kernel", "-o", exe])
+    elif is_hip():
+        command.extend(["-L", dir, "-l", "kernel", "-o", exe])
     subprocess.run(command, check=True, cwd=dir)
 
 
 def write_triton_kernels(dir, src, util_src):
-    print("write triton kernel")
     kernel_path = os.path.join(dir, "kernel.py")
-    print(f'{kernel_path=}')
     with open(kernel_path, "w") as file:
         file.write(src)
 
     kernel_utils_path = os.path.join(dir, "kernel_utils.py")
-    print(f'{kernel_utils_path=}')
     with open(kernel_utils_path, "w") as file:
         file.write(util_src)
 
@@ -230,13 +314,9 @@ def _compile_kernel(dir, signature, kernel_name, out_name, out_path, num_warps, 
 # Edge case kernel with no specialization
 def compile_aot_kernel_no_specialization(dir, kernel_path, dtype, BM, BN, BK):
     # compile all desired configs
-    print("compile aot kernel")
     sig = f"*fp32, *{dtype}, *{dtype}, i32, i32, i32, i32, i32, i32, i32, i32, i32, {BM}, {BN}, {BK}"
     name = f"matmul_{dtype}"
     grid = f"M/{BM}, N/{BN}, 1"
-    print(f'{sig=}')
-    print(f'{name=}')
-    print(f'{grid=}')
     _compile_kernel(
         dir=dir,
         signature=sig,
@@ -262,15 +342,18 @@ def compile_aot_kernels(dir, kernel_path, dtype, BM, BN, BK, ha_hb_hints):
                 kernel_name="kernel",
                 out_name=name,
                 out_path=name,
-                num_warps=1,
+                num_warps=4,
+                num_stages=0,
                 grid=grid,
                 kernel_path=kernel_path,
             )
 
 
 def link_aot_kernels(dir):
-    #linker_path = os.path.join(triton.tools.__path__[0], "link.py")
-    linker_path = os.path.join(triton.tools.__path__[0], "../backends/amd/tools/link.py")
+    if is_hip():
+        linker_path = os.path.join(triton.tools.__path__[0], "../backends/amd/tools/link.py")
+    else:
+        linker_path = os.path.join(triton.tools.__path__[0], "../backends/nvidia/tools/link.py")
 
     # link all desired configs
     h_files = glob.glob(os.path.join(dir, "*.h"))
@@ -321,7 +404,7 @@ def test_compile_link_matmul_no_specialization():
 
 
 def test_compile_link_matmul():
-    #np.random.seed(3)
+    np.random.seed(3)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         dtype = "fp16"
@@ -436,6 +519,9 @@ def test_compile_link_autotune_matmul():
 
 
 def test_ttgir_to_ptx():
+    if is_hip():
+        pytest.skip('test_abs_fp8 not supported on HIP.')
+
     src = """
 module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 32 : i32, "triton_gpu.num-ctas" = 1 : i32} {
   tt.func public @sum_kernel_0d1d(%arg0: !tt.ptr<i32, 1>, %arg1: !tt.ptr<i32, 1>) {

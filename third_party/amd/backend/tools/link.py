@@ -168,7 +168,7 @@ def make_kernel_hints_dispatcher(name: str, metas: Sequence[KernelLinkerMeta]) -
     src += "\n"
     for meta in sorted(metas, key=lambda m: -m.num_specs):
         cond_fn = (  #
-            lambda val, hint: f"({val} % {hint} == 0)"  #
+            lambda val, hint: f"((int64_t){val} % {hint} == 0)"  #
             if hint == 16  #
             else f"({val} == {hint})"  #
             if hint == 1  #

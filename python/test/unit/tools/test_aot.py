@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import pytest
 
 import torch
 import numpy as np
@@ -342,8 +343,7 @@ def compile_aot_kernels(dir, kernel_path, dtype, BM, BN, BK, ha_hb_hints):
                 kernel_name="kernel",
                 out_name=name,
                 out_path=name,
-                num_warps=4,
-                num_stages=0,
+                num_warps=1,
                 grid=grid,
                 kernel_path=kernel_path,
             )
@@ -520,7 +520,7 @@ def test_compile_link_autotune_matmul():
 
 def test_ttgir_to_ptx():
     if is_hip():
-        pytest.skip('test_abs_fp8 not supported on HIP.')
+        pytest.skip('test_ttgir_to_ptx is not supported on HIP.')
 
     src = """
 module attributes {"triton_gpu.num-warps" = 4 : i32, "triton_gpu.threads-per-warp" = 32 : i32, "triton_gpu.num-ctas" = 1 : i32} {

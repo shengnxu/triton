@@ -41,6 +41,7 @@ namespace ttg = triton::gpu;
 
 namespace {
 
+static int br = 0;
 class LoopPipeliner {
   /// Cache of ForOp and YieldOp related to this pipeliner.
   scf::ForOp forOp;
@@ -281,8 +282,12 @@ LogicalResult LoopPipeliner::checkOpUses() {
     } else
       isCandidate = false;
 
-    if (isCandidate)
-      validLoads.insert(op);
+    if (isCandidate){
+      if(br == 0){
+        validLoads.insert(op);
+        br += 1;
+      }
+    }
   }
 
   return validLoads.empty() ? failure() : success();

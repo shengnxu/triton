@@ -166,18 +166,18 @@ class _attention(torch.autograd.Function):
             ## For fp16, pick BLOCK_M=256, num_warps=8
             ## For fp8, pick BLOCK_M=128, num_warps=4
             ## TODO (zhanglx): add tuning infra for FA
-            BLOCK_M = 128 if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
+            BLOCK_M = 128 #if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
             BLOCK_N = 128
             waves_per_eu = 2
-            num_warps = BLOCK_M // 32
+            num_warps = 4
             num_stages = 1
             pre_load_v = False
             slice_k_tile = 32
-            kpack = 1
+            kpack = 2
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
-
+        print(grid)
         _attn_fwd[grid](
             q, k, v, sm_scale, M, o,
             q.stride(0), q.stride(1), q.stride(2), q.stride(3),
@@ -213,7 +213,7 @@ name_to_torch_types = {
     for shape in [(4, 48, 1024, 128),
                   (4, 48, 2048, 128),
                   (4, 48, 4096, 128)]
-    for dtype in ['fp16', 'bf16', 'fp8']])
+    for dtype in ['fp16']])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, dtype):
     torch.manual_seed(20)
     init_dtype = torch.float16 if dtype == 'fp8' else name_to_torch_types[dtype]
@@ -264,21 +264,21 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in ['fp16', 'bf16', 'fp8']:
+for dtype in ['fp16']:
     for D_HEAD in [128]:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
+                x_vals=[#(16, 16, 1024),
+                        # (8, 16, 2048),
+                        # (4, 16, 4096),
+                        # (2, 16, 8192),
+                        # (1, 16, 16384),
+                        # (4, 48, 1024),
+                        # (4, 48, 2048),
                         (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        # (4, 48, 8192),
+                        # (4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'],

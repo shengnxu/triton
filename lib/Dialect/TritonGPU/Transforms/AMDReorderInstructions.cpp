@@ -281,26 +281,23 @@ public:
   //
   // dot0 = dot(..., k0_dot, 0)
   // dot1 = dot(..., k1_dot, dot1)
-  void doPipelining(SmallVector<SmallVector<Operation *>> &dotChains,
-                    int pipelineStages) {
-    for (auto chain : dotChains) {
-      for (int i = 0; i < (chain.size() - 1) / pipelineStages; i++) {
-        int startStageIdx = i == 0 ? 0 : 1;
-        for (int j = startStageIdx; j <= pipelineStages; j++) {
-          processStage(/*currDot*/ chain[i * pipelineStages + j],
-                       /*moveBeforeDot*/ chain[i * pipelineStages],
-                       /*operandIdx*/ 0);
-          processStage(/*currDot*/ chain[i * pipelineStages + j],
-                       /*moveBeforeDot*/ chain[i * pipelineStages],
-                       /*operandIdx*/ 1);
-        }
+  void doPipelining(SmallVector<Operation *> &chain, int pipelineStages) {
+    for (int i = 0; i < (chain.size() - 1) / pipelineStages; i++) {
+      int startStageIdx = i == 0 ? 0 : 1;
+      for (int j = startStageIdx; j <= pipelineStages; j++) {
+        processStage(/*currDot*/ chain[i * pipelineStages + j],
+                     /*moveBeforeDot*/ chain[i * pipelineStages],
+                     /*operandIdx*/ 0);
+        processStage(/*currDot*/ chain[i * pipelineStages + j],
+                     /*moveBeforeDot*/ chain[i * pipelineStages],
+                     /*operandIdx*/ 1);
       }
+    }
 
-      int startDotIdx = ((chain.size() - 1) / pipelineStages) * pipelineStages;
-      for (int i = 1; i <= (chain.size() - 1) % pipelineStages; i++) {
-        processStage(chain[startDotIdx + i], chain[startDotIdx], 0);
-        processStage(chain[startDotIdx + i], chain[startDotIdx], 1);
-      }
+    int startDotIdx = ((chain.size() - 1) / pipelineStages) * pipelineStages;
+    for (int i = 1; i <= (chain.size() - 1) % pipelineStages; i++) {
+      processStage(chain[startDotIdx + i], chain[startDotIdx], 0);
+      processStage(chain[startDotIdx + i], chain[startDotIdx], 1);
     }
   }
 
@@ -331,56 +328,45 @@ public:
     });
   }
 
-  void sinkLDSConverts(SmallVector<SmallVector<Operation *>> &dotChains,
-                       bool sinkLDSWr) {
-    for (auto chain : dotChains) {
-      for (int i = 0; i < chain.size(); i++) {
-        Operation *dotOp = chain[i];
-        Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
-        assert(isLDSRead(ldsRd));
-        moveBefore(ldsRd, dotOp);
-        if (sinkLDSWr) {
-          Operation *ldsWr = ldsRd->getOperand(0).getDefiningOp();
-          assert(isLDSWrite(ldsWr));
-          moveBefore(ldsWr, ldsRd);
-        }
+  void sinkLDSConverts(SmallVector<Operation *> &chain, bool sinkLDSWr) {
+    for (int i = 0; i < chain.size(); i++) {
+      Operation *dotOp = chain[i];
+      Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
+      assert(isLDSRead(ldsRd));
+      moveBefore(ldsRd, dotOp);
+      if (sinkLDSWr) {
+        Operation *ldsWr = ldsRd->getOperand(0).getDefiningOp();
+        assert(isLDSWrite(ldsWr));
+        moveBefore(ldsWr, ldsRd);
       }
     }
   }
 
-  void interleaveLoadsAndLDS(SmallVector<SmallVector<Operation *>> &dotChains) {
-    for (auto chain : dotChains) {
-      for (int i = 1; i < chain.size(); i++) {
-        Operation *dotOp = chain[i - 1];
-        Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
-        assert(isLDSRead(ldsRd));
+  void interleaveLoadsAndLDS(SmallVector<Operation *> &chain) {
+    for (int i = 1; i < chain.size(); i++) {
+      Operation *dotOp = chain[i - 1];
+      Operation *ldsRd = dotOp->getOperand(1).getDefiningOp();
+      assert(isLDSRead(ldsRd));
 
-        Operation *dotOpCurr = chain[i];
-        Operation *curr = dotOpCurr->getOperand(1).getDefiningOp();
-        while (!isa<tt::LoadOp>(curr)) {
-          curr = curr->getOperand(0).getDefiningOp();
-        }
-        moveBefore(curr, ldsRd);
+      Operation *dotOpCurr = chain[i];
+      Operation *curr = dotOpCurr->getOperand(1).getDefiningOp();
+      while (!isa<tt::LoadOp>(curr)) {
+        curr = curr->getOperand(0).getDefiningOp();
       }
+      moveBefore(curr, ldsRd);
     }
   }
 
-  void scheduleSlicedDot(ModuleOp m, int stages, bool sinkLDSRd, bool sinkLDSWr,
+  void scheduleSlicedDot(SmallVector<Operation *> chain, int stages,
+                         bool sinkLDSRd, bool sinkLDSWr,
                          bool interleaveLoadWithLDSOps) {
-    SmallVector<SmallVector<Operation *>> dotChains;
     int pipelineLoads = stages - 1;
 
-    findDotChains(m, dotChains);
-
-    if (dotChains.empty()) {
-      return;
-    }
-
     if (stages > 1)
-      doPipelining(dotChains, pipelineLoads);
+      doPipelining(chain, pipelineLoads);
 
     if (sinkLDSRd)
-      sinkLDSConverts(dotChains, sinkLDSWr);
+      sinkLDSConverts(chain, sinkLDSWr);
 
     // Arrange ops in CK-like manner.
     // k0 = load k0_ptrs
@@ -394,7 +380,7 @@ public:
     // k1_dot = cvt(k1, shared, dot)
     // dot1 = dot(q1_dot, k1_dot, dot0)
     if (interleaveLoadWithLDSOps && stages == 2) {
-      interleaveLoadsAndLDS(dotChains);
+      interleaveLoadsAndLDS(chain);
     }
   }
 
@@ -406,18 +392,27 @@ public:
     // TODO: Add some of these variables as autotunable parameters if needed.
     // At present, the optimal performance of FA fwd pass is achieved using the
     // following setup:
-    int stages = 4;
-    bool sinkLDSRd = false;
-    bool sinkLDSWr = false;
-    bool interleaveLoadWithLDSOps = false;
+    // int stages = 4;
+    // bool sinkLDSRd = false;
+    // bool sinkLDSWr = false;
+    // bool interleaveLoadWithLDSOps = false;
 
     // For CK-like FA fwd pass schedule of sliced dots use following configuration:
-    // int stages = 2;
-    // bool sinkLDSRd = true;
-    // bool sinkLDSWr = true;
-    // bool interleaveLoadWithLDSOps = true;
-    scheduleSlicedDot(m, stages, sinkLDSRd, sinkLDSWr,
-                      interleaveLoadWithLDSOps);
+    int stages = 2;
+    bool sinkLDSRd = true;
+    bool sinkLDSWr = true;
+    bool interleaveLoadWithLDSOps = true;
+
+    SmallVector<SmallVector<Operation *>> dotChains;
+    findDotChains(m, dotChains);
+    for (auto chain : dotChains) {
+      scheduleSlicedDot(chain, stages, sinkLDSRd, sinkLDSWr,
+                        interleaveLoadWithLDSOps);
+      stages = 4;
+      sinkLDSRd = false;
+      sinkLDSWr = false;
+      interleaveLoadWithLDSOps = false;
+    }
   }
 };
 

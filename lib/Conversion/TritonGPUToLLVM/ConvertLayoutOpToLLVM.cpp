@@ -1012,7 +1012,7 @@ private:
       //   which is 4 for fp16 and bfloat16 dtypes
       //
       // For mentioned types MFMA and MFMA operand layouts are the same
-      const unsigned vecSize = 4;
+      const unsigned vecSize = 8;
       Type vecTy = vec_ty(elemTy, vecSize);
       types = SmallVector<Type>(elems / vecSize, vecTy);
       for (unsigned i = 0; i < elems; i += vecSize) {

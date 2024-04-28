@@ -11,6 +11,8 @@ function set_env {
 	export HIP_FORCE_DEV_KERNARG=1
 	rocm-smi --setperfdeterminism 1900
 	sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing
+    sudo cpupower frequency-set -r -g performance
+    sudo cpupower idle-set -d 1
 }
 
 function reset_env {

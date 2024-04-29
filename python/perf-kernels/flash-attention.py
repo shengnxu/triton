@@ -137,13 +137,17 @@ def dropout_mask(philox_seed, philox_offset, dropout_p, m, n, stride):
     return rng_keep
 
 @triton.jit
-def load_fn(block_ptr, first, second, pad):
-    if first and second:
-        tensor = tl.load(block_ptr, boundary_check=(0,1), padding_option=pad)
-    elif first:
-        tensor = tl.load(block_ptr, boundary_check=(0,), padding_option=pad)
-    elif second:
-        tensor = tl.load(block_ptr, boundary_check=(1,), padding_option=pad)
+def load_fn(ptrs, offset_first, offset_second, boundary_first, boundary_second):
+    if offset_first is not None and offset_second is not None:
+        mask = (offset_first[:, None] < boundary_first) & 
+               (offset_second[None, :] < boundary_second)
+        tensor = tl.load(ptrs, mask=mask, other=0)
+    elif offset_first is not None:
+        mask = offset_first[:, None] < boundary_first
+        tensor = tl.load(ptrs, mask=mask, other=0)
+    elif second is not None:
+        mask = offset_second[None, :] < boundary_second
+        tensor = tl.load(ptrs, mask=mask, other=0)
     else:
         tensor = tl.load(block_ptr)
     return tensor
@@ -151,14 +155,15 @@ def load_fn(block_ptr, first, second, pad):
 @triton.jit
 def _attn_fwd_inner(
     acc, l_i, m_i, q,
-    K_block_ptr, V_block_ptr,
+    k_ptrs, v_ptrs,
+    stride_kk, stride_vk,
     start_m,
     actual_seqlen_k,
     actual_seqlen_q,
     dropout_p,
     philox_seed,
     batch_philox_offset,
-    encoded_softmax_block_ptr,
+    encoded_sm_ptrs,
     block_min, block_max,
     offs_n_causal,
     masked_blocks,
@@ -168,6 +173,7 @@ def _attn_fwd_inner(
     IS_CAUSAL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_DMODEL: tl.constexpr,
+    ACTUAL_BLOCK_DMODEL: tl.constexpr,
     BLOCK_N: tl.constexpr,
     OFFS_M: tl.constexpr,
     OFFS_N: tl.constexpr,
@@ -181,9 +187,14 @@ def _attn_fwd_inner(
     for start_n in range (block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
-        k = load_fn(K_block_ptr, PADDED_HEAD, MASK_STEPS and (n_extra_tokens != 0), "zero")
+        if MASK_STEPS:
+            kv_offs_nk = None if n_extra_tokens == 0 else start_n + tl.arange(0, BLOCK_N)
+        else:
+            kv_offs_nk = None
+        kv_offs_kn = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL)
+        k = load_fn(k_ptrs, kv_offs_kn, kv_offs_nk, ACTUAL_BLOCK_DMODEL, actual_seqlen_k)
         if PRE_LOAD_V:
-            v = load_fn(V_block_ptr, MASK_STEPS and (n_extra_tokens != 0), PADDED_HEAD, "zero")
+            v = load_fn(v_ptrs, kv_offs_nk, kv_offs_kn, actual_seqlen_k, ACTUAL_BLOCK_DMODEL)
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # We start from end of seqlen_k so only the first iteration would need
         # to be checked for padding if it is not a multiple of block_n
@@ -206,7 +217,11 @@ def _attn_fwd_inner(
         # -- compute qk ----
         qk += tl.dot(q, k)
         if bias_ptr is not None:
-            bias = load_fn(bias_ptr, False, MASK_STEPS and (n_extra_tokens != 0), "zero")
+            if MASK_STEPS:
+                bias_offs_n = None if n_extra_tokens == 0 else start_n + tl.arange(0, BLOCK_N)
+            else:
+                bias_offs_n = None
+            bias = load_fn(bias_ptr, OFFS_M, bias_offs_n, actual_seqlen_q, actual_seqlen_k)
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
@@ -214,16 +229,15 @@ def _attn_fwd_inner(
            
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
-            global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
-            global_n_positions = start_n + tl.arange(0, BLOCK_N)
+            global_m_positions = OFFS_M
+            global_n_positions = start_n + OFFS_N
 
             # Compute the relative position using the global positions
-            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
+            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k -
+                                 global_n_positions[None,:] - actual_seqlen_q
             relative_pos_block = tl.abs(relative_pos_block)
 
-
             alibi_block = -1 * alibi_slope  * relative_pos_block
-
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
         # softmax
@@ -237,27 +251,35 @@ def _attn_fwd_inner(
             philox_offset = batch_philox_offset + start_m * BLOCK_M * actual_seqlen_k + start_n - BLOCK_N
             keep = dropout_mask(philox_seed, philox_offset, dropout_p, BLOCK_M, BLOCK_N, actual_seqlen_k)
             if RETURN_ENCODED_SOFTMAX:
-                tl.store(encoded_softmax_block_ptr, tl.where(keep, p, -p).to(encoded_softmax_block_ptr.type.element_ty))
+                encoded_sm_mask = OFFS_M[:, None] < actual_seqlen_q &
+                                  start_n + OFFS_N[None, :] < actual_seqlen_k
+                tl.store(encoded_sm_ptrs, tl.where(keep, p, -p).to(encoded_sm_ptrs.type.element_ty),
+                         mask=mask)
             p = tl.where(keep, p, 0.0)
         elif RETURN_ENCODED_SOFTMAX:
-            tl.store(encoded_softmax_block_ptr, p.to(encoded_softmax_block_ptr.type.element_ty))
+            encoded_sm_mask = OFFS_M[:, None] < actual_seqlen_q &
+                              start_n + OFFS_N[None, :] < actual_seqlen_k
+            tl.store(encoded_sm_ptrs, tl.where(keep, p, -p).to(encoded_sm_ptrs.type.element_ty),
+                     mask=mask)
+            tl.store(encoded_sm_ptrs, p.to(encoded_sm_ptrs.type.element_ty))
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
         if not PRE_LOAD_V:
-            v = load_fn(V_block_ptr, MASK_STEPS and (n_extra_tokens != 0), PADDED_HEAD, "zero")
+            v = load_fn(v_ptrs, kv_offs_nk, kv_offs_kn, actual_seqlen_k, ACTUAL_BLOCK_DMODEL)
         # -- update m_i and l_i
         l_i = l_i * alpha + l_ij
         # update m_i and l_i
         m_i = m_ij
         acc += tl.dot(p.to(V_block_ptr.type.element_ty), v)
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+        k_ptrs += OFFS_N[None, :] * stride_kk
+        v_ptrs += OFFS_N[:, None] * stride_vk
         if bias_ptr is not None:
-            bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
+            bias_ptr += OFFS_N[None, :] * stride_bn
         if RETURN_ENCODED_SOFTMAX:
-            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i
+            # No need to multiply by stride as stride is 1 for this.
+            encoded_sm_ptrs += OFFS_N[None, :]
+    return acc, l_i, m_i, k_ptrs, v_ptrs, bias_ptrs, encoded_sm_ptrs
 
 @triton.autotune(
    configs=[
@@ -347,22 +369,17 @@ def attn_fwd(
         # the blocks that are all 0. We exit early.
         if n_blocks <= 0:
             o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
-            O_block_ptr = tl.make_block_ptr(
-                base=Out + o_offset,
-                shape=(seqlen_q, BLOCK_DMODEL),
-                strides=(stride_om, stride_on),
-                offsets=(start_m * BLOCK_M, 0),
-                block_shape=(BLOCK_M, BLOCK_DMODEL),
-                order=(1, 0)
-            )
+            o_ptrs = o_offset + offs_m[:, None] * stride_om + offs_k[None, :] * stride_on
             acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=Out.type.element_ty)
             # We still need to write 0s to the result
-            tl.store(O_block_ptr, acc.to(Out.type.element_ty), boundary_check=(0,1))
+            o_ptrs_mask = offs_m[:, None] < seqlen_q & offs_k[None, :] < ACTUAL_BLOCK_DMODEL
+            tl.store(o_ptrs, acc.to(Out.type.element_ty), mask=o_ptrs_mask)
             l_ptrs = L + off_z * HQ * MAX_SEQLENS_Q + off_h_q * MAX_SEQLENS_Q + offs_m
             # We store inf to LSE, not -inf because in the bwd pass, we subtract this
             # from qk which makes it -inf, such that exp(qk - inf) = 0 for these masked blocks.
             l = tl.full([BLOCK_M], value=float("inf"), dtype=tl.float32)
-            tl.store(l_ptrs, l)
+            l_ptrs_mask = offs_m < seqlen_q
+            tl.store(l_ptrs, l, mask=l_ptrs_mask)
             # TODO: Should dropout and return encoded softmax be handled here too?
             return
 
@@ -384,49 +401,26 @@ def attn_fwd(
     PADDED_HEAD:tl.constexpr = (ACTUAL_BLOCK_DMODEL != BLOCK_DMODEL)
 
     # Compute pointers for all the tensors used in this kernel.
+    # First, shift q start pointer to move forward to the batch, head and (if varlen)
+    # context that this WG will be using.
     q_offset = off_z * stride_qz +  off_h_q * stride_qh + cu_seqlens_q_start * stride_qm
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q + q_offset,
-        shape=(seqlen_q, ACTUAL_BLOCK_DMODEL),
-        strides=(stride_qm, stride_qk),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0)
-    )
+    # Next, use this offset as the base to create the slice of the tensor used by this WG.
+    q_ptrs = q_offset + offs_m[:, None] * stride_qm + offs_k[None, :] * stride_qk 
+    # Similarly, compute addrs for the K and V tensors
     k_offset = off_z * stride_kz + off_h_k * stride_kh + cu_seqlens_k_start * stride_kn
-    K_block_ptr = tl.make_block_ptr(
-        base=K + k_offset,
-        shape=(ACTUAL_BLOCK_DMODEL, seqlen_k),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_DMODEL, BLOCK_N),
-        order=(0, 1)
-    )
+    k_ptrs = k_offset + offs_k[:, None] * stride_kk + offs_n[None, :] * stride_kn
     v_offset = off_z * stride_vz + off_h_k * stride_vh + cu_seqlens_k_start * stride_vk
-    V_block_ptr = tl.make_block_ptr(
-        base=V + v_offset,
-        shape=(seqlen_k, ACTUAL_BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0)
-    )
+    v_ptrs = v_offset + offs_n[:, None] * stride_vk + offs_k[None, :] * stride_vn
     if BIAS_TYPE != 0:
-        b_offset = off_h_q * stride_bh # Note: this might get large enough to overflow on some configs
-        bias_ptr = tl.make_block_ptr(
-            base=bias + b_offset,
-            shape=(seqlen_q, seqlen_k),
-            strides=(stride_bm, stride_bn),
-            offsets=(start_m * BLOCK_M, 0),
-            block_shape=(BLOCK_M, BLOCK_N),
-            order=(1, 0),
-        )
+        # Note: this might get large enough to overflow on some configs
+        bias_offset = off_h_q * stride_bh 
+        bias_ptrs = bias_offset + offs_m[:, None] * stride_bm + offs_n[None, :] * stride_n
     else:
         bias_ptr = None
 
     if USE_ALIBI != 0:
-        a_offset = off_z * stride_az +  off_h_q * stride_ah 
-        alibi_slope = tl.load(alibi_slopes + a_offset)
+        alibi_offset = off_z * stride_az +  off_h_q * stride_ah 
+        alibi_slope = tl.load(alibi_slopes + alibi_offset)
     else:
         alibi_slope = None
 
@@ -438,16 +432,10 @@ def attn_fwd(
     # this case, we return an invalid pointer so indicate the mask is not valid.
     # TODO: Fix encoded softmax. It currently uses just h_q in the base offset.
     if RETURN_ENCODED_SOFTMAX:
-        encoded_softmax_block_ptr = tl.make_block_ptr(
-                base=encoded_softmax + off_h_q * seqlen_q * seqlen_k,
-                shape=(seqlen_q, seqlen_k),
-                strides=(seqlen_k, 1),
-                offsets=(start_m * BLOCK_M, 0),
-                block_shape=(BLOCK_M, BLOCK_N),
-                order=(1, 0)
-                )
+        encoded_sm_base = encoded_softmax + off_h_q * seqlen_q * seqlen_k
+        encoded_sm_ptrs = encoded_sm_base + offs_m[:, None] * seqlen_k + offs_n[None, :]
     else:
-        encoded_softmax_block_ptr = 0
+        encoded_sm_ptrs = 0
     # initialize pointer to m and l
     m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
     l_i = tl.full([BLOCK_M], 1.0, dtype=tl.float32)
@@ -456,7 +444,13 @@ def attn_fwd(
     # have native e^x support in HW.
     qk_scale = sm_scale * 1.44269504089
     # Q is loaded once at the beginning and shared by all N blocks.
-    q = load_fn(Q_block_ptr, True, PADDED_HEAD, "zero")
+    # We unconditionally mask the Q load along the sequence (M) dimension.
+    # There could be an optimization here to do this if Q is not a multiple of BLOCK_M
+    # But its value may be limited as we do not statically know this
+    q_ptrs_mask = offs_m[:, None] < seqlen_q
+    if PADDED_HEAD:
+        q_ptrs_mask = q_ptrs_mask & offs_k[None, :] < ACTUAL_BLOCK_DMODEL
+    q = tl.load(q_ptrs, mask=q_ptrs_mask, other=0)
     q = (q * qk_scale).to(Q_block_ptr.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
@@ -479,14 +473,14 @@ def attn_fwd(
     # value because there is no masking. Similarly we do not need padding.
     if n_full_blocks > 0:
         block_max = (n_blocks - masked_blocks) * BLOCK_N
-        acc, l_i, m_i = _attn_fwd_inner(
-            acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+        acc, l_i, m_i, k_ptrs, v_ptrs, bias_ptrs, encoded_sm_ptrs = _attn_fwd_inner(
+            acc, l_i, m_i, q, K_block_ptr, V_block_ptr, stride_kk, stride_vk,
             start_m, seqlen_k, seqlen_q,
-            dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+            dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
             # _, _, offs_n_causal, masked_blocks, n_extra_tokens, _
-            block_min, block_max, 0, 0, 0, bias_ptr, alibi_slope,
+            block_min, block_max, 0, 0, 0, bias_ptr, stride_bn, alibi_slope,
             # IS_CAUSAL, ....
-            False, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
+            False, BLOCK_M, BLOCK_DMODEL, ACTUAL_BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
             PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD
         )
@@ -500,19 +494,13 @@ def attn_fwd(
             offs_n_causal = offs_n + (seqlen_q - seqlen_k)
         else:
             offs_n_causal = 0
-        K_block_ptr = tl.advance(K_block_ptr, (0, n_full_blocks*BLOCK_N))
-        V_block_ptr = tl.advance(V_block_ptr, (n_full_blocks*BLOCK_N, 0))
-        if bias_ptr is not None:
-            bias_ptr = tl.advance(bias_ptr, (0, n_full_blocks*BLOCK_N))
-        if RETURN_ENCODED_SOFTMAX:
-            encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr,
-                                                   (0, n_full_blocks))
-        acc, l_i, m_i = _attn_fwd_inner(
-            acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+        acc, l_i, m_i, _, _, _, _ = _attn_fwd_inner(
+            acc, l_i, m_i, q, K_block_ptr, V_block_ptr, stride_kk, stride_vk,
             start_m, seqlen_k, seqlen_q,
-            dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
-            block_min, block_max, offs_n_causal, masked_blocks, n_extra_tokens, bias_ptr, alibi_slope,
-            IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
+            dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
+            block_min, block_max, offs_n_causal, masked_blocks, n_extra_tokens,
+            bias_ptr, stride_bn, alibi_slope,
+            IS_CAUSAL, BLOCK_M, BLOCK_DMODEL, ACTUAL_BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, MASK_STEPS, ...
             PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD
         )
@@ -542,26 +530,20 @@ def attn_fwd(
     overflow_size = end_m_idx - seqlen_q
     if overflow_size > 0:
         boundary = tl.full((BLOCK_M,), BLOCK_M - overflow_size, dtype=tl.int32)
-        # This is a > check because mask being 0 blocks the store.
-        l_ptrs_mask = boundary > tl.arange(0, BLOCK_M)
+        l_ptrs_mask = tl.arange(0, BLOCK_M) < boundary
         tl.store(l_ptrs, m_i + tl.math.log2(l_i), mask=l_ptrs_mask)
     else:
         tl.store(l_ptrs, m_i + tl.math.log2(l_i))
 
     # write back O
     o_offset = off_z * stride_oz + cu_seqlens_q_start * stride_om + off_h_q * stride_oh
-    O_block_ptr = tl.make_block_ptr(
-        base=Out + o_offset,
-        shape=(seqlen_q, ACTUAL_BLOCK_DMODEL),
-        strides=(stride_om, stride_on),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0)
-    )
-    # Need boundary check on this to make sure the padding from the
-    # Q and KV tensors in both dims are not part of what we store back.
-    # TODO: Do the boundary check optionally.
-    tl.store(O_block_ptr, acc, boundary_check=(0,1))
+    o_ptrs = o_offset + offs_m[:, None] * stride_om + offs_k[None, :] * stride_ok
+    o_ptrs_mask = tl.full([BLOCK_M, BLOCK_DMODEL], 1, dtype=tl.int32)
+    if overflow_size > 0:
+        o_ptrs_mask = offs_m[:, None] < seqlen_q
+    if PADDED_HEAD:
+        o_ptrs_mask = o_ptrs_mask & offs_k[None, :] < ACTUAL_BLOCK_DMODEL
+    tl.store(O_block_ptr, acc, mask=o_ptrs_mask)
 
 @triton.jit
 def _attn_bwd_preprocess(

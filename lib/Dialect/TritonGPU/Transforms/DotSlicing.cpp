@@ -35,6 +35,7 @@ namespace ttg = triton::gpu;
 #define GEN_PASS_CLASSES
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h.inc"
 
+static int br = 0;
 namespace {
 
 bool isElementwiseOp(Operation *op) {
@@ -347,44 +348,100 @@ struct TritonAMDGPUDotSlicingPass
     return false;
   }
 
-  tt::LoadOp getLoadInst(tt::DotOp dotOp, int operandIdx) {
-    auto dotOperand = dotOp.getOperand(operandIdx);
-    SmallVector<tt::LoadOp> loadOpsVec;
+  void findLoadOps(Operation *currOp, SmallVector<Operation *> &loadOpsVec,
+                   SmallVector<Operation *> &visitedOps) {
 
-    getOperation()->walk([&](tt::LoadOp loadOp) {
-      SetVector<Operation *> forwardSlices;
-      getForwardSlice((Operation *)loadOp, &forwardSlices);
-      if (std::find(forwardSlices.begin(), forwardSlices.end(),
-                    dotOperand.getDefiningOp()) != forwardSlices.end()) {
-        loadOpsVec.push_back(loadOp);
+    if (std::find(visitedOps.begin(), visitedOps.end(), currOp) !=
+        visitedOps.end()) {
+      return;
+    }
+
+    if (isa<tt::LoadOp>(currOp)) {
+      loadOpsVec.push_back(currOp);
+      return;
+    }
+
+    auto operands = currOp->getOperands();
+    if (operands.empty()) {
+      return;
+    }
+
+    for (int i = 0; i < operands.size(); i++) {
+      auto operandVal = operands[i];
+      Operation *argOp = operandVal.getDefiningOp();
+      if (!argOp) {
+        continue;
       }
-    });
+      findLoadOps(argOp, loadOpsVec, visitedOps);
+    }
 
-    // Currently, we expect the dot operand to depend only on one tensor
-    // from global memory (applicable for dot ops that don't depend on other dot
-    // ops). This condition can be lifted if necessary.
+    visitedOps.push_back(currOp);
+  }
+
+
+  void dependsOnPreviousDot(Operation *currOp, SmallVector<Operation *> &loadOpsVec,
+                   SmallVector<Operation *> &visitedOps) {
+
+    if (std::find(visitedOps.begin(), visitedOps.end(), currOp) !=
+        visitedOps.end()) {
+      return;
+    }
+
+    if (isa<tt::ReduceOp>(currOp)) {
+      loadOpsVec.push_back(currOp);
+      return;
+    }
+
+    auto operands = currOp->getOperands();
+    if (operands.empty()) {
+      return;
+    }
+
+    for (int i = 0; i < operands.size(); i++) {
+      auto operandVal = operands[i];
+      Operation *argOp = operandVal.getDefiningOp();
+      if (!argOp) {
+        continue;
+      }
+      dependsOnPreviousDot(argOp, loadOpsVec, visitedOps);
+    }
+
+    visitedOps.push_back(currOp);
+  }
+
+  Operation *getLoadInst(tt::DotOp dotOp, int operandIdx) {
+    auto dotOperand = dotOp.getOperand(operandIdx).getDefiningOp();
+    SmallVector<Operation*> loadOpsVec;
+    SmallVector<Operation*> visitedOps;
+
+    findLoadOps(dotOperand, loadOpsVec, visitedOps);
     assert(loadOpsVec.size() == 1);
     return loadOpsVec[0];
   }
 
-  bool dependsOnPreviousDot(tt::DotOp dotOp, int operandIdx) {
-    SetVector<Operation *> bwdSlices;
-    SmallVector<Operation *> filteredSlices;
-    Operation *operand = dotOp.getOperand(operandIdx).getDefiningOp();
-    // Seems like getBackwardSlice(dotOp, bwdSlices, filter) doesn't work
-    // properly. Do it manually.
-    getBackwardSlice(operand, &bwdSlices);
-    std::copy_if(bwdSlices.begin(), bwdSlices.end(),
-                 std::back_inserter(filteredSlices),
-                 [](Operation *op) { return isa<tt::DotOp>(op); });
+  // bool dependsOnPreviousDot(tt::DotOp dotOp, int operandIdx) {
+  //   SetVector<Operation *> bwdSlices;
+  //   SmallVector<Operation *> filteredSlices;
+  //   Operation *operand = dotOp.getOperand(operandIdx).getDefiningOp();
+  //   // Seems like getBackwardSlice(dotOp, bwdSlices, filter) doesn't work
+  //   // properly. Do it manually.
+  //   getBackwardSlice(operand, &bwdSlices);
+  //   std::copy_if(bwdSlices.begin(), bwdSlices.end(),
+  //                std::back_inserter(filteredSlices),
+  //                [](Operation *op) { return isa<tt::DotOp>(op); });
 
-    if (filteredSlices.empty()) {
-      return false;
-    }
-    return true;
-  }
+  //   if (filteredSlices.empty()) {
+  //     return false;
+  //   }
+  //   return true;
+  // }
 
   bool shouldSliceDot(tt::DotOp dotOp) {
+    // if(br == 0 || br == 1){
+    //   br += 1;
+    //   return true;
+    // }
+    // return false;
     auto dotOperand = dotOp.getOperand(0);
     auto dotATy = dotOperand.getType().cast<RankedTensorType>();
     auto kDim = dotATy.getShape()[1];
@@ -412,14 +469,23 @@ struct TritonAMDGPUDotSlicingPass
   }
 
   Operation *getFirstOpToSlice(tt::DotOp dotOp, int operandIdx) {
-    if (dependsOnPreviousDot(dotOp, operandIdx)) {
-      return dotOp.getOperand(operandIdx).getDefiningOp();
+    auto dotOperand = dotOp.getOperand(operandIdx).getDefiningOp();
+    SmallVector<Operation *> dotOps;
+    SmallVector<Operation *> visitedOps;
+    dependsOnPreviousDot(dotOperand, dotOps, visitedOps);
+
+    if (!dotOps.empty()) {
+      std::cout << "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" << std::endl;
+      return dotOperand;
     }
     return getLoadInst(dotOp, operandIdx);
   }
 
   void runOnOperation() override {
     getOperation()->walk([&](tt::DotOp dotOp) {
+      ModuleOp mod = getOperation();
+      // mod.dump();
+      
       if (!shouldSliceDot(dotOp)) {
         return;
       }
@@ -436,7 +502,7 @@ struct TritonAMDGPUDotSlicingPass
 
       auto firstOpToSliceA = getFirstOpToSlice(dotOp, 0);
       auto firstOpToSliceB = getFirstOpToSlice(dotOp, 1);
-
+      
       if (setLayoutForSlicing(firstOpToSliceA, /*operandIdx*/ 0)) {
         firstOpToSliceA = getFirstOpToSlice(dotOp, /*operandIdx*/ 0);
       }
@@ -446,11 +512,16 @@ struct TritonAMDGPUDotSlicingPass
       }
 
       for (int i = 0; i < numSlices; i++) {
+        builder.setInsertionPoint(firstOpToSliceA);
         auto slicedOperandA = getSlicedDotOperand(
             firstOpToSliceA, dotOp, 0, i, this->sliceKTile, builder, eraseOps);
+
+        builder.setInsertionPoint(firstOpToSliceB);
         auto slicedOperandB = getSlicedDotOperand(
             firstOpToSliceB, dotOp, 1, i, this->sliceKTile, builder, eraseOps);
 
+
+        builder.setInsertionPoint(dotOp);
         auto slicedDot = builder.create<tt::DotOp>(
             dotOp.getLoc(), dotResTy, slicedOperandA, slicedOperandB, slicedAcc,
             dotOp.getAllowTF32(), dotOp.getMaxNumImpreciseAcc());

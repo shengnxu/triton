@@ -53,6 +53,7 @@ int getMfmaVersion(MatrixCoreVersion matrixCoreVer) {
 }
 
 static bool isTransposeChainDotPattern(tt::DotOp &dotOp) {
+  return true;
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };

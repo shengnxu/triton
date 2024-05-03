@@ -92,24 +92,28 @@ def _attn_fwd(
     # So conversion is quite cheap
     q = (q * qk_scale).to(q.dtype)
     lo, hi = 0, N_CTX
+
+    k = tl.load(K_block_ptr)
+    qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+    qk += tl.dot(q, k)
+
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        k = tl.load(K_block_ptr)
-        if pre_load_v:
-            v = tl.load(V_block_ptr)
-        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        qk += tl.dot(q, k)
-        #qk = (qk * qk_scale)
+        if start_n != lo:
+            k = tl.load(K_block_ptr)
+            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+            qk += tl.dot(q, k)
+
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
         p = tl.math.exp2(qk)
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
-        if not pre_load_v:
-            v = tl.load(V_block_ptr)
+        
+        v = tl.load(V_block_ptr)
         acc += tl.dot(p.to(v.dtype), v)
         # -- update m_i and l_i
         l_ij = tl.sum(p, 1)
@@ -166,10 +170,10 @@ class _attention(torch.autograd.Function):
             ## For fp16, pick BLOCK_M=256, num_warps=8
             ## For fp8, pick BLOCK_M=128, num_warps=4
             ## TODO (zhanglx): add tuning infra for FA
-            BLOCK_M = 128 if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
+            BLOCK_M = 128 # if TORCH_HAS_FP8E4 and q.dtype == torch.float8_e4m3fnuz else 256
             BLOCK_N = 128
             waves_per_eu = 2
-            num_warps = BLOCK_M // 32
+            num_warps = 4
             num_stages = 1
             pre_load_v = False
             slice_k_tile = 32
@@ -264,21 +268,21 @@ HAS_FLASH = FLASH_VER is not None
 
 # vary seq length for fixed head and batch=4
 configs = []
-for dtype in ['fp16', 'bf16', 'fp8']:
+for dtype in ['fp16']:
     for D_HEAD in [128]:
         for causal in [False]:
             configs.append(triton.testing.Benchmark(
                 x_names=['BATCH', 'H','N_CTX'],
-                x_vals=[(16, 16, 1024),
-                        (8, 16, 2048),
-                        (4, 16, 4096),
-                        (2, 16, 8192),
-                        (1, 16, 16384),
-                        (4, 48, 1024),
-                        (4, 48, 2048),
+                x_vals=[#(16, 16, 1024),
+                        # (8, 16, 2048),
+                        # (4, 16, 4096),
+                        # (2, 16, 8192),
+                        # (1, 16, 16384),
+                        # (4, 48, 1024),
+                        # (4, 48, 2048),
                         (4, 48, 4096),
-                        (4, 48, 8192),
-                        (4, 48, 16384),
+                        # (4, 48, 8192),
+                        # (4, 48, 16384),
                         ],
                 line_arg='provider',
                 line_vals=['triton'],

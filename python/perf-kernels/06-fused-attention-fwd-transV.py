@@ -177,7 +177,7 @@ class _attention(torch.autograd.Function):
             num_stages = 1
             pre_load_v = False
             slice_k_tile = 32
-            kpack = 1
+            kpack = 2
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)

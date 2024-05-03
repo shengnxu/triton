@@ -134,7 +134,6 @@ def optimize_ttgir(mod, num_stages, num_warps, num_ctas, target, cluster_info, e
 
     pm.add_tritongpu_bypass_lds_for_dot_layout_pass()
 
-    pm.add_tritongpu_bypass_lds_for_dot_layout_pass()
     pm.add_tritonamdgpu_dot_slicing_pass(slice_k_tile)
 
 

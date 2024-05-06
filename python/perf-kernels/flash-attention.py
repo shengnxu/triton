@@ -237,14 +237,10 @@ def _attn_fwd_inner(
             # Compute the global position of each token within the sequence
             global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
-
             # Compute the relative position using the global positions
             relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
             relative_pos_block = tl.abs(relative_pos_block)
-
-
             alibi_block = -1 * alibi_slope  * relative_pos_block
-
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
         # softmax
@@ -278,22 +274,22 @@ def _attn_fwd_inner(
             bias_ptr = tl.advance(bias_ptr, (0, BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i, k_ptrs, v_ptrs
+    return acc, l_i, m_i
 
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
    ],
    key=['IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
    use_cuda_graph=True,
@@ -369,12 +365,12 @@ def attn_fwd(
         # If we have no blocks after adjusting for seqlen deltas, this WG is part of
         # the blocks that are all 0. We exit early.
         if n_blocks <= 0:
-            o_offset = Out + off_z * stride_om + off_h_q * stride_oh * stride_oz + cu_seqlens_q_start
+            o_offset = Out + off_z * stride_oz + off_h_q * stride_oh + cu_seqlens_q_start * stride_om
             o_ptrs = o_offset + offs_m[:, None] * stride_om + offs_d[None, :] * stride_on
             acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=Out.type.element_ty)
             o_ptrs_mask = offs_m[:, None] < seqlen_q
             # We still need to write 0s to the result
-            tl.store(o_ptrs, acc.to(Out.type.element_ty), mask=o_ptrs_mask)
+            tl.store(o_ptrs, acc, mask=o_ptrs_mask)
             # The tensor allocated for L is based on MAX_SEQLENS_Q as that is
             # statically known.
             l_ptrs = L + off_z * HQ * MAX_SEQLENS_Q + off_h_q * MAX_SEQLENS_Q + offs_m
@@ -481,7 +477,7 @@ def attn_fwd(
     # value because there is no masking. Similarly we do not need padding.
     if n_full_blocks > 0:
         block_max = (n_blocks - masked_blocks) * BLOCK_N
-        acc, l_i, m_i, k_ptrs, v_ptrs = _attn_fwd_inner(
+        acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, stride_kn, stride_vk,
             start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
@@ -502,14 +498,14 @@ def attn_fwd(
             offs_n_causal = offs_n + (seqlen_q - seqlen_k)
         else:
             offs_n_causal = 0
-        # k_ptrs += n_full_blocks * BLOCK_N * stride_kn
-        # v_ptrs += n_full_blocks * BLOCK_N * stride_vk
+        k_ptrs += n_full_blocks * BLOCK_N * stride_kn
+        v_ptrs += n_full_blocks * BLOCK_N * stride_vk
         if bias_ptr is not None:
             bias_ptr = tl.advance(bias_ptr, (0, n_full_blocks*BLOCK_N))
         if RETURN_ENCODED_SOFTMAX:
             encoded_softmax_block_ptr = tl.advance(encoded_softmax_block_ptr,
                                                    (0, n_full_blocks))
-        acc, l_i, m_i, k_ptrs, v_ptrs = _attn_fwd_inner(
+        acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, stride_kn, stride_vk,
             start_m, seqlen_k, seqlen_q,
             dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
@@ -1125,25 +1121,25 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
     return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [#(4, 48, 24, 1024, 1024, 64),
-                        #   (1, 24, 6, 8192, 8192, 64),
+                         [(4, 48, 24, 1024, 1024, 64),
+                          (1, 24, 6, 8192, 8192, 64),
                           (1, 4, 2, 16384, 16384, 128),
-                        #   (2, 16, 4, 1020, 987, 128),
-                        #   (2, 16, 4, 15498, 2, 128),
-                        #   (2, 16, 2, 7, 16219, 64),
-                        #   (4, 48, 12, 1, 1, 64),
-                        #   (4, 48, 48, 1, 1, 128),
-                        #   (4, 48, 24, 3, 3, 128),
-                        #   (4, 48, 48, 1001, 990, 64),
-                        #   (1, 8, 8, 8081, 7099, 64),
-                        #   (1, 4, 4, 16330, 15989, 128),
-                        #   (4, 4, 1, 1024, 1024, 33),
-                        #   (4, 4, 2, 65, 1018, 65),
-                        #   (4, 4, 4, 128, 128, 65),
-                        #   (4, 4, 4, 113, 123, 1),
+                          (2, 16, 4, 1020, 987, 128),
+                          (2, 16, 4, 15498, 2, 128),
+                          (2, 16, 2, 7, 16219, 64),
+                          (4, 48, 12, 1, 1, 64),
+                          (4, 48, 48, 1, 1, 128),
+                          (4, 48, 24, 3, 3, 128),
+                          (4, 48, 48, 1001, 990, 64),
+                          (1, 8, 8, 8081, 7099, 64),
+                          (1, 4, 4, 16330, 15989, 128),
+                          (4, 4, 1, 1024, 1024, 33),
+                          (4, 4, 2, 65, 1018, 65),
+                          (4, 4, 4, 128, 128, 65),
+                          (4, 4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [True])
-@pytest.mark.parametrize('use_alibi', [False])
+@pytest.mark.parametrize('causal', [False, True])
+@pytest.mark.parametrize('use_alibi', [True, False])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype)
@@ -1194,6 +1190,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
     # compare
     torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
     # print(f"err out = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
+    # print(f"tri out = {tri_out[0][1][0][0]}")
+    # print(f"ref out = {ref_out[0][1][0][0]}")
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
                          [(4, 48, 1024, 1024, 64),

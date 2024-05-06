@@ -285,10 +285,10 @@ def _attn_fwd_inner(
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
@@ -380,7 +380,7 @@ def attn_fwd(
             # We store inf to LSE, not -inf because in the bwd pass, we subtract this
             # from qk which makes it -inf, such that exp(qk - inf) = 0 for these masked blocks.
             l = tl.full([BLOCK_M], value=float("inf"), dtype=tl.float32)
-            l_ptrs_mask = offs_m[:, None] < MAX_SEQLENS_Q
+            l_ptrs_mask = offs_m < MAX_SEQLENS_Q
             tl.store(l_ptrs, l, mask=l_ptrs_mask)
             # TODO: Should dropout and return encoded softmax be handled here too?
             return
@@ -1125,8 +1125,8 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
                          [#(4, 48, 24, 1024, 1024, 64),
                         #   (1, 24, 6, 8192, 8192, 64),
-                        #   (1, 4, 2, 16384, 16384, 128),
-                          (2, 16, 4, 127, 1024, 128),
+                          (1, 4, 2, 16384, 16384, 128),
+                        #   (2, 16, 4, 1020, 987, 128),
                         #   (2, 16, 4, 15498, 2, 128),
                         #   (2, 16, 2, 7, 16219, 64),
                         #   (4, 48, 12, 1, 1, 64),
@@ -1140,7 +1140,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
                         #   (4, 4, 4, 128, 128, 65),
                         #   (4, 4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False])
+@pytest.mark.parametrize('causal', [True])
 @pytest.mark.parametrize('use_alibi', [False])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
     torch.manual_seed(20)
@@ -1155,9 +1155,6 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
     else:
         alibi = None
 
-    if TORCH_HAS_FP8E5:
-        q = q.to(torch_dtype)
-        k = k.to(torch_dtype)
     o = torch.empty_like(q)
 
     # triton implementation
@@ -1193,8 +1190,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
     # compare
-    #torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
-    print(f"err out = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
+    torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
+    # print(f"err out = {torch.max(torch.abs(tri_out) - torch.abs(ref_out))}")
 
 @pytest.mark.parametrize('Z, H, N_CTX_Q, N_CTX_K, D_HEAD',
                          [(4, 48, 1024, 1024, 64),

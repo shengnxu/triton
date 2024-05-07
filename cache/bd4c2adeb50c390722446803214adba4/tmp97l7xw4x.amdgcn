@@ -1,0 +1,3239 @@
+	.text
+	.amdgcn_target "amdgcn-amd-amdhsa--gfx942"
+	.globl	_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de
+	.p2align	8
+	.type	_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de,@function
+_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de:
+.Lfunc_begin0:
+	.cfi_sections .debug_frame
+	.cfi_startproc
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_nop 0
+	s_load_dwordx2 s[20:21], s[0:1], 0x34
+	s_load_dword s14, s[0:1], 0x44
+	s_load_dword s18, s[0:1], 0x68
+	v_lshrrev_b32_e32 v1, 6, v0
+	v_and_b32_e32 v4, 31, v0
+	s_waitcnt lgkmcnt(0)
+	s_mul_i32 s10, s16, s20
+	v_lshlrev_b32_e32 v2, 5, v1
+	s_lshl_b32 s15, s15, 7
+	s_ashr_i32 s11, s10, 31
+	s_ashr_i32 s9, s21, 31
+	s_ashr_i32 s17, s15, 31
+	s_lshl_b64 s[10:11], s[10:11], 1
+	v_or3_b32 v129, v2, v4, s15
+	s_add_u32 s2, s2, s10
+	s_mul_i32 s15, s17, s21
+	v_mul_lo_u32 v5, v129, s9
+	v_mad_u64_u32 v[2:3], s[20:21], v129, s21, 0
+	v_bfe_u32 v128, v0, 5, 1
+	s_addc_u32 s3, s3, s11
+	v_add3_u32 v3, v3, v5, s15
+	v_lshl_add_u64 v[2:3], v[2:3], 1, s[2:3]
+	v_lshlrev_b32_e32 v14, 4, v128
+	v_mov_b32_e32 v15, 0
+	v_lshl_add_u64 v[22:23], v[2:3], 0, v[14:15]
+	global_load_dwordx4 v[16:19], v[22:23], off
+	global_load_dwordx4 v[8:11], v[22:23], off offset:32
+	v_bfe_u32 v2, v0, 2, 4
+	v_lshlrev_b32_e32 v5, 3, v0
+	v_lshl_or_b32 v30, v1, 4, v2
+	v_and_b32_e32 v1, 24, v5
+	s_add_u32 s2, s4, s10
+	s_addc_u32 s3, s5, s11
+	v_lshlrev_b32_e32 v14, 1, v1
+	v_lshl_add_u64 v[24:25], s[2:3], 0, v[14:15]
+	v_mad_i64_i32 v[12:13], s[2:3], s14, v30, 0
+	v_or_b32_e32 v31, 64, v30
+	v_lshlrev_b64 v[26:27], 1, v[12:13]
+	v_mad_i64_i32 v[20:21], s[2:3], s14, v31, 0
+	v_lshl_add_u64 v[2:3], v[24:25], 0, v[26:27]
+	v_lshlrev_b64 v[28:29], 1, v[20:21]
+	global_load_dwordx4 v[32:35], v[2:3], off
+	v_lshl_add_u64 v[2:3], v[24:25], 0, v[28:29]
+	global_load_dwordx4 v[36:39], v[2:3], off
+	v_mov_b32_e32 v2, 0x3fb8aa3b
+	v_mul_f32_e32 v14, s8, v2
+	v_and_b32_e32 v2, 63, v0
+	v_cmp_lt_u32_e32 vcc, 31, v2
+	v_xor_b32_e32 v3, v5, v0
+	v_lshlrev_b32_e32 v98, 5, v30
+	v_cndmask_b32_e64 v2, 0, 1, vcc
+	v_lshlrev_b32_e32 v54, 3, v2
+	v_and_or_b32 v2, v3, 24, v98
+	v_lshl_add_u32 v126, v2, 1, 0
+	v_lshl_add_u64 v[2:3], v[24:25], 0, 64
+	v_lshl_add_u64 v[40:41], v[2:3], 0, v[26:27]
+	v_lshl_add_u64 v[2:3], v[2:3], 0, v[28:29]
+	v_lshlrev_b32_e32 v96, 5, v4
+	global_load_dwordx4 v[100:103], v[22:23], off offset:64
+	global_load_dwordx4 v[4:7], v[22:23], off offset:96
+	global_load_dwordx4 v[104:107], v[40:41], off
+	global_load_dwordx4 v[108:111], v[2:3], off
+	v_bfe_u32 v97, v0, 1, 2
+	v_lshlrev_b32_e32 v53, 3, v97
+	v_xor_b32_e32 v46, v54, v53
+	s_mov_b32 s3, 0
+	s_movk_i32 s2, 0x80
+	s_cmp_lt_i32 s18, 1
+	s_waitcnt vmcnt(5)
+	ds_write_b128 v126, v[32:35]
+	s_waitcnt vmcnt(4)
+	ds_write_b128 v126, v[36:39] offset:4096
+	v_cvt_f32_f16_e32 v2, v17
+	v_cvt_f32_f16_sdwa v3, v17 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v40, v16
+	v_cvt_f32_f16_sdwa v41, v16 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v48, v9
+	v_pk_mul_f32 v[2:3], v[14:15], v[2:3] op_sel_hi:[0,1]
+	v_cvt_f32_f16_sdwa v49, v9 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v50, v8
+	v_cvt_f32_f16_sdwa v51, v8 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v8, v11
+	v_cvt_f32_f16_sdwa v9, v11 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v11, v3
+	v_cvt_f16_f32_e32 v16, v2
+	v_cvt_f32_f16_e32 v42, v19
+	v_cvt_f32_f16_sdwa v43, v19 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v44, v18
+	v_pack_b32_f16 v81, v16, v11
+	v_or_b32_e32 v11, v46, v96
+	v_lshl_add_u32 v175, v11, 1, 0
+	v_cvt_f32_f16_sdwa v45, v18 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_read_b128 v[16:19], v175
+	ds_read_b128 v[62:65], v175 offset:2048
+	v_pk_mul_f32 v[2:3], v[14:15], v[40:41] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v3, v3
+	v_cvt_f16_f32_e32 v2, v2
+	v_cvt_f32_f16_e32 v52, v10
+	s_waitcnt vmcnt(2)
+	v_cvt_f32_f16_e32 v122, v7
+	v_cvt_f32_f16_sdwa v123, v7 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_pack_b32_f16 v80, v2, v3
+	v_pk_mul_f32 v[2:3], v[14:15], v[42:43] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v11, v3
+	v_cvt_f16_f32_e32 v55, v2
+	v_pk_mul_f32 v[2:3], v[14:15], v[44:45] op_sel_hi:[0,1]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[16:17], v[80:81], 0
+	v_cvt_f16_f32_e32 v3, v3
+	v_cvt_f16_f32_e32 v2, v2
+	v_or_b32_e32 v17, 16, v54
+	v_xor_b32_e32 v17, v17, v53
+	v_or_b32_e32 v17, v17, v96
+	v_pack_b32_f16 v116, v2, v3
+	v_pk_mul_f32 v[2:3], v[14:15], v[48:49] op_sel_hi:[0,1]
+	v_lshl_add_u32 v176, v17, 1, 0
+	v_pack_b32_f16 v117, v55, v11
+	v_cvt_f16_f32_e32 v11, v3
+	v_cvt_f16_f32_e32 v16, v2
+	v_pk_mul_f32 v[2:3], v[14:15], v[50:51] op_sel_hi:[0,1]
+	ds_read_b128 v[48:51], v176
+	v_mfma_f32_32x32x8_f16 v[32:47], v[18:19], v[116:117], v[32:47]
+	v_cvt_f16_f32_e32 v3, v3
+	v_cvt_f16_f32_e32 v2, v2
+	v_cvt_f32_f16_sdwa v53, v10 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_pack_b32_f16 v121, v16, v11
+	v_cvt_f32_f16_e32 v118, v102
+	v_pack_b32_f16 v120, v2, v3
+	v_pk_mul_f32 v[2:3], v[14:15], v[8:9] op_sel_hi:[0,1]
+	ds_read_b128 v[8:11], v176 offset:2048
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[48:49], v[120:121], v[32:47]
+	v_cvt_f16_f32_e32 v16, v3
+	v_cvt_f16_f32_e32 v17, v2
+	v_pk_mul_f32 v[2:3], v[14:15], v[52:53] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v3, v3
+	v_cvt_f16_f32_e32 v2, v2
+	v_pack_b32_f16 v131, v17, v16
+	v_cvt_f32_f16_sdwa v119, v102 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v124, v6
+	v_pack_b32_f16 v130, v2, v3
+	v_cvt_f32_f16_e32 v2, v101
+	v_cvt_f32_f16_sdwa v3, v101 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[32:47], v[50:51], v[130:131], v[32:47]
+	v_cvt_f32_f16_sdwa v125, v6 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_pk_mul_f32 v[2:3], v[14:15], v[2:3] op_sel_hi:[0,1]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[62:63], v[80:81], 0
+	v_mfma_f32_32x32x8_f16 v[48:63], v[64:65], v[116:117], v[48:63]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[8:9], v[120:121], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[10:11], v[130:131], v[48:63]
+	ds_read_b128 v[8:11], v175 offset:4096
+	ds_read_b128 v[16:19], v175 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[8:9], v[80:81], 0
+	v_mfma_f32_32x32x8_f16 v[64:79], v[10:11], v[116:117], v[64:79]
+	ds_read_b128 v[8:11], v176 offset:4096
+	ds_read_b128 v[112:115], v176 offset:6144
+	scratch_store_dwordx2 off, v[80:81], off offset:108
+	scratch_store_dwordx2 off, v[120:121], off offset:124
+	scratch_store_dwordx2 off, v[116:117], off offset:116
+	scratch_store_dwordx2 off, v[130:131], off offset:132
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	v_mfma_f32_32x32x8_f16 v[80:95], v[16:17], v[80:81], 0
+	s_waitcnt vmcnt(5) lgkmcnt(0)
+	ds_write_b128 v126, v[104:107]
+	s_waitcnt vmcnt(4)
+	ds_write_b128 v126, v[108:111] offset:4096
+	v_mfma_f32_32x32x8_f16 v[80:95], v[18:19], v[116:117], v[80:95]
+	v_cvt_f32_f16_e32 v116, v103
+	v_cvt_f32_f16_sdwa v117, v103 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_pk_mul_f32 v[108:109], v[14:15], v[116:117] op_sel_hi:[0,1]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[8:9], v[120:121], v[64:79]
+	v_cvt_f32_f16_e32 v8, v100
+	v_cvt_f32_f16_sdwa v9, v100 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[80:95], v[112:113], v[120:121], v[80:95]
+	v_cvt_f32_f16_e32 v112, v5
+	v_cvt_f32_f16_sdwa v113, v5 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v120, v4
+	v_cvt_f32_f16_sdwa v121, v4 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v4, v3
+	v_cvt_f16_f32_e32 v5, v2
+	v_pk_mul_f32 v[2:3], v[14:15], v[8:9] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v7, v3
+	v_cvt_f16_f32_e32 v99, v2
+	v_lshl_add_u64 v[2:3], v[24:25], 0, s[2:3]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[10:11], v[130:131], v[64:79]
+	s_movk_i32 s2, 0xc0
+	v_mfma_f32_32x32x8_f16 v[80:95], v[114:115], v[130:131], v[80:95]
+	v_pack_b32_f16 v131, v5, v4
+	v_lshl_add_u64 v[4:5], v[2:3], 0, v[26:27]
+	v_lshl_add_u64 v[2:3], v[2:3], 0, v[28:29]
+	global_load_dwordx4 v[8:11], v[4:5], off
+	global_load_dwordx4 v[16:19], v[2:3], off
+	global_load_dwordx4 v[100:103], v[22:23], off offset:128
+	s_nop 0
+	global_load_dwordx4 v[2:5], v[22:23], off offset:160
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_read_b128 v[104:107], v175
+	v_pack_b32_f16 v130, v99, v7
+	v_cvt_f16_f32_e32 v7, v109
+	v_cvt_f16_f32_e32 v99, v108
+	v_pk_mul_f32 v[108:109], v[14:15], v[118:119] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v114, v109
+	v_cvt_f16_f32_e32 v115, v108
+	ds_read_b128 v[108:111], v175 offset:2048
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[104:105], v[130:131], v[32:47]
+	v_pk_mul_f32 v[104:105], v[14:15], v[112:113] op_sel_hi:[0,1]
+	v_pack_b32_f16 v119, v99, v7
+	v_cvt_f16_f32_e32 v7, v105
+	v_cvt_f16_f32_e32 v99, v104
+	v_pk_mul_f32 v[104:105], v[14:15], v[120:121] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v105, v105
+	v_cvt_f16_f32_e32 v104, v104
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[108:109], v[130:131], v[48:63]
+	v_pack_b32_f16 v118, v115, v114
+	ds_read_b128 v[112:115], v176
+	v_pack_b32_f16 v140, v104, v105
+	v_pack_b32_f16 v141, v99, v7
+	v_pk_mul_f32 v[6:7], v[14:15], v[122:123] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v99, v7
+	v_cvt_f16_f32_e32 v116, v6
+	v_mfma_f32_32x32x8_f16 v[32:47], v[106:107], v[118:119], v[32:47]
+	ds_read_b128 v[104:107], v176 offset:2048
+	v_pk_mul_f32 v[6:7], v[14:15], v[124:125] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v7, v7
+	v_cvt_f16_f32_e32 v6, v6
+	v_pack_b32_f16 v143, v116, v99
+	v_pack_b32_f16 v142, v6, v7
+	v_mfma_f32_32x32x8_f16 v[48:63], v[110:111], v[118:119], v[48:63]
+	s_waitcnt vmcnt(1)
+	v_cvt_f32_f16_e32 v6, v101
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[104:105], v[140:141], v[48:63]
+	v_cvt_f32_f16_sdwa v7, v101 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	s_waitcnt vmcnt(0)
+	v_cvt_f32_f16_e32 v116, v2
+	v_cvt_f32_f16_sdwa v117, v2 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v2, v5
+	v_pk_mul_f32 v[6:7], v[14:15], v[6:7] op_sel_hi:[0,1]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[106:107], v[142:143], v[48:63]
+	ds_read_b128 v[104:107], v175 offset:4096
+	ds_read_b128 v[108:111], v175 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[104:105], v[130:131], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[108:109], v[130:131], v[80:95]
+	v_cvt_f32_f16_e32 v108, v103
+	v_cvt_f32_f16_sdwa v109, v103 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[32:47], v[112:113], v[140:141], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[106:107], v[118:119], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[110:111], v[118:119], v[80:95]
+	v_cvt_f32_f16_e32 v110, v102
+	v_cvt_f32_f16_sdwa v111, v102 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[32:47], v[114:115], v[142:143], v[32:47]
+	ds_read_b128 v[104:107], v176 offset:4096
+	ds_read_b128 v[112:115], v176 offset:6144
+	scratch_store_dwordx2 off, v[130:131], off offset:140
+	scratch_store_dwordx2 off, v[118:119], off offset:148
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_write_b128 v126, v[8:11]
+	ds_write_b128 v126, v[16:19] offset:4096
+	v_mfma_f32_32x32x8_f16 v[64:79], v[104:105], v[140:141], v[64:79]
+	v_cvt_f32_f16_e32 v104, v100
+	v_cvt_f32_f16_sdwa v105, v100 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v16, v6
+	v_lshl_add_u64 v[8:9], v[24:25], 0, s[2:3]
+	v_lshl_add_u64 v[10:11], v[8:9], 0, v[26:27]
+	v_lshl_add_u64 v[8:9], v[8:9], 0, v[28:29]
+	v_cvt_f32_f16_e32 v118, v4
+	v_mfma_f32_32x32x8_f16 v[80:95], v[112:113], v[140:141], v[80:95]
+	v_cvt_f32_f16_e32 v112, v3
+	v_cvt_f32_f16_sdwa v113, v3 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_sdwa v3, v5 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v5, v7
+	v_pk_mul_f32 v[6:7], v[14:15], v[104:105] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v28, v7
+	v_cvt_f16_f32_e32 v29, v6
+	v_pack_b32_f16 v145, v16, v5
+	global_load_dwordx4 v[16:19], v[10:11], off
+	global_load_dwordx4 v[24:27], v[8:9], off
+	global_load_dwordx4 v[100:103], v[22:23], off offset:192
+	s_nop 0
+	global_load_dwordx4 v[6:9], v[22:23], off offset:224
+	v_pk_mul_f32 v[10:11], v[14:15], v[108:109] op_sel_hi:[0,1]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[106:107], v[142:143], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_read_b128 v[104:107], v175
+	v_cvt_f16_f32_e32 v5, v11
+	v_cvt_f16_f32_e32 v22, v10
+	v_pk_mul_f32 v[10:11], v[14:15], v[110:111] op_sel_hi:[0,1]
+	ds_read_b128 v[108:111], v175 offset:2048
+	v_cvt_f16_f32_e32 v11, v11
+	v_cvt_f16_f32_e32 v10, v10
+	v_pack_b32_f16 v144, v29, v28
+	v_pack_b32_f16 v147, v22, v5
+	v_pk_mul_f32 v[2:3], v[14:15], v[2:3] op_sel_hi:[0,1]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[108:109], v[144:145], v[48:63]
+	v_pack_b32_f16 v146, v10, v11
+	v_pk_mul_f32 v[10:11], v[14:15], v[112:113] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v5, v11
+	v_cvt_f16_f32_e32 v22, v10
+	v_cvt_f32_f16_sdwa v119, v4 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v23, v2
+	v_pk_mul_f32 v[10:11], v[14:15], v[116:117] op_sel_hi:[0,1]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[114:115], v[142:143], v[80:95]
+	ds_read_b128 v[112:115], v176
+	v_pack_b32_f16 v149, v22, v5
+	v_cvt_f16_f32_e32 v22, v3
+	ds_read_b128 v[2:5], v176 offset:2048
+	v_cvt_f16_f32_e32 v11, v11
+	v_cvt_f16_f32_e32 v10, v10
+	v_pack_b32_f16 v151, v23, v22
+	v_mfma_f32_32x32x8_f16 v[48:63], v[110:111], v[146:147], v[48:63]
+	v_pack_b32_f16 v148, v10, v11
+	v_pk_mul_f32 v[10:11], v[14:15], v[118:119] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v11, v11
+	v_cvt_f16_f32_e32 v10, v10
+	v_pack_b32_f16 v150, v10, v11
+	v_mfma_f32_32x32x8_f16 v[32:47], v[104:105], v[144:145], v[32:47]
+	s_waitcnt vmcnt(1)
+	v_cvt_f32_f16_e32 v10, v103
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[2:3], v[148:149], v[48:63]
+	s_waitcnt vmcnt(0)
+	v_cvt_f32_f16_e32 v28, v7
+	v_cvt_f32_f16_sdwa v29, v7 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_sdwa v11, v103 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_e32 v22, v102
+	v_cvt_f32_f16_sdwa v23, v102 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[32:47], v[106:107], v[146:147], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[4:5], v[150:151], v[48:63]
+	ds_read_b128 v[2:5], v175 offset:4096
+	ds_read_b128 v[104:107], v175 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[2:3], v[144:145], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[4:5], v[146:147], v[64:79]
+	ds_read_b128 v[2:5], v176 offset:4096
+	ds_read_b128 v[108:111], v176 offset:6144
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_write_b128 v126, v[16:19]
+	scratch_store_dword off, v126, off offset:104
+	ds_write_b128 v126, v[24:27] offset:4096
+	v_mfma_f32_32x32x8_f16 v[64:79], v[2:3], v[148:149], v[64:79]
+	v_cvt_f32_f16_e32 v2, v101
+	v_cvt_f32_f16_sdwa v3, v101 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	v_pk_mul_f32 v[2:3], v[14:15], v[2:3] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v7, v3
+	v_mfma_f32_32x32x8_f16 v[64:79], v[4:5], v[150:151], v[64:79]
+	v_cvt_f32_f16_e32 v4, v100
+	v_cvt_f32_f16_sdwa v5, v100 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f16_f32_e32 v16, v2
+	v_cvt_f32_f16_e32 v100, v6
+	v_cvt_f32_f16_sdwa v101, v6 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_pk_mul_f32 v[2:3], v[14:15], v[4:5] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v17, v3
+	v_mfma_f32_32x32x8_f16 v[32:47], v[112:113], v[148:149], v[32:47]
+	v_cvt_f16_f32_e32 v18, v2
+	ds_read_b128 v[2:5], v175
+	v_pack_b32_f16 v153, v16, v7
+	v_pk_mul_f32 v[6:7], v[14:15], v[10:11] op_sel_hi:[0,1]
+	v_pack_b32_f16 v152, v18, v17
+	ds_read_b128 v[16:19], v175 offset:2048
+	v_cvt_f16_f32_e32 v7, v7
+	v_mfma_f32_32x32x8_f16 v[32:47], v[114:115], v[150:151], v[32:47]
+	v_cvt_f16_f32_e32 v11, v6
+	v_cvt_f32_f16_e32 v6, v9
+	v_cvt_f32_f16_e32 v10, v8
+	v_pack_b32_f16 v155, v11, v7
+	v_cvt_f32_f16_sdwa v7, v9 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_cvt_f32_f16_sdwa v11, v8 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
+	v_mfma_f32_32x32x8_f16 v[80:95], v[104:105], v[144:145], v[80:95]
+	v_pk_mul_f32 v[10:11], v[14:15], v[10:11] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v11, v11
+	v_cvt_f16_f32_e32 v10, v10
+	v_pack_b32_f16 v158, v10, v11
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[2:3], v[152:153], v[32:47]
+	v_pk_mul_f32 v[2:3], v[14:15], v[22:23] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v3, v3
+	v_cvt_f16_f32_e32 v2, v2
+	v_pk_mul_f32 v[22:23], v[14:15], v[100:101] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v23, v23
+	v_cvt_f16_f32_e32 v22, v22
+	v_pack_b32_f16 v154, v2, v3
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[16:17], v[152:153], v[48:63]
+	v_pk_mul_f32 v[2:3], v[14:15], v[28:29] op_sel_hi:[0,1]
+	v_cvt_f16_f32_e32 v24, v3
+	v_cvt_f16_f32_e32 v25, v2
+	v_pack_b32_f16 v156, v22, v23
+	v_pk_mul_f32 v[22:23], v[14:15], v[6:7] op_sel_hi:[0,1]
+	ds_read_b128 v[6:9], v176 offset:2048
+	v_pack_b32_f16 v157, v25, v24
+	v_mfma_f32_32x32x8_f16 v[80:95], v[106:107], v[146:147], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[4:5], v[154:155], v[32:47]
+	ds_read_b128 v[2:5], v176
+	v_mfma_f32_32x32x8_f16 v[48:63], v[18:19], v[154:155], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[108:109], v[148:149], v[80:95]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[2:3], v[156:157], v[32:47]
+	v_cvt_f16_f32_e32 v2, v23
+	v_cvt_f16_f32_e32 v3, v22
+	v_pack_b32_f16 v159, v3, v2
+	v_mfma_f32_32x32x8_f16 v[48:63], v[6:7], v[156:157], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[110:111], v[150:151], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[4:5], v[158:159], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[8:9], v[158:159], v[48:63]
+	ds_read_b128 v[2:5], v175 offset:4096
+	ds_read_b128 v[6:9], v175 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[2:3], v[152:153], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[6:7], v[152:153], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[4:5], v[154:155], v[64:79]
+	ds_read_b128 v[2:5], v176 offset:4096
+	ds_read_b128 v[16:19], v176 offset:6144
+	v_mfma_f32_32x32x8_f16 v[80:95], v[8:9], v[154:155], v[80:95]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[2:3], v[156:157], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[16:17], v[156:157], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[4:5], v[158:159], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[18:19], v[158:159], v[80:95]
+	s_cbranch_scc1 .LBB0_6
+	v_lshrrev_b32_e32 v2, 1, v0
+	v_or_b32_e32 v3, 4, v1
+	v_and_b32_e32 v2, 12, v2
+	v_xor_b32_e32 v1, v2, v1
+	v_xor_b32_e32 v2, v3, v2
+	v_or_b32_e32 v2, v98, v2
+	v_or_b32_e32 v1, v98, v1
+	v_lshlrev_b32_e32 v2, 1, v2
+	v_lshlrev_b32_e32 v1, 1, v1
+	v_add_u32_e32 v3, 0, v2
+	s_add_i32 s8, 0, 0x2000
+	scratch_store_dword off, v129, off offset:160
+	scratch_store_dword off, v128, off offset:156
+	v_lshlrev_b32_e32 v4, 2, v0
+	scratch_store_dword off, v3, off offset:8
+	v_add_u32_e32 v3, s8, v1
+	v_xor_b32_e32 v4, 0x80, v4
+	scratch_store_dword off, v3, off offset:12
+	v_add_u32_e32 v3, s8, v2
+	s_add_i32 s9, 0, 0x4000
+	s_add_i32 s16, 0, 0x6000
+	scratch_store_dword off, v4, off offset:4
+	v_add_u32_e32 v4, 0, v1
+	scratch_store_dword off, v3, off offset:16
+	v_add_u32_e32 v3, s9, v1
+	v_add_u32_e32 v1, s16, v1
+	scratch_store_dword off, v1, off offset:28
+	v_add_u32_e32 v1, s16, v2
+	scratch_store_dword off, v3, off offset:20
+	v_add_u32_e32 v3, s9, v2
+	scratch_store_dword off, v1, off offset:32
+	v_cndmask_b32_e64 v1, 0, 4, vcc
+	v_lshlrev_b32_e32 v5, 2, v97
+	scratch_store_dword off, v4, off offset:100
+	scratch_store_dword off, v3, off offset:24
+	v_or_b32_e32 v2, 8, v1
+	v_or_b32_e32 v3, 16, v1
+	v_or_b32_e32 v4, 24, v1
+	v_xor_b32_e32 v1, v1, v5
+	v_or_b32_e32 v1, v1, v96
+	v_xor_b32_e32 v2, v2, v5
+	v_or_b32_e32 v2, v2, v96
+	v_xor_b32_e32 v3, v3, v5
+	v_lshlrev_b32_e32 v1, 1, v1
+	v_or_b32_e32 v3, v3, v96
+	v_xor_b32_e32 v4, v4, v5
+	v_add_u32_e32 v5, 0, v1
+	v_lshlrev_b32_e32 v2, 1, v2
+	v_or_b32_e32 v4, v4, v96
+	scratch_store_dword off, v5, off offset:36
+	v_add_u32_e32 v5, 0, v2
+	v_lshlrev_b32_e32 v3, 1, v3
+	scratch_store_dword off, v5, off offset:40
+	v_add_u32_e32 v5, 0, v3
+	v_lshlrev_b32_e32 v4, 1, v4
+	scratch_store_dword off, v5, off offset:44
+	v_add_u32_e32 v5, 0, v4
+	scratch_store_dword off, v5, off offset:48
+	v_add_u32_e32 v5, s8, v1
+	scratch_store_dword off, v5, off offset:52
+	v_add_u32_e32 v5, s8, v2
+	scratch_store_dword off, v5, off offset:56
+	v_add_u32_e32 v5, s8, v3
+	scratch_store_dword off, v5, off offset:60
+	v_add_u32_e32 v5, s8, v4
+	scratch_store_dword off, v5, off offset:64
+	v_add_u32_e32 v5, s9, v1
+	v_add_u32_e32 v1, s16, v1
+	scratch_store_dword off, v5, off offset:68
+	v_add_u32_e32 v5, s9, v2
+	scratch_store_dword off, v1, off offset:84
+	v_add_u32_e32 v1, s16, v2
+	scratch_store_dword off, v5, off offset:72
+	v_add_u32_e32 v5, s9, v3
+	scratch_store_dword off, v1, off offset:88
+	v_add_u32_e32 v1, s16, v3
+	scratch_store_dword off, v5, off offset:76
+	v_add_u32_e32 v5, s9, v4
+	scratch_store_dword off, v1, off offset:92
+	v_add_u32_e32 v1, s16, v4
+	scratch_store_dword off, v5, off offset:80
+	scratch_store_dword off, v1, off offset:96
+	scratch_load_dword v136, off, off offset:4
+	scratch_load_dword v137, off, off offset:96
+	s_load_dword s2, s[0:1], 0x50
+	v_and_b32_e32 v0, 3, v0
+	v_lshlrev_b32_e32 v0, 4, v0
+	v_mov_b32_e32 v1, 0
+	v_lshl_add_u64 v[2:3], v[12:13], 1, v[0:1]
+	v_lshl_add_u64 v[160:161], s[4:5], 0, v[2:3]
+	v_lshl_add_u64 v[2:3], v[20:21], 1, v[0:1]
+	v_lshl_add_u64 v[162:163], s[4:5], 0, v[2:3]
+	s_waitcnt lgkmcnt(0)
+	v_mad_i64_i32 v[2:3], s[4:5], s2, v31, 0
+	v_lshl_add_u64 v[2:3], v[2:3], 1, v[0:1]
+	v_lshl_add_u64 v[164:165], s[6:7], 0, v[2:3]
+	v_mad_i64_i32 v[2:3], s[4:5], s2, v30, 0
+	s_ashr_i32 s15, s14, 31
+	v_lshl_add_u64 v[2:3], v[2:3], 1, v[0:1]
+	s_lshl_b64 s[8:9], s[14:15], 8
+	v_lshl_add_u64 v[166:167], s[6:7], 0, v[2:3]
+	v_mov_b32_e32 v203, 0xff800000
+	v_mov_b32_e32 v138, 1.0
+	s_movk_i32 s2, 0x100
+	s_mov_b32 s4, s3
+	v_mov_b32_e32 v0, v1
+	v_mov_b32_e32 v2, v1
+	v_mov_b32_e32 v3, v1
+	v_mov_b32_e32 v4, v1
+	v_mov_b32_e32 v5, v1
+	v_mov_b32_e32 v6, v1
+	v_mov_b32_e32 v7, v1
+	v_mov_b32_e32 v8, v1
+	v_mov_b32_e32 v9, v1
+	v_mov_b32_e32 v10, v1
+	v_mov_b32_e32 v11, v1
+	v_mov_b32_e32 v12, v1
+	v_mov_b32_e32 v13, v1
+	v_mov_b32_e32 v14, v1
+	v_mov_b32_e32 v15, v1
+	v_mov_b32_e32 v16, v1
+	v_mov_b32_e32 v17, v1
+	v_mov_b32_e32 v18, v1
+	v_mov_b32_e32 v19, v1
+	v_mov_b32_e32 v20, v1
+	v_mov_b32_e32 v21, v1
+	v_mov_b32_e32 v22, v1
+	v_mov_b32_e32 v23, v1
+	v_mov_b32_e32 v24, v1
+	v_mov_b32_e32 v25, v1
+	v_mov_b32_e32 v26, v1
+	v_mov_b32_e32 v27, v1
+	v_mov_b32_e32 v28, v1
+	v_mov_b32_e32 v29, v1
+	v_mov_b32_e32 v30, v1
+	v_mov_b32_e32 v31, v1
+	v_mov_b32_e32 v96, v1
+	v_mov_b32_e32 v97, v1
+	v_mov_b32_e32 v98, v1
+	v_mov_b32_e32 v99, v1
+	v_mov_b32_e32 v100, v1
+	v_mov_b32_e32 v101, v1
+	v_mov_b32_e32 v102, v1
+	v_mov_b32_e32 v103, v1
+	v_mov_b32_e32 v104, v1
+	v_mov_b32_e32 v105, v1
+	v_mov_b32_e32 v106, v1
+	v_mov_b32_e32 v107, v1
+	v_mov_b32_e32 v108, v1
+	v_mov_b32_e32 v109, v1
+	v_mov_b32_e32 v110, v1
+	v_mov_b32_e32 v111, v1
+	v_mov_b32_e32 v112, v1
+	v_mov_b32_e32 v113, v1
+	v_mov_b32_e32 v114, v1
+	v_mov_b32_e32 v115, v1
+	v_mov_b32_e32 v116, v1
+	v_mov_b32_e32 v117, v1
+	v_mov_b32_e32 v118, v1
+	v_mov_b32_e32 v119, v1
+	v_mov_b32_e32 v120, v1
+	v_mov_b32_e32 v121, v1
+	v_mov_b32_e32 v122, v1
+	v_mov_b32_e32 v123, v1
+	v_mov_b32_e32 v124, v1
+	v_mov_b32_e32 v125, v1
+	v_mov_b32_e32 v126, v1
+	v_mov_b32_e32 v127, v1
+	s_cmp_eq_u32 s4, 0
+	s_cbranch_scc1 .LBB0_3
+.LBB0_2:
+	v_lshl_add_u64 v[168:169], v[160:161], 0, s[10:11]
+	v_lshl_add_u64 v[170:171], v[162:163], 0, s[10:11]
+	global_load_dwordx4 v[32:35], v[168:169], off
+	global_load_dwordx4 v[36:39], v[170:171], off
+	global_load_dwordx4 v[204:207], v[168:169], off offset:64
+	global_load_dwordx4 v[208:211], v[170:171], off offset:64
+	scratch_load_dword v128, off, off offset:104
+	s_waitcnt vmcnt(0)
+	ds_write_b128 v128, v[32:35]
+	ds_write_b128 v128, v[36:39] offset:4096
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_read_b128 v[212:215], v175
+	ds_read_b128 v[216:219], v175 offset:2048
+	scratch_load_dwordx2 v[80:81], off, off offset:108
+	ds_read_b128 v[220:223], v175 offset:4096
+	ds_read_b128 v[224:227], v175 offset:6144
+	scratch_load_dwordx2 v[130:131], off, off offset:116
+	s_waitcnt vmcnt(1) lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[212:213], v[80:81], 0
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[216:217], v[80:81], 0
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[220:221], v[80:81], 0
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[224:225], v[80:81], 0
+	s_waitcnt vmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[214:215], v[130:131], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[218:219], v[130:131], v[48:63]
+	ds_read_b128 v[212:215], v176
+	ds_read_b128 v[216:219], v176 offset:2048
+	v_mfma_f32_32x32x8_f16 v[64:79], v[222:223], v[130:131], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[226:227], v[130:131], v[80:95]
+	scratch_load_dwordx2 v[130:131], off, off offset:124
+	ds_read_b128 v[220:223], v176 offset:4096
+	ds_read_b128 v[224:227], v176 offset:6144
+	scratch_load_dwordx2 v[132:133], off, off offset:132
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_write_b128 v128, v[204:207]
+	ds_write_b128 v128, v[208:211] offset:4096
+	global_load_dwordx4 v[204:207], v[168:169], off offset:128
+	global_load_dwordx4 v[208:211], v[170:171], off offset:128
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt vmcnt(3) lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[212:213], v[130:131], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[216:217], v[130:131], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[220:221], v[130:131], v[64:79]
+	s_waitcnt vmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[214:215], v[132:133], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[218:219], v[132:133], v[48:63]
+	ds_read_b128 v[212:215], v175
+	ds_read_b128 v[216:219], v175 offset:2048
+	v_mfma_f32_32x32x8_f16 v[80:95], v[224:225], v[130:131], v[80:95]
+	scratch_load_dwordx2 v[130:131], off, off offset:140
+	v_mfma_f32_32x32x8_f16 v[64:79], v[222:223], v[132:133], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[226:227], v[132:133], v[80:95]
+	scratch_load_dwordx2 v[132:133], off, off offset:148
+	s_waitcnt vmcnt(1) lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[212:213], v[130:131], v[32:47]
+	s_waitcnt vmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[214:215], v[132:133], v[32:47]
+	ds_read_b128 v[212:215], v176
+	ds_read_b128 v[220:223], v176 offset:2048
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[216:217], v[130:131], v[48:63]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[212:213], v[140:141], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[218:219], v[132:133], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[214:215], v[142:143], v[32:47]
+	ds_read_b128 v[212:215], v175 offset:4096
+	ds_read_b128 v[216:219], v175 offset:6144
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[220:221], v[140:141], v[48:63]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[212:213], v[130:131], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[222:223], v[142:143], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[214:215], v[132:133], v[64:79]
+	ds_read_b128 v[212:215], v176 offset:4096
+	ds_read_b128 v[220:223], v176 offset:6144
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_write_b128 v128, v[204:207]
+	ds_write_b128 v128, v[208:211] offset:4096
+	global_load_dwordx4 v[204:207], v[168:169], off offset:192
+	s_nop 0
+	global_load_dwordx4 v[168:171], v[170:171], off offset:192
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[212:213], v[140:141], v[64:79]
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[214:215], v[142:143], v[64:79]
+	ds_read_b128 v[208:211], v175
+	ds_read_b128 v[212:215], v175 offset:2048
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[208:209], v[144:145], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[216:217], v[130:131], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[210:211], v[146:147], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[218:219], v[132:133], v[80:95]
+	ds_read_b128 v[208:211], v176
+	ds_read_b128 v[216:219], v176 offset:2048
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[212:213], v[144:145], v[48:63]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[208:209], v[148:149], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[214:215], v[146:147], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[220:221], v[140:141], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[210:211], v[150:151], v[32:47]
+	ds_read_b128 v[208:211], v175 offset:4096
+	ds_read_b128 v[212:215], v175 offset:6144
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[48:63], v[216:217], v[148:149], v[48:63]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[208:209], v[144:145], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[222:223], v[142:143], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[218:219], v[150:151], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[210:211], v[146:147], v[64:79]
+	ds_read_b128 v[208:211], v176 offset:4096
+	ds_read_b128 v[216:219], v176 offset:6144
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt vmcnt(1) lgkmcnt(0)
+	ds_write_b128 v128, v[204:207]
+	s_waitcnt vmcnt(0)
+	ds_write_b128 v128, v[168:171] offset:4096
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	ds_read_b128 v[168:171], v175
+	ds_read_b128 v[204:207], v175 offset:2048
+	v_mfma_f32_32x32x8_f16 v[80:95], v[212:213], v[144:145], v[80:95]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[168:169], v[152:153], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[208:209], v[148:149], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[214:215], v[146:147], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[170:171], v[154:155], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[210:211], v[150:151], v[64:79]
+	ds_read_b128 v[168:171], v176
+	ds_read_b128 v[208:211], v176 offset:2048
+	v_mfma_f32_32x32x8_f16 v[80:95], v[216:217], v[148:149], v[80:95]
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[32:47], v[168:169], v[156:157], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[204:205], v[152:153], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[218:219], v[150:151], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[32:47], v[170:171], v[158:159], v[32:47]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[206:207], v[154:155], v[48:63]
+	ds_read_b128 v[168:171], v175 offset:4096
+	ds_read_b128 v[204:207], v175 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[168:169], v[152:153], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[204:205], v[152:153], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[208:209], v[156:157], v[48:63]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[170:171], v[154:155], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[206:207], v[154:155], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[48:63], v[210:211], v[158:159], v[48:63]
+	ds_read_b128 v[168:171], v176 offset:4096
+	ds_read_b128 v[208:211], v176 offset:6144
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[64:79], v[168:169], v[156:157], v[64:79]
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[80:95], v[208:209], v[156:157], v[80:95]
+	v_mfma_f32_32x32x8_f16 v[64:79], v[170:171], v[158:159], v[64:79]
+	v_mfma_f32_32x32x8_f16 v[80:95], v[210:211], v[158:159], v[80:95]
+.LBB0_3:
+	v_max_f32_e32 v168, v33, v33
+	v_max_f32_e32 v169, v32, v32
+	v_max_f32_e32 v168, v169, v168
+	v_max3_f32 v168, v168, v34, v35
+	v_max3_f32 v168, v168, v36, v37
+	v_max3_f32 v168, v168, v38, v39
+	v_max3_f32 v168, v168, v40, v41
+	v_max3_f32 v168, v168, v42, v43
+	v_max3_f32 v168, v168, v44, v45
+	v_max3_f32 v168, v168, v46, v47
+	v_max3_f32 v168, v168, v48, v49
+	v_max3_f32 v168, v168, v50, v51
+	v_max3_f32 v168, v168, v52, v53
+	v_max3_f32 v168, v168, v54, v55
+	v_max3_f32 v168, v168, v56, v57
+	v_lshl_add_u64 v[170:171], v[166:167], 0, s[10:11]
+	v_max3_f32 v204, v168, v58, v59
+	v_lshl_add_u64 v[168:169], v[164:165], 0, s[10:11]
+	global_load_dwordx4 v[206:209], v[170:171], off
+	global_load_dwordx4 v[210:213], v[168:169], off
+	global_load_dwordx4 v[214:217], v[170:171], off offset:64
+	global_load_dwordx4 v[218:221], v[168:169], off offset:64
+	global_load_dwordx4 v[222:225], v[170:171], off offset:128
+	global_load_dwordx4 v[226:229], v[168:169], off offset:128
+	global_load_dwordx4 v[230:233], v[170:171], off offset:192
+	global_load_dwordx4 v[234:237], v[168:169], off offset:192
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	scratch_load_dword v128, off, off offset:100
+	v_max3_f32 v204, v204, v60, v61
+	v_max3_f32 v204, v204, v62, v63
+	v_max3_f32 v204, v204, v64, v65
+	v_max3_f32 v168, v204, v66, v67
+	v_max3_f32 v168, v168, v68, v69
+	v_max3_f32 v168, v168, v70, v71
+	v_max3_f32 v168, v168, v72, v73
+	v_max3_f32 v168, v168, v74, v75
+	v_max3_f32 v168, v168, v76, v77
+	v_max3_f32 v168, v168, v78, v79
+	v_max3_f32 v168, v168, v80, v81
+	v_max3_f32 v168, v168, v82, v83
+	v_max3_f32 v168, v168, v84, v85
+	v_max3_f32 v168, v168, v86, v87
+	v_max3_f32 v168, v168, v88, v89
+	v_max3_f32 v168, v168, v90, v91
+	v_max3_f32 v168, v168, v92, v93
+	v_max3_f32 v168, v168, v94, v95
+	s_waitcnt vmcnt(10)
+	ds_bpermute_b32 v169, v136, v168
+	s_addk_i32 s4, 0x80
+	v_lshl_add_u64 v[160:161], v[160:161], 0, s[8:9]
+	v_lshl_add_u64 v[162:163], v[162:163], 0, s[8:9]
+	v_lshl_add_u64 v[164:165], v[164:165], 0, s[2:3]
+	s_waitcnt lgkmcnt(0)
+	v_max3_f32 v170, v203, v168, v169
+	v_sub_f32_e32 v168, v203, v170
+	v_exp_f32_e32 v168, v168
+	v_sub_f32_e32 v35, v35, v170
+	v_sub_f32_e32 v34, v34, v170
+	v_exp_f32_e32 v171, v34
+	v_pk_mul_f32 v[126:127], v[126:127], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[124:125], v[124:125], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[122:123], v[122:123], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[120:121], v[120:121], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[118:119], v[118:119], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[116:117], v[116:117], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[114:115], v[114:115], v[168:169] op_sel_hi:[1,0]
+	v_exp_f32_e32 v169, v35
+	v_sub_f32_e32 v33, v33, v170
+	v_sub_f32_e32 v32, v32, v170
+	v_sub_f32_e32 v39, v39, v170
+	v_sub_f32_e32 v38, v38, v170
+	v_cvt_f16_f32_e32 v203, v169
+	v_cvt_f16_f32_e32 v204, v171
+	v_exp_f32_e32 v242, v33
+	v_exp_f32_e32 v243, v32
+	v_exp_f32_e32 v244, v39
+	v_exp_f32_e32 v245, v38
+	v_pack_b32_f16 v239, v204, v203
+	v_cvt_f16_f32_e32 v203, v242
+	v_cvt_f16_f32_e32 v204, v243
+	v_sub_f32_e32 v37, v37, v170
+	v_sub_f32_e32 v36, v36, v170
+	v_cvt_f16_f32_e32 v205, v244
+	v_cvt_f16_f32_e32 v240, v245
+	v_exp_f32_e32 v246, v37
+	v_exp_f32_e32 v247, v36
+	v_pack_b32_f16 v238, v204, v203
+	v_pack_b32_f16 v241, v240, v205
+	v_cvt_f16_f32_e32 v203, v246
+	v_cvt_f16_f32_e32 v240, v247
+	v_sub_f32_e32 v47, v47, v170
+	v_sub_f32_e32 v46, v46, v170
+	v_pk_mul_f32 v[112:113], v[112:113], v[168:169] op_sel_hi:[1,0]
+	v_pack_b32_f16 v240, v240, v203
+	v_exp_f32_e32 v203, v47
+	v_sub_f32_e32 v43, v43, v170
+	v_sub_f32_e32 v42, v42, v170
+	v_sub_f32_e32 v41, v41, v170
+	s_waitcnt vmcnt(0)
+	ds_write_b64 v128, v[206:207]
+	ds_write_b64 v128, v[210:211] offset:4096
+	scratch_load_dword v128, off, off offset:8
+	v_sub_f32_e32 v40, v40, v170
+	v_exp_f32_e32 v248, v43
+	v_sub_f32_e32 v45, v45, v170
+	v_sub_f32_e32 v44, v44, v170
+	v_pk_mul_f32 v[110:111], v[110:111], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[108:109], v[108:109], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[106:107], v[106:107], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[104:105], v[104:105], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[102:103], v[102:103], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[100:101], v[100:101], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[98:99], v[98:99], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[96:97], v[96:97], v[168:169] op_sel_hi:[1,0]
+	v_sub_f32_e32 v51, v51, v170
+	v_sub_f32_e32 v50, v50, v170
+	v_exp_f32_e32 v249, v51
+	v_exp_f32_e32 v250, v50
+	v_pk_mul_f32 v[30:31], v[30:31], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[28:29], v[28:29], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[26:27], v[26:27], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[24:25], v[24:25], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[22:23], v[22:23], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[20:21], v[20:21], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[18:19], v[18:19], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[16:17], v[16:17], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[14:15], v[14:15], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[12:13], v[12:13], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[10:11], v[10:11], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[8:9], v[8:9], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[6:7], v[6:7], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[4:5], v[4:5], v[168:169] op_sel_hi:[1,0]
+	v_pk_mul_f32 v[2:3], v[2:3], v[168:169] op_sel_hi:[1,0]
+	v_sub_f32_e32 v49, v49, v170
+	v_sub_f32_e32 v48, v48, v170
+	v_pk_mul_f32 v[0:1], v[0:1], v[168:169] op_sel_hi:[1,0]
+	v_sub_f32_e32 v55, v55, v170
+	v_sub_f32_e32 v54, v54, v170
+	v_exp_f32_e32 v251, v49
+	v_exp_f32_e32 v252, v48
+	v_sub_f32_e32 v53, v53, v170
+	v_sub_f32_e32 v52, v52, v170
+	v_sub_f32_e32 v59, v59, v170
+	v_sub_f32_e32 v58, v58, v170
+	v_exp_f32_e32 v253, v58
+	v_exp_f32_e32 v254, v59
+	v_sub_f32_e32 v57, v57, v170
+	v_sub_f32_e32 v56, v56, v170
+	v_exp_f32_e32 v255, v57
+	v_exp_f32_e32 v172, v56
+	v_sub_f32_e32 v63, v63, v170
+	v_sub_f32_e32 v62, v62, v170
+	v_sub_f32_e32 v61, v61, v170
+	v_sub_f32_e32 v60, v60, v170
+	v_exp_f32_e32 v173, v63
+	v_exp_f32_e32 v179, v60
+	v_exp_f32_e32 v181, v61
+	v_exp_f32_e32 v183, v62
+	v_sub_f32_e32 v67, v67, v170
+	v_sub_f32_e32 v66, v66, v170
+	v_exp_f32_e32 v185, v67
+	v_exp_f32_e32 v177, v66
+	v_sub_f32_e32 v65, v65, v170
+	v_sub_f32_e32 v64, v64, v170
+	v_sub_f32_e32 v71, v71, v170
+	v_sub_f32_e32 v70, v70, v170
+	v_exp_f32_e32 v178, v65
+	v_exp_f32_e32 v180, v64
+	v_exp_f32_e32 v182, v71
+	v_exp_f32_e32 v184, v70
+	v_sub_f32_e32 v79, v79, v170
+	v_sub_f32_e32 v78, v78, v170
+	v_exp_f32_e32 v192, v79
+	v_exp_f32_e32 v195, v78
+	v_sub_f32_e32 v69, v69, v170
+	v_sub_f32_e32 v68, v68, v170
+	v_exp_f32_e32 v186, v69
+	v_exp_f32_e32 v187, v68
+	v_sub_f32_e32 v75, v75, v170
+	v_sub_f32_e32 v74, v74, v170
+	v_exp_f32_e32 v188, v74
+	s_waitcnt vmcnt(0)
+	ds_write2st64_b64 v128, v[208:209], v[212:213] offset1:8
+	scratch_load_dword v128, off, off offset:12
+	v_cvt_f16_f32_e32 v212, v248
+	v_exp_f32_e32 v189, v75
+	v_sub_f32_e32 v77, v77, v170
+	v_sub_f32_e32 v76, v76, v170
+	v_exp_f32_e32 v193, v76
+	v_exp_f32_e32 v194, v77
+	v_sub_f32_e32 v73, v73, v170
+	v_sub_f32_e32 v72, v72, v170
+	v_exp_f32_e32 v190, v73
+	v_exp_f32_e32 v191, v72
+	v_sub_f32_e32 v87, v87, v170
+	v_sub_f32_e32 v86, v86, v170
+	v_exp_f32_e32 v200, v87
+	v_exp_f32_e32 v201, v86
+	v_sub_f32_e32 v81, v81, v170
+	v_sub_f32_e32 v80, v80, v170
+	v_exp_f32_e32 v198, v81
+	v_exp_f32_e32 v199, v80
+	v_sub_f32_e32 v91, v91, v170
+	v_sub_f32_e32 v90, v90, v170
+	v_exp_f32_e32 v202, v90
+	v_sub_f32_e32 v83, v83, v170
+	v_sub_f32_e32 v82, v82, v170
+	v_sub_f32_e32 v85, v85, v170
+	v_sub_f32_e32 v84, v84, v170
+	v_exp_f32_e32 v196, v83
+	v_exp_f32_e32 v197, v82
+	v_exp_f32_e32 v174, v85
+	v_sub_f32_e32 v95, v95, v170
+	v_sub_f32_e32 v94, v94, v170
+	v_exp_f32_e32 v132, v95
+	v_exp_f32_e32 v133, v94
+	v_sub_f32_e32 v93, v93, v170
+	v_sub_f32_e32 v92, v92, v170
+	v_exp_f32_e32 v134, v93
+	v_exp_f32_e32 v135, v92
+	v_sub_f32_e32 v89, v89, v170
+	v_sub_f32_e32 v88, v88, v170
+	v_lshl_add_u64 v[166:167], v[166:167], 0, s[2:3]
+	s_cmp_lt_i32 s4, s18
+	s_waitcnt vmcnt(0)
+	ds_write_b64 v128, v[214:215]
+	ds_write_b64 v128, v[218:219] offset:4096
+	scratch_load_dword v128, off, off offset:16
+	s_waitcnt vmcnt(0)
+	ds_write2st64_b64 v128, v[216:217], v[220:221] offset1:8
+	scratch_load_dword v128, off, off offset:20
+	s_waitcnt vmcnt(0)
+	ds_write_b64 v128, v[222:223]
+	ds_write_b64 v128, v[226:227] offset:4096
+	scratch_load_dword v128, off, off offset:24
+	s_waitcnt vmcnt(0)
+	ds_write2st64_b64 v128, v[224:225], v[228:229] offset1:8
+	scratch_load_dword v128, off, off offset:28
+	s_waitcnt vmcnt(0)
+	ds_write_b64 v128, v[230:231]
+	ds_write_b64 v128, v[234:235] offset:4096
+	scratch_load_dword v128, off, off offset:32
+	v_exp_f32_e32 v234, v40
+	v_exp_f32_e32 v235, v44
+	v_cvt_f16_f32_e32 v215, v234
+	s_waitcnt vmcnt(0)
+	ds_write2st64_b64 v128, v[232:233], v[236:237] offset1:8
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	scratch_load_dword v128, off, off offset:36
+	scratch_load_dword v129, off, off offset:40
+	scratch_load_dword v130, off, off offset:44
+	scratch_load_dword v131, off, off offset:48
+	v_exp_f32_e32 v237, v46
+	v_exp_f32_e32 v232, v42
+	v_exp_f32_e32 v233, v41
+	v_exp_f32_e32 v236, v45
+	v_cvt_f16_f32_e32 v213, v232
+	v_cvt_f16_f32_e32 v214, v233
+	v_pack_b32_f16 v221, v213, v212
+	v_pack_b32_f16 v220, v215, v214
+	s_waitcnt vmcnt(3)
+	ds_read2st64_b64 v[204:207], v128 offset1:4
+	s_waitcnt vmcnt(2)
+	ds_read2st64_b64 v[208:211], v129 offset1:4
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[204:205], v[238:239], v[112:127]
+	v_cvt_f16_f32_e32 v204, v203
+	v_cvt_f16_f32_e32 v205, v237
+	s_waitcnt vmcnt(1)
+	ds_read2st64_b64 v[212:215], v130 offset1:4
+	s_waitcnt vmcnt(0)
+	ds_read2st64_b64 v[216:219], v131 offset1:4
+	v_pack_b32_f16 v223, v205, v204
+	v_mfma_f32_32x32x8_f16 v[96:111], v[206:207], v[238:239], v[96:111]
+	ds_read2st64_b64 v[204:207], v128 offset0:8 offset1:12
+	scratch_load_dword v128, off, off offset:52
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[208:209], v[240:241], v[112:127]
+	v_cvt_f16_f32_e32 v208, v236
+	v_cvt_f16_f32_e32 v209, v235
+	v_pack_b32_f16 v222, v209, v208
+	v_mfma_f32_32x32x8_f16 v[96:111], v[210:211], v[240:241], v[96:111]
+	ds_read2st64_b64 v[208:211], v129 offset0:8 offset1:12
+	scratch_load_dword v129, off, off offset:56
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[212:213], v[220:221], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[214:215], v[220:221], v[96:111]
+	ds_read2st64_b64 v[212:215], v130 offset0:8 offset1:12
+	scratch_load_dword v130, off, off offset:60
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[216:217], v[222:223], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[218:219], v[222:223], v[96:111]
+	ds_read2st64_b64 v[216:219], v131 offset0:8 offset1:12
+	scratch_load_dword v131, off, off offset:64
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[204:205], v[238:239], v[16:31]
+	v_cvt_f16_f32_e32 v204, v249
+	v_cvt_f16_f32_e32 v205, v250
+	v_pack_b32_f16 v225, v205, v204
+	v_cvt_f16_f32_e32 v204, v251
+	v_mfma_f32_32x32x8_f16 v[0:15], v[206:207], v[238:239], v[0:15]
+	v_exp_f32_e32 v238, v55
+	v_exp_f32_e32 v239, v54
+	v_cvt_f16_f32_e32 v205, v252
+	v_cvt_f16_f32_e32 v206, v238
+	v_cvt_f16_f32_e32 v207, v239
+	v_pack_b32_f16 v224, v205, v204
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[208:209], v[240:241], v[16:31]
+	v_pack_b32_f16 v227, v207, v206
+	s_waitcnt vmcnt(3)
+	ds_read2st64_b64 v[204:207], v128 offset1:4
+	v_mfma_f32_32x32x8_f16 v[0:15], v[210:211], v[240:241], v[0:15]
+	v_exp_f32_e32 v240, v53
+	v_exp_f32_e32 v241, v52
+	s_waitcnt vmcnt(2)
+	ds_read2st64_b64 v[208:211], v129 offset1:4
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[204:205], v[224:225], v[112:127]
+	v_cvt_f16_f32_e32 v204, v173
+	v_cvt_f16_f32_e32 v205, v183
+	v_mfma_f32_32x32x8_f16 v[96:111], v[206:207], v[224:225], v[96:111]
+	v_mfma_f32_32x32x8_f16 v[16:31], v[212:213], v[220:221], v[16:31]
+	v_cvt_f16_f32_e32 v212, v240
+	v_cvt_f16_f32_e32 v213, v241
+	v_pack_b32_f16 v226, v213, v212
+	v_mfma_f32_32x32x8_f16 v[0:15], v[214:215], v[220:221], v[0:15]
+	v_cvt_f16_f32_e32 v214, v254
+	v_cvt_f16_f32_e32 v215, v253
+	v_pack_b32_f16 v221, v215, v214
+	s_waitcnt vmcnt(1)
+	ds_read2st64_b64 v[212:215], v130 offset1:4
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[208:209], v[226:227], v[112:127]
+	v_cvt_f16_f32_e32 v208, v181
+	v_cvt_f16_f32_e32 v209, v179
+	v_mfma_f32_32x32x8_f16 v[96:111], v[210:211], v[226:227], v[96:111]
+	v_mfma_f32_32x32x8_f16 v[16:31], v[216:217], v[222:223], v[16:31]
+	v_cvt_f16_f32_e32 v216, v255
+	v_cvt_f16_f32_e32 v217, v172
+	v_pack_b32_f16 v220, v217, v216
+	v_mfma_f32_32x32x8_f16 v[0:15], v[218:219], v[222:223], v[0:15]
+	s_waitcnt vmcnt(0)
+	ds_read2st64_b64 v[216:219], v131 offset1:4
+	v_pack_b32_f16 v223, v205, v204
+	v_pack_b32_f16 v222, v209, v208
+	ds_read2st64_b64 v[204:207], v128 offset0:8 offset1:12
+	ds_read2st64_b64 v[208:211], v129 offset0:8 offset1:12
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[212:213], v[220:221], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[214:215], v[220:221], v[96:111]
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[216:217], v[222:223], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[218:219], v[222:223], v[96:111]
+	ds_read2st64_b64 v[212:215], v130 offset0:8 offset1:12
+	ds_read2st64_b64 v[216:219], v131 offset0:8 offset1:12
+	scratch_load_dword v128, off, off offset:68
+	scratch_load_dword v129, off, off offset:72
+	scratch_load_dword v130, off, off offset:76
+	scratch_load_dword v131, off, off offset:80
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[204:205], v[224:225], v[16:31]
+	v_cvt_f16_f32_e32 v204, v185
+	v_cvt_f16_f32_e32 v205, v177
+	v_pack_b32_f16 v229, v205, v204
+	v_cvt_f16_f32_e32 v204, v178
+	v_mfma_f32_32x32x8_f16 v[0:15], v[206:207], v[224:225], v[0:15]
+	v_cvt_f16_f32_e32 v205, v180
+	v_cvt_f16_f32_e32 v206, v182
+	v_cvt_f16_f32_e32 v207, v184
+	v_pack_b32_f16 v228, v205, v204
+	v_pack_b32_f16 v225, v207, v206
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[208:209], v[226:227], v[16:31]
+	s_waitcnt vmcnt(3)
+	ds_read2st64_b64 v[204:207], v128 offset1:4
+	v_mfma_f32_32x32x8_f16 v[0:15], v[210:211], v[226:227], v[0:15]
+	s_waitcnt vmcnt(2)
+	ds_read2st64_b64 v[208:211], v129 offset1:4
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[212:213], v[220:221], v[16:31]
+	v_cvt_f16_f32_e32 v212, v186
+	v_cvt_f16_f32_e32 v213, v187
+	v_pack_b32_f16 v224, v213, v212
+	v_mfma_f32_32x32x8_f16 v[0:15], v[214:215], v[220:221], v[0:15]
+	v_cvt_f16_f32_e32 v214, v189
+	v_cvt_f16_f32_e32 v215, v188
+	v_pack_b32_f16 v221, v215, v214
+	s_waitcnt vmcnt(1)
+	ds_read2st64_b64 v[212:215], v130 offset1:4
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[204:205], v[228:229], v[112:127]
+	v_cvt_f16_f32_e32 v204, v192
+	v_cvt_f16_f32_e32 v205, v195
+	v_mfma_f32_32x32x8_f16 v[16:31], v[216:217], v[222:223], v[16:31]
+	v_cvt_f16_f32_e32 v216, v190
+	v_cvt_f16_f32_e32 v217, v191
+	v_pack_b32_f16 v220, v217, v216
+	v_mfma_f32_32x32x8_f16 v[0:15], v[218:219], v[222:223], v[0:15]
+	v_pack_b32_f16 v223, v205, v204
+	s_waitcnt vmcnt(0)
+	ds_read2st64_b64 v[216:219], v131 offset1:4
+	v_mfma_f32_32x32x8_f16 v[96:111], v[206:207], v[228:229], v[96:111]
+	ds_read2st64_b64 v[204:207], v128 offset0:8 offset1:12
+	v_exp_f32_e32 v128, v84
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[208:209], v[224:225], v[112:127]
+	v_cvt_f16_f32_e32 v208, v194
+	v_cvt_f16_f32_e32 v209, v193
+	v_pack_b32_f16 v222, v209, v208
+	v_mfma_f32_32x32x8_f16 v[96:111], v[210:211], v[224:225], v[96:111]
+	ds_read2st64_b64 v[208:211], v129 offset0:8 offset1:12
+	v_cvt_f16_f32_e32 v129, v200
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[204:205], v[228:229], v[16:31]
+	v_mfma_f32_32x32x8_f16 v[112:127], v[212:213], v[220:221], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[214:215], v[220:221], v[96:111]
+	ds_read2st64_b64 v[212:215], v130 offset0:8 offset1:12
+	v_exp_f32_e32 v130, v88
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[208:209], v[224:225], v[16:31]
+	v_cvt_f16_f32_e32 v208, v196
+	v_cvt_f16_f32_e32 v209, v197
+	v_mfma_f32_32x32x8_f16 v[0:15], v[206:207], v[228:229], v[0:15]
+	v_mfma_f32_32x32x8_f16 v[112:127], v[216:217], v[222:223], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[218:219], v[222:223], v[96:111]
+	ds_read2st64_b64 v[216:219], v131 offset0:8 offset1:12
+	v_exp_f32_e32 v131, v89
+	s_waitcnt lgkmcnt(1)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[212:213], v[220:221], v[16:31]
+	v_cvt_f16_f32_e32 v212, v198
+	v_cvt_f16_f32_e32 v213, v199
+	v_mfma_f32_32x32x8_f16 v[0:15], v[210:211], v[224:225], v[0:15]
+	v_cvt_f16_f32_e32 v210, v201
+	v_pack_b32_f16 v224, v213, v212
+	v_cvt_f16_f32_e32 v213, v202
+	v_cvt_f16_f32_e32 v211, v174
+	v_pack_b32_f16 v227, v210, v129
+	v_exp_f32_e32 v129, v91
+	v_pack_b32_f16 v225, v209, v208
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[216:217], v[222:223], v[16:31]
+	scratch_load_dword v217, off, off offset:84
+	v_cvt_f16_f32_e32 v212, v129
+	v_cvt_f16_f32_e32 v216, v134
+	v_pack_b32_f16 v229, v213, v212
+	v_add_f32_e32 v212, v243, v242
+	v_mfma_f32_32x32x8_f16 v[0:15], v[214:215], v[220:221], v[0:15]
+	scratch_load_dword v220, off, off offset:92
+	v_add_f32_e32 v171, v171, v212
+	v_add_f32_e32 v169, v169, v171
+	v_add_f32_e32 v169, v247, v169
+	v_add_f32_e32 v169, v246, v169
+	v_add_f32_e32 v169, v245, v169
+	v_add_f32_e32 v169, v244, v169
+	v_mfma_f32_32x32x8_f16 v[0:15], v[218:219], v[222:223], v[0:15]
+	scratch_load_dword v218, off, off offset:88
+	v_add_f32_e32 v169, v234, v169
+	v_add_f32_e32 v169, v233, v169
+	v_add_f32_e32 v169, v232, v169
+	v_add_f32_e32 v169, v248, v169
+	v_add_f32_e32 v169, v235, v169
+	v_add_f32_e32 v169, v236, v169
+	v_add_f32_e32 v169, v237, v169
+	v_add_f32_e32 v169, v203, v169
+	v_add_f32_e32 v169, v252, v169
+	v_add_f32_e32 v169, v251, v169
+	v_add_f32_e32 v169, v250, v169
+	v_add_f32_e32 v169, v249, v169
+	v_add_f32_e32 v169, v241, v169
+	v_cvt_f16_f32_e32 v214, v128
+	v_add_f32_e32 v169, v240, v169
+	v_add_f32_e32 v169, v239, v169
+	v_add_f32_e32 v169, v238, v169
+	v_add_f32_e32 v169, v172, v169
+	v_pack_b32_f16 v226, v214, v211
+	v_add_f32_e32 v169, v255, v169
+	v_cvt_f16_f32_e32 v214, v132
+	v_cvt_f16_f32_e32 v215, v133
+	v_add_f32_e32 v169, v253, v169
+	v_add_f32_e32 v169, v254, v169
+	v_add_f32_e32 v169, v179, v169
+	v_add_f32_e32 v169, v181, v169
+	v_pack_b32_f16 v231, v215, v214
+	v_add_f32_e32 v169, v183, v169
+	v_add_f32_e32 v169, v173, v169
+	v_add_f32_e32 v169, v180, v169
+	v_add_f32_e32 v169, v178, v169
+	v_add_f32_e32 v169, v177, v169
+	v_add_f32_e32 v169, v185, v169
+	v_add_f32_e32 v169, v187, v169
+	v_add_f32_e32 v169, v186, v169
+	v_add_f32_e32 v169, v184, v169
+	v_add_f32_e32 v169, v182, v169
+	v_add_f32_e32 v169, v191, v169
+	v_add_f32_e32 v169, v190, v169
+	v_add_f32_e32 v169, v188, v169
+	v_add_f32_e32 v169, v189, v169
+	v_add_f32_e32 v169, v193, v169
+	v_add_f32_e32 v169, v194, v169
+	v_add_f32_e32 v169, v195, v169
+	v_add_f32_e32 v169, v192, v169
+	v_add_f32_e32 v169, v199, v169
+	v_add_f32_e32 v169, v198, v169
+	v_add_f32_e32 v169, v197, v169
+	v_add_f32_e32 v169, v196, v169
+	v_add_f32_e32 v128, v128, v169
+	v_add_f32_e32 v128, v174, v128
+	v_add_f32_e32 v128, v201, v128
+	v_add_f32_e32 v128, v200, v128
+	v_add_f32_e32 v128, v130, v128
+	v_add_f32_e32 v128, v131, v128
+	v_add_f32_e32 v128, v202, v128
+	v_add_f32_e32 v128, v129, v128
+	v_add_f32_e32 v128, v135, v128
+	v_add_f32_e32 v128, v134, v128
+	v_add_f32_e32 v128, v133, v128
+	v_add_f32_e32 v128, v132, v128
+	ds_bpermute_b32 v129, v136, v128
+	s_waitcnt vmcnt(2)
+	ds_read2st64_b64 v[204:207], v217 offset1:4
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[96:111], v[206:207], v[224:225], v[96:111]
+	ds_read2st64_b64 v[212:215], v217 offset0:8 offset1:12
+	v_add_f32_e32 v169, v128, v129
+	v_fmac_f32_e32 v169, v138, v168
+	s_waitcnt vmcnt(0)
+	ds_read2st64_b64 v[208:211], v218 offset1:4
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[96:111], v[210:211], v[226:227], v[96:111]
+	v_cvt_f16_f32_e32 v210, v135
+	v_pack_b32_f16 v230, v210, v216
+	ds_read2st64_b64 v[216:219], v218 offset0:8 offset1:12
+	v_mfma_f32_32x32x8_f16 v[112:127], v[204:205], v[224:225], v[112:127]
+	ds_read2st64_b64 v[204:207], v220 offset1:4
+	ds_read2st64_b64 v[220:223], v220 offset0:8 offset1:12
+	v_mfma_f32_32x32x8_f16 v[16:31], v[212:213], v[224:225], v[16:31]
+	v_mfma_f32_32x32x8_f16 v[0:15], v[214:215], v[224:225], v[0:15]
+	v_mfma_f32_32x32x8_f16 v[112:127], v[208:209], v[226:227], v[112:127]
+	v_cvt_f16_f32_e32 v208, v131
+	v_cvt_f16_f32_e32 v209, v130
+	v_pack_b32_f16 v228, v209, v208
+	ds_read2st64_b64 v[208:211], v137 offset1:4
+	s_waitcnt lgkmcnt(3)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[216:217], v[226:227], v[16:31]
+	v_mfma_f32_32x32x8_f16 v[0:15], v[218:219], v[226:227], v[0:15]
+	s_waitcnt lgkmcnt(2)
+	v_mfma_f32_32x32x8_f16 v[112:127], v[204:205], v[228:229], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[206:207], v[228:229], v[96:111]
+	ds_read2st64_b64 v[204:207], v137 offset0:8 offset1:12
+	s_waitcnt lgkmcnt(0)
+	s_barrier
+	s_waitcnt lgkmcnt(0)
+	v_mfma_f32_32x32x8_f16 v[16:31], v[220:221], v[228:229], v[16:31]
+	v_mfma_f32_32x32x8_f16 v[0:15], v[222:223], v[228:229], v[0:15]
+	v_mfma_f32_32x32x8_f16 v[112:127], v[208:209], v[230:231], v[112:127]
+	v_mfma_f32_32x32x8_f16 v[96:111], v[210:211], v[230:231], v[96:111]
+	v_mfma_f32_32x32x8_f16 v[16:31], v[204:205], v[230:231], v[16:31]
+	v_mfma_f32_32x32x8_f16 v[0:15], v[206:207], v[230:231], v[0:15]
+	s_cbranch_scc0 .LBB0_5
+	v_mov_b32_e32 v203, v170
+	v_mov_b32_e32 v138, v169
+	s_cmp_eq_u32 s4, 0
+	s_cbranch_scc0 .LBB0_2
+	s_branch .LBB0_3
+.LBB0_5:
+	scratch_load_dword v128, off, off offset:156
+	scratch_load_dword v129, off, off offset:160
+	s_branch .LBB0_7
+.LBB0_6:
+	v_mov_b32_e32 v169, 1.0
+	v_mov_b32_e32 v14, 0
+	v_mov_b32_e32 v13, 0
+	v_mov_b32_e32 v12, 0
+	v_mov_b32_e32 v11, 0
+	v_mov_b32_e32 v10, 0
+	v_mov_b32_e32 v9, 0
+	v_mov_b32_e32 v8, 0
+	v_mov_b32_e32 v7, 0
+	v_mov_b32_e32 v6, 0
+	v_mov_b32_e32 v5, 0
+	v_mov_b32_e32 v4, 0
+	v_mov_b32_e32 v3, 0
+	v_mov_b32_e32 v2, 0
+	v_mov_b32_e32 v1, 0
+	v_mov_b32_e32 v0, 0
+	v_mov_b32_e32 v31, 0
+	v_mov_b32_e32 v30, 0
+	v_mov_b32_e32 v29, 0
+	v_mov_b32_e32 v28, 0
+	v_mov_b32_e32 v27, 0
+	v_mov_b32_e32 v26, 0
+	v_mov_b32_e32 v25, 0
+	v_mov_b32_e32 v24, 0
+	v_mov_b32_e32 v23, 0
+	v_mov_b32_e32 v22, 0
+	v_mov_b32_e32 v21, 0
+	v_mov_b32_e32 v20, 0
+	v_mov_b32_e32 v19, 0
+	v_mov_b32_e32 v18, 0
+	v_mov_b32_e32 v17, 0
+	v_mov_b32_e32 v16, 0
+	v_mov_b32_e32 v111, 0
+	v_mov_b32_e32 v110, 0
+	v_mov_b32_e32 v109, 0
+	v_mov_b32_e32 v108, 0
+	v_mov_b32_e32 v107, 0
+	v_mov_b32_e32 v106, 0
+	v_mov_b32_e32 v105, 0
+	v_mov_b32_e32 v104, 0
+	v_mov_b32_e32 v103, 0
+	v_mov_b32_e32 v102, 0
+	v_mov_b32_e32 v101, 0
+	v_mov_b32_e32 v100, 0
+	v_mov_b32_e32 v99, 0
+	v_mov_b32_e32 v98, 0
+	v_mov_b32_e32 v97, 0
+	v_mov_b32_e32 v96, 0
+	v_mov_b32_e32 v127, 0
+	v_mov_b32_e32 v126, 0
+	v_mov_b32_e32 v125, 0
+	v_mov_b32_e32 v124, 0
+	v_mov_b32_e32 v123, 0
+	v_mov_b32_e32 v122, 0
+	v_mov_b32_e32 v121, 0
+	v_mov_b32_e32 v120, 0
+	v_mov_b32_e32 v119, 0
+	v_mov_b32_e32 v118, 0
+	v_mov_b32_e32 v117, 0
+	v_mov_b32_e32 v116, 0
+	v_mov_b32_e32 v115, 0
+	v_mov_b32_e32 v114, 0
+	v_mov_b32_e32 v113, 0
+	v_mov_b32_e32 v112, 0
+.LBB0_7:
+	s_nop 3
+	v_div_scale_f32 v32, s[2:3], v169, v169, v112
+	v_rcp_f32_e32 v33, v32
+	v_div_scale_f32 v34, vcc, v112, v169, v112
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v35, -v32, v33, 1.0
+	v_fmac_f32_e32 v33, v35, v33
+	v_mul_f32_e32 v35, v34, v33
+	v_fma_f32 v36, -v32, v35, v34
+	v_fmac_f32_e32 v35, v36, v33
+	v_fma_f32 v32, -v32, v35, v34
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v32, v32, v33, v35
+	v_div_scale_f32 v33, s[2:3], v169, v169, v113
+	v_rcp_f32_e32 v34, v33
+	v_div_fixup_f32 v32, v32, v169, v112
+	v_div_scale_f32 v35, vcc, v113, v169, v113
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v36, -v33, v34, 1.0
+	v_fmac_f32_e32 v34, v36, v34
+	v_mul_f32_e32 v36, v35, v34
+	v_fma_f32 v37, -v33, v36, v35
+	v_fmac_f32_e32 v36, v37, v34
+	v_fma_f32 v33, -v33, v36, v35
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v33, v33, v34, v36
+	v_div_scale_f32 v34, s[2:3], v169, v169, v114
+	v_rcp_f32_e32 v35, v34
+	v_div_fixup_f32 v33, v33, v169, v113
+	v_div_scale_f32 v36, vcc, v114, v169, v114
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v37, -v34, v35, 1.0
+	v_fmac_f32_e32 v35, v37, v35
+	v_mul_f32_e32 v37, v36, v35
+	v_fma_f32 v38, -v34, v37, v36
+	v_fmac_f32_e32 v37, v38, v35
+	v_fma_f32 v34, -v34, v37, v36
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v34, v34, v35, v37
+	v_div_scale_f32 v35, s[2:3], v169, v169, v115
+	v_rcp_f32_e32 v36, v35
+	v_div_fixup_f32 v34, v34, v169, v114
+	v_div_scale_f32 v37, vcc, v115, v169, v115
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v38, -v35, v36, 1.0
+	v_fmac_f32_e32 v36, v38, v36
+	v_mul_f32_e32 v38, v37, v36
+	v_fma_f32 v39, -v35, v38, v37
+	v_fmac_f32_e32 v38, v39, v36
+	v_fma_f32 v35, -v35, v38, v37
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v35, v35, v36, v38
+	v_div_scale_f32 v36, s[2:3], v169, v169, v116
+	v_rcp_f32_e32 v37, v36
+	v_div_fixup_f32 v35, v35, v169, v115
+	v_div_scale_f32 v38, vcc, v116, v169, v116
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v39, -v36, v37, 1.0
+	v_fmac_f32_e32 v37, v39, v37
+	v_mul_f32_e32 v39, v38, v37
+	v_fma_f32 v40, -v36, v39, v38
+	v_fmac_f32_e32 v39, v40, v37
+	v_fma_f32 v36, -v36, v39, v38
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v36, v36, v37, v39
+	v_div_scale_f32 v37, s[2:3], v169, v169, v117
+	v_rcp_f32_e32 v38, v37
+	v_div_fixup_f32 v36, v36, v169, v116
+	v_div_scale_f32 v39, vcc, v117, v169, v117
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v40, -v37, v38, 1.0
+	v_fmac_f32_e32 v38, v40, v38
+	v_mul_f32_e32 v40, v39, v38
+	v_fma_f32 v41, -v37, v40, v39
+	v_fmac_f32_e32 v40, v41, v38
+	v_fma_f32 v37, -v37, v40, v39
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v37, v37, v38, v40
+	v_div_scale_f32 v38, s[2:3], v169, v169, v118
+	v_rcp_f32_e32 v39, v38
+	v_div_fixup_f32 v37, v37, v169, v117
+	v_div_scale_f32 v40, vcc, v118, v169, v118
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v41, -v38, v39, 1.0
+	v_fmac_f32_e32 v39, v41, v39
+	v_mul_f32_e32 v41, v40, v39
+	v_fma_f32 v42, -v38, v41, v40
+	v_fmac_f32_e32 v41, v42, v39
+	v_fma_f32 v38, -v38, v41, v40
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v38, v38, v39, v41
+	v_div_scale_f32 v39, s[2:3], v169, v169, v119
+	v_rcp_f32_e32 v40, v39
+	v_div_fixup_f32 v38, v38, v169, v118
+	v_div_scale_f32 v41, vcc, v119, v169, v119
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v42, -v39, v40, 1.0
+	v_fmac_f32_e32 v40, v42, v40
+	v_mul_f32_e32 v42, v41, v40
+	v_fma_f32 v43, -v39, v42, v41
+	v_fmac_f32_e32 v42, v43, v40
+	v_fma_f32 v39, -v39, v42, v41
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v39, v39, v40, v42
+	v_div_scale_f32 v40, s[2:3], v169, v169, v120
+	v_rcp_f32_e32 v41, v40
+	v_div_fixup_f32 v39, v39, v169, v119
+	v_div_scale_f32 v42, vcc, v120, v169, v120
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v43, -v40, v41, 1.0
+	v_fmac_f32_e32 v41, v43, v41
+	v_mul_f32_e32 v43, v42, v41
+	v_fma_f32 v44, -v40, v43, v42
+	v_fmac_f32_e32 v43, v44, v41
+	v_fma_f32 v40, -v40, v43, v42
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v40, v40, v41, v43
+	v_div_scale_f32 v41, s[2:3], v169, v169, v121
+	v_rcp_f32_e32 v42, v41
+	v_div_fixup_f32 v40, v40, v169, v120
+	v_div_scale_f32 v43, vcc, v121, v169, v121
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v44, -v41, v42, 1.0
+	v_fmac_f32_e32 v42, v44, v42
+	v_mul_f32_e32 v44, v43, v42
+	v_fma_f32 v45, -v41, v44, v43
+	v_fmac_f32_e32 v44, v45, v42
+	v_fma_f32 v41, -v41, v44, v43
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v41, v41, v42, v44
+	v_div_scale_f32 v42, s[2:3], v169, v169, v122
+	v_rcp_f32_e32 v43, v42
+	v_div_fixup_f32 v41, v41, v169, v121
+	v_div_scale_f32 v44, vcc, v122, v169, v122
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v45, -v42, v43, 1.0
+	v_fmac_f32_e32 v43, v45, v43
+	v_mul_f32_e32 v45, v44, v43
+	v_fma_f32 v46, -v42, v45, v44
+	v_fmac_f32_e32 v45, v46, v43
+	v_fma_f32 v42, -v42, v45, v44
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v42, v42, v43, v45
+	v_div_scale_f32 v43, s[2:3], v169, v169, v123
+	v_rcp_f32_e32 v44, v43
+	v_div_fixup_f32 v42, v42, v169, v122
+	v_div_scale_f32 v45, vcc, v123, v169, v123
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v46, -v43, v44, 1.0
+	v_fmac_f32_e32 v44, v46, v44
+	v_mul_f32_e32 v46, v45, v44
+	v_fma_f32 v47, -v43, v46, v45
+	v_fmac_f32_e32 v46, v47, v44
+	v_fma_f32 v43, -v43, v46, v45
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v43, v43, v44, v46
+	v_div_scale_f32 v44, s[2:3], v169, v169, v124
+	v_rcp_f32_e32 v45, v44
+	v_div_fixup_f32 v43, v43, v169, v123
+	v_div_scale_f32 v46, vcc, v124, v169, v124
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v47, -v44, v45, 1.0
+	v_fmac_f32_e32 v45, v47, v45
+	v_mul_f32_e32 v47, v46, v45
+	v_fma_f32 v48, -v44, v47, v46
+	v_fmac_f32_e32 v47, v48, v45
+	v_fma_f32 v44, -v44, v47, v46
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v44, v44, v45, v47
+	v_div_scale_f32 v45, s[2:3], v169, v169, v125
+	v_rcp_f32_e32 v46, v45
+	v_div_fixup_f32 v44, v44, v169, v124
+	v_div_scale_f32 v47, vcc, v125, v169, v125
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v48, -v45, v46, 1.0
+	v_fmac_f32_e32 v46, v48, v46
+	v_mul_f32_e32 v48, v47, v46
+	v_fma_f32 v49, -v45, v48, v47
+	v_fmac_f32_e32 v48, v49, v46
+	v_fma_f32 v45, -v45, v48, v47
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v45, v45, v46, v48
+	v_div_scale_f32 v46, s[2:3], v169, v169, v126
+	v_rcp_f32_e32 v47, v46
+	v_div_fixup_f32 v45, v45, v169, v125
+	v_div_scale_f32 v48, vcc, v126, v169, v126
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v49, -v46, v47, 1.0
+	v_fmac_f32_e32 v47, v49, v47
+	v_mul_f32_e32 v49, v48, v47
+	v_fma_f32 v50, -v46, v49, v48
+	v_fmac_f32_e32 v49, v50, v47
+	v_fma_f32 v46, -v46, v49, v48
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v46, v46, v47, v49
+	v_div_scale_f32 v47, s[2:3], v169, v169, v127
+	v_rcp_f32_e32 v48, v47
+	v_div_fixup_f32 v46, v46, v169, v126
+	v_div_scale_f32 v49, vcc, v127, v169, v127
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v50, -v47, v48, 1.0
+	v_fmac_f32_e32 v48, v50, v48
+	v_mul_f32_e32 v50, v49, v48
+	v_fma_f32 v51, -v47, v50, v49
+	v_fmac_f32_e32 v50, v51, v48
+	v_fma_f32 v47, -v47, v50, v49
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v47, v47, v48, v50
+	v_div_scale_f32 v48, s[2:3], v169, v169, v96
+	v_rcp_f32_e32 v49, v48
+	v_div_fixup_f32 v47, v47, v169, v127
+	v_div_scale_f32 v50, vcc, v96, v169, v96
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v51, -v48, v49, 1.0
+	v_fmac_f32_e32 v49, v51, v49
+	v_mul_f32_e32 v51, v50, v49
+	v_fma_f32 v52, -v48, v51, v50
+	v_fmac_f32_e32 v51, v52, v49
+	v_fma_f32 v48, -v48, v51, v50
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v48, v48, v49, v51
+	v_div_scale_f32 v49, s[2:3], v169, v169, v97
+	v_rcp_f32_e32 v50, v49
+	v_div_fixup_f32 v48, v48, v169, v96
+	v_div_scale_f32 v51, vcc, v97, v169, v97
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v52, -v49, v50, 1.0
+	v_fmac_f32_e32 v50, v52, v50
+	v_mul_f32_e32 v52, v51, v50
+	v_fma_f32 v53, -v49, v52, v51
+	v_fmac_f32_e32 v52, v53, v50
+	v_fma_f32 v49, -v49, v52, v51
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v49, v49, v50, v52
+	v_div_scale_f32 v50, s[2:3], v169, v169, v98
+	v_rcp_f32_e32 v51, v50
+	v_div_fixup_f32 v49, v49, v169, v97
+	v_div_scale_f32 v52, vcc, v98, v169, v98
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v53, -v50, v51, 1.0
+	v_fmac_f32_e32 v51, v53, v51
+	v_mul_f32_e32 v53, v52, v51
+	v_fma_f32 v54, -v50, v53, v52
+	v_fmac_f32_e32 v53, v54, v51
+	v_fma_f32 v50, -v50, v53, v52
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v50, v50, v51, v53
+	v_div_scale_f32 v51, s[2:3], v169, v169, v99
+	v_rcp_f32_e32 v52, v51
+	v_div_fixup_f32 v50, v50, v169, v98
+	v_div_scale_f32 v53, vcc, v99, v169, v99
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v54, -v51, v52, 1.0
+	v_fmac_f32_e32 v52, v54, v52
+	v_mul_f32_e32 v54, v53, v52
+	v_fma_f32 v55, -v51, v54, v53
+	v_fmac_f32_e32 v54, v55, v52
+	v_fma_f32 v51, -v51, v54, v53
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v51, v51, v52, v54
+	v_div_scale_f32 v52, s[2:3], v169, v169, v100
+	v_rcp_f32_e32 v53, v52
+	v_div_fixup_f32 v51, v51, v169, v99
+	v_div_scale_f32 v54, vcc, v100, v169, v100
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v55, -v52, v53, 1.0
+	v_fmac_f32_e32 v53, v55, v53
+	v_mul_f32_e32 v55, v54, v53
+	v_fma_f32 v56, -v52, v55, v54
+	v_fmac_f32_e32 v55, v56, v53
+	v_fma_f32 v52, -v52, v55, v54
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v52, v52, v53, v55
+	v_div_scale_f32 v53, s[2:3], v169, v169, v101
+	v_rcp_f32_e32 v54, v53
+	v_div_fixup_f32 v52, v52, v169, v100
+	v_div_scale_f32 v55, vcc, v101, v169, v101
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v56, -v53, v54, 1.0
+	v_fmac_f32_e32 v54, v56, v54
+	v_mul_f32_e32 v56, v55, v54
+	v_fma_f32 v57, -v53, v56, v55
+	v_fmac_f32_e32 v56, v57, v54
+	v_fma_f32 v53, -v53, v56, v55
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v53, v53, v54, v56
+	v_div_scale_f32 v54, s[2:3], v169, v169, v102
+	v_rcp_f32_e32 v55, v54
+	v_div_fixup_f32 v53, v53, v169, v101
+	v_div_scale_f32 v56, vcc, v102, v169, v102
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v57, -v54, v55, 1.0
+	v_fmac_f32_e32 v55, v57, v55
+	v_mul_f32_e32 v57, v56, v55
+	v_fma_f32 v58, -v54, v57, v56
+	v_fmac_f32_e32 v57, v58, v55
+	v_fma_f32 v54, -v54, v57, v56
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v54, v54, v55, v57
+	v_div_scale_f32 v55, s[2:3], v169, v169, v103
+	v_rcp_f32_e32 v56, v55
+	v_div_fixup_f32 v54, v54, v169, v102
+	v_div_scale_f32 v57, vcc, v103, v169, v103
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v58, -v55, v56, 1.0
+	v_fmac_f32_e32 v56, v58, v56
+	v_mul_f32_e32 v58, v57, v56
+	v_fma_f32 v59, -v55, v58, v57
+	v_fmac_f32_e32 v58, v59, v56
+	v_fma_f32 v55, -v55, v58, v57
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v55, v55, v56, v58
+	v_div_scale_f32 v56, s[2:3], v169, v169, v104
+	v_rcp_f32_e32 v57, v56
+	v_div_fixup_f32 v55, v55, v169, v103
+	v_div_scale_f32 v58, vcc, v104, v169, v104
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v59, -v56, v57, 1.0
+	v_fmac_f32_e32 v57, v59, v57
+	v_mul_f32_e32 v59, v58, v57
+	v_fma_f32 v60, -v56, v59, v58
+	v_fmac_f32_e32 v59, v60, v57
+	v_fma_f32 v56, -v56, v59, v58
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v56, v56, v57, v59
+	v_div_scale_f32 v57, s[2:3], v169, v169, v105
+	v_rcp_f32_e32 v58, v57
+	v_div_fixup_f32 v56, v56, v169, v104
+	v_div_scale_f32 v59, vcc, v105, v169, v105
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v60, -v57, v58, 1.0
+	v_fmac_f32_e32 v58, v60, v58
+	v_mul_f32_e32 v60, v59, v58
+	v_fma_f32 v61, -v57, v60, v59
+	v_fmac_f32_e32 v60, v61, v58
+	v_fma_f32 v57, -v57, v60, v59
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v57, v57, v58, v60
+	v_div_scale_f32 v58, s[2:3], v169, v169, v106
+	v_rcp_f32_e32 v59, v58
+	v_div_fixup_f32 v57, v57, v169, v105
+	v_div_scale_f32 v60, vcc, v106, v169, v106
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v61, -v58, v59, 1.0
+	v_fmac_f32_e32 v59, v61, v59
+	v_mul_f32_e32 v61, v60, v59
+	v_fma_f32 v62, -v58, v61, v60
+	v_fmac_f32_e32 v61, v62, v59
+	v_fma_f32 v58, -v58, v61, v60
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v58, v58, v59, v61
+	v_div_scale_f32 v59, s[2:3], v169, v169, v107
+	v_rcp_f32_e32 v60, v59
+	v_div_fixup_f32 v58, v58, v169, v106
+	v_div_scale_f32 v61, vcc, v107, v169, v107
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v62, -v59, v60, 1.0
+	v_fmac_f32_e32 v60, v62, v60
+	v_mul_f32_e32 v62, v61, v60
+	v_fma_f32 v63, -v59, v62, v61
+	v_fmac_f32_e32 v62, v63, v60
+	v_fma_f32 v59, -v59, v62, v61
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v59, v59, v60, v62
+	v_div_scale_f32 v60, s[2:3], v169, v169, v108
+	v_rcp_f32_e32 v61, v60
+	v_div_fixup_f32 v59, v59, v169, v107
+	v_div_scale_f32 v62, vcc, v108, v169, v108
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v63, -v60, v61, 1.0
+	v_fmac_f32_e32 v61, v63, v61
+	v_mul_f32_e32 v63, v62, v61
+	v_fma_f32 v64, -v60, v63, v62
+	v_fmac_f32_e32 v63, v64, v61
+	v_fma_f32 v60, -v60, v63, v62
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v60, v60, v61, v63
+	v_div_scale_f32 v61, s[2:3], v169, v169, v109
+	v_rcp_f32_e32 v62, v61
+	v_div_fixup_f32 v60, v60, v169, v108
+	v_div_scale_f32 v63, vcc, v109, v169, v109
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v64, -v61, v62, 1.0
+	v_fmac_f32_e32 v62, v64, v62
+	v_mul_f32_e32 v64, v63, v62
+	v_fma_f32 v65, -v61, v64, v63
+	v_fmac_f32_e32 v64, v65, v62
+	v_fma_f32 v61, -v61, v64, v63
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v61, v61, v62, v64
+	v_div_scale_f32 v62, s[2:3], v169, v169, v110
+	v_rcp_f32_e32 v63, v62
+	v_div_fixup_f32 v61, v61, v169, v109
+	v_div_scale_f32 v64, vcc, v110, v169, v110
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v65, -v62, v63, 1.0
+	v_fmac_f32_e32 v63, v65, v63
+	v_mul_f32_e32 v65, v64, v63
+	v_fma_f32 v66, -v62, v65, v64
+	v_fmac_f32_e32 v65, v66, v63
+	v_fma_f32 v62, -v62, v65, v64
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v62, v62, v63, v65
+	v_div_scale_f32 v63, s[2:3], v169, v169, v111
+	v_rcp_f32_e32 v64, v63
+	v_div_fixup_f32 v62, v62, v169, v110
+	v_div_scale_f32 v65, vcc, v111, v169, v111
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v66, -v63, v64, 1.0
+	v_fmac_f32_e32 v64, v66, v64
+	v_mul_f32_e32 v66, v65, v64
+	v_fma_f32 v67, -v63, v66, v65
+	v_fmac_f32_e32 v66, v67, v64
+	v_fma_f32 v63, -v63, v66, v65
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v63, v63, v64, v66
+	v_div_scale_f32 v64, s[2:3], v169, v169, v16
+	v_rcp_f32_e32 v65, v64
+	v_div_fixup_f32 v63, v63, v169, v111
+	v_div_scale_f32 v66, vcc, v16, v169, v16
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v16, v64, v169, v16
+	v_div_scale_f32 v64, s[2:3], v169, v169, v17
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v17, v169, v17
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v17, v64, v169, v17
+	v_div_scale_f32 v64, s[2:3], v169, v169, v18
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v18, v169, v18
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v18, v64, v169, v18
+	v_div_scale_f32 v64, s[2:3], v169, v169, v19
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v19, v169, v19
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v19, v64, v169, v19
+	v_div_scale_f32 v64, s[2:3], v169, v169, v20
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v20, v169, v20
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v20, v64, v169, v20
+	v_div_scale_f32 v64, s[2:3], v169, v169, v21
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v21, v169, v21
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v21, v64, v169, v21
+	v_div_scale_f32 v64, s[2:3], v169, v169, v22
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v22, v169, v22
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v22, v64, v169, v22
+	v_div_scale_f32 v64, s[2:3], v169, v169, v23
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v23, v169, v23
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v23, v64, v169, v23
+	v_div_scale_f32 v64, s[2:3], v169, v169, v24
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v24, v169, v24
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v24, v64, v169, v24
+	v_div_scale_f32 v64, s[2:3], v169, v169, v25
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v25, v169, v25
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v25, v64, v169, v25
+	v_div_scale_f32 v64, s[2:3], v169, v169, v26
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v26, v169, v26
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v26, v64, v169, v26
+	v_div_scale_f32 v64, s[2:3], v169, v169, v27
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v27, v169, v27
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v27, v64, v169, v27
+	v_div_scale_f32 v64, s[2:3], v169, v169, v28
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v28, v169, v28
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v28, v64, v169, v28
+	v_div_scale_f32 v64, s[2:3], v169, v169, v29
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v29, v169, v29
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v29, v64, v169, v29
+	v_div_scale_f32 v64, s[2:3], v169, v169, v30
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v30, v169, v30
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v30, v64, v169, v30
+	v_div_scale_f32 v64, s[2:3], v169, v169, v31
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v31, v169, v31
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v31, v64, v169, v31
+	v_div_scale_f32 v64, s[2:3], v169, v169, v0
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v0, v169, v0
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v0, v64, v169, v0
+	v_div_scale_f32 v64, s[2:3], v169, v169, v1
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v1, v169, v1
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v1, v64, v169, v1
+	v_div_scale_f32 v64, s[2:3], v169, v169, v2
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v2, v169, v2
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v2, v64, v169, v2
+	v_div_scale_f32 v64, s[2:3], v169, v169, v3
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v3, v169, v3
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v3, v64, v169, v3
+	v_div_scale_f32 v64, s[2:3], v169, v169, v4
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v4, v169, v4
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v4, v64, v169, v4
+	v_div_scale_f32 v64, s[2:3], v169, v169, v5
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v5, v169, v5
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v5, v64, v169, v5
+	v_div_scale_f32 v64, s[2:3], v169, v169, v6
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v6, v169, v6
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v6, v64, v169, v6
+	v_div_scale_f32 v64, s[2:3], v169, v169, v7
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v7, v169, v7
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v7, v64, v169, v7
+	v_div_scale_f32 v64, s[2:3], v169, v169, v8
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v8, v169, v8
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v8, v64, v169, v8
+	v_div_scale_f32 v64, s[2:3], v169, v169, v9
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v9, v169, v9
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v9, v64, v169, v9
+	v_div_scale_f32 v64, s[2:3], v169, v169, v10
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v10, v169, v10
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v10, v64, v169, v10
+	v_div_scale_f32 v64, s[2:3], v169, v169, v11
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v11, v169, v11
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v11, v64, v169, v11
+	v_div_scale_f32 v64, s[2:3], v169, v169, v12
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v12, v169, v12
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v12, v64, v169, v12
+	v_div_scale_f32 v64, s[2:3], v169, v169, v13
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v13, v169, v13
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v13, v64, v169, v13
+	v_div_scale_f32 v64, s[2:3], v169, v169, v14
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v14, v169, v14
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	v_div_fmas_f32 v64, v64, v65, v67
+	v_div_fixup_f32 v14, v64, v169, v14
+	v_div_scale_f32 v64, s[2:3], v169, v169, v15
+	v_rcp_f32_e32 v65, v64
+	v_div_scale_f32 v66, vcc, v15, v169, v15
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 3
+	v_fma_f32 v67, -v64, v65, 1.0
+	s_load_dword s0, s[0:1], 0x5c
+	v_fmac_f32_e32 v65, v67, v65
+	v_mul_f32_e32 v67, v66, v65
+	v_fma_f32 v68, -v64, v67, v66
+	v_fmac_f32_e32 v67, v68, v65
+	v_fma_f32 v64, -v64, v67, v66
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 4, 2), 0
+	s_waitcnt lgkmcnt(0)
+	s_ashr_i32 s1, s0, 31
+	v_div_fmas_f32 v64, v64, v65, v67
+	s_setreg_imm32_b32 hwreg(HW_REG_MODE, 2, 2), 0
+	v_cvt_f16_f32_e32 v33, v33
+	v_cvt_f16_f32_e32 v32, v32
+	v_cvt_f16_f32_e32 v35, v35
+	v_cvt_f16_f32_e32 v34, v34
+	v_cvt_f16_f32_e32 v65, v0
+	v_mov_b32_e32 v0, s17
+	v_div_fixup_f32 v15, v64, v169, v15
+	s_add_u32 s2, s12, s10
+	v_cvt_f16_f32_e32 v37, v37
+	v_cvt_f16_f32_e32 v36, v36
+	v_cvt_f16_f32_e32 v39, v39
+	v_cvt_f16_f32_e32 v38, v38
+	v_cvt_f16_f32_e32 v64, v1
+	v_cvt_f16_f32_e32 v66, v3
+	v_cvt_f16_f32_e32 v67, v2
+	v_mul_lo_u32 v2, v0, s0
+	s_waitcnt vmcnt(0)
+	v_mul_lo_u32 v3, v129, s1
+	v_mad_u64_u32 v[0:1], s[0:1], v129, s0, 0
+	s_addc_u32 s3, s13, s11
+	v_cvt_f16_f32_e32 v41, v41
+	v_cvt_f16_f32_e32 v40, v40
+	v_cvt_f16_f32_e32 v43, v43
+	v_cvt_f16_f32_e32 v42, v42
+	v_add3_u32 v1, v1, v3, v2
+	v_cvt_f16_f32_e32 v45, v45
+	v_cvt_f16_f32_e32 v44, v44
+	v_cvt_f16_f32_e32 v47, v47
+	v_cvt_f16_f32_e32 v46, v46
+	v_lshl_add_u64 v[0:1], v[0:1], 1, s[2:3]
+	v_lshlrev_b32_e32 v2, 3, v128
+	v_mov_b32_e32 v3, 0
+	v_cvt_f16_f32_e32 v49, v49
+	v_cvt_f16_f32_e32 v48, v48
+	v_cvt_f16_f32_e32 v51, v51
+	v_cvt_f16_f32_e32 v50, v50
+	v_lshl_add_u64 v[0:1], v[0:1], 0, v[2:3]
+	v_pack_b32_f16 v3, v34, v35
+	v_pack_b32_f16 v2, v32, v33
+	v_cvt_f16_f32_e32 v53, v53
+	v_cvt_f16_f32_e32 v52, v52
+	v_cvt_f16_f32_e32 v55, v55
+	v_cvt_f16_f32_e32 v54, v54
+	global_store_dwordx2 v[0:1], v[2:3], off
+	v_pack_b32_f16 v3, v38, v39
+	v_pack_b32_f16 v2, v36, v37
+	v_cvt_f16_f32_e32 v57, v57
+	v_cvt_f16_f32_e32 v56, v56
+	v_cvt_f16_f32_e32 v59, v59
+	v_cvt_f16_f32_e32 v58, v58
+	global_store_dwordx2 v[0:1], v[2:3], off offset:16
+	v_pack_b32_f16 v3, v42, v43
+	v_pack_b32_f16 v2, v40, v41
+	v_cvt_f16_f32_e32 v61, v61
+	v_cvt_f16_f32_e32 v60, v60
+	v_cvt_f16_f32_e32 v63, v63
+	v_cvt_f16_f32_e32 v62, v62
+	global_store_dwordx2 v[0:1], v[2:3], off offset:32
+	v_pack_b32_f16 v3, v46, v47
+	v_pack_b32_f16 v2, v44, v45
+	v_cvt_f16_f32_e32 v17, v17
+	v_cvt_f16_f32_e32 v16, v16
+	v_cvt_f16_f32_e32 v19, v19
+	v_cvt_f16_f32_e32 v18, v18
+	global_store_dwordx2 v[0:1], v[2:3], off offset:48
+	v_pack_b32_f16 v3, v50, v51
+	v_pack_b32_f16 v2, v48, v49
+	v_cvt_f16_f32_e32 v21, v21
+	v_cvt_f16_f32_e32 v20, v20
+	v_cvt_f16_f32_e32 v23, v23
+	v_cvt_f16_f32_e32 v22, v22
+	global_store_dwordx2 v[0:1], v[2:3], off offset:64
+	v_pack_b32_f16 v3, v54, v55
+	v_pack_b32_f16 v2, v52, v53
+	v_cvt_f16_f32_e32 v25, v25
+	v_cvt_f16_f32_e32 v24, v24
+	v_cvt_f16_f32_e32 v27, v27
+	v_cvt_f16_f32_e32 v26, v26
+	global_store_dwordx2 v[0:1], v[2:3], off offset:80
+	v_pack_b32_f16 v3, v58, v59
+	v_pack_b32_f16 v2, v56, v57
+	v_cvt_f16_f32_e32 v29, v29
+	v_cvt_f16_f32_e32 v28, v28
+	v_cvt_f16_f32_e32 v31, v31
+	v_cvt_f16_f32_e32 v30, v30
+	global_store_dwordx2 v[0:1], v[2:3], off offset:96
+	v_pack_b32_f16 v3, v62, v63
+	v_pack_b32_f16 v2, v60, v61
+	global_store_dwordx2 v[0:1], v[2:3], off offset:112
+	v_pack_b32_f16 v3, v18, v19
+	v_pack_b32_f16 v2, v16, v17
+	v_cvt_f16_f32_e32 v5, v5
+	v_cvt_f16_f32_e32 v4, v4
+	v_cvt_f16_f32_e32 v7, v7
+	v_cvt_f16_f32_e32 v6, v6
+	global_store_dwordx2 v[0:1], v[2:3], off offset:128
+	v_pack_b32_f16 v3, v22, v23
+	v_pack_b32_f16 v2, v20, v21
+	v_cvt_f16_f32_e32 v9, v9
+	v_cvt_f16_f32_e32 v8, v8
+	v_cvt_f16_f32_e32 v11, v11
+	v_cvt_f16_f32_e32 v10, v10
+	global_store_dwordx2 v[0:1], v[2:3], off offset:144
+	v_pack_b32_f16 v3, v26, v27
+	v_pack_b32_f16 v2, v24, v25
+	v_cvt_f16_f32_e32 v13, v13
+	v_cvt_f16_f32_e32 v12, v12
+	v_cvt_f16_f32_e32 v15, v15
+	v_cvt_f16_f32_e32 v14, v14
+	global_store_dwordx2 v[0:1], v[2:3], off offset:160
+	v_pack_b32_f16 v3, v30, v31
+	v_pack_b32_f16 v2, v28, v29
+	global_store_dwordx2 v[0:1], v[2:3], off offset:176
+	v_pack_b32_f16 v3, v67, v66
+	v_pack_b32_f16 v2, v65, v64
+	global_store_dwordx2 v[0:1], v[2:3], off offset:192
+	v_pack_b32_f16 v3, v6, v7
+	v_pack_b32_f16 v2, v4, v5
+	global_store_dwordx2 v[0:1], v[2:3], off offset:208
+	v_pack_b32_f16 v3, v10, v11
+	v_pack_b32_f16 v2, v8, v9
+	global_store_dwordx2 v[0:1], v[2:3], off offset:224
+	v_pack_b32_f16 v3, v14, v15
+	v_pack_b32_f16 v2, v12, v13
+	global_store_dwordx2 v[0:1], v[2:3], off offset:240
+	s_endpgm
+	.section	.rodata,#alloc
+	.p2align	6, 0x0
+	.amdhsa_kernel _attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de
+		.amdhsa_group_segment_fixed_size 0
+		.amdhsa_private_segment_fixed_size 164
+		.amdhsa_kernarg_size 108
+		.amdhsa_user_sgpr_count 15
+		.amdhsa_user_sgpr_dispatch_ptr 0
+		.amdhsa_user_sgpr_queue_ptr 0
+		.amdhsa_user_sgpr_kernarg_segment_ptr 1
+		.amdhsa_user_sgpr_dispatch_id 0
+		.amdhsa_user_sgpr_kernarg_preload_length  13
+		.amdhsa_user_sgpr_kernarg_preload_offset  0
+		.amdhsa_user_sgpr_private_segment_size 0
+		.amdhsa_enable_private_segment 1
+		.amdhsa_system_sgpr_workgroup_id_x 1
+		.amdhsa_system_sgpr_workgroup_id_y 1
+		.amdhsa_system_sgpr_workgroup_id_z 0
+		.amdhsa_system_sgpr_workgroup_info 0
+		.amdhsa_system_vgpr_workitem_id 0
+		.amdhsa_next_free_vgpr 256
+		.amdhsa_next_free_sgpr 22
+		.amdhsa_accum_offset 256
+		.amdhsa_reserve_xnack_mask 1
+		.amdhsa_float_round_mode_32 0
+		.amdhsa_float_round_mode_16_64 0
+		.amdhsa_float_denorm_mode_32 0
+		.amdhsa_float_denorm_mode_16_64 3
+		.amdhsa_dx10_clamp 1
+		.amdhsa_ieee_mode 1
+		.amdhsa_fp16_overflow 0
+		.amdhsa_tg_split 0
+		.amdhsa_exception_fp_ieee_invalid_op 0
+		.amdhsa_exception_fp_denorm_src 0
+		.amdhsa_exception_fp_ieee_div_zero 0
+		.amdhsa_exception_fp_ieee_overflow 0
+		.amdhsa_exception_fp_ieee_underflow 0
+		.amdhsa_exception_fp_ieee_inexact 0
+		.amdhsa_exception_int_div_zero 0
+	.end_amdhsa_kernel
+	.text
+.Lfunc_end0:
+	.size	_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de, .Lfunc_end0-_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de
+	.cfi_endproc
+
+	.p2alignl 6, 3212836864
+	.fill 256, 4, 3212836864
+	.section	.debug_abbrev
+	.byte	1
+	.byte	17
+	.byte	1
+	.byte	37
+	.byte	14
+	.byte	19
+	.byte	5
+	.byte	3
+	.byte	14
+	.byte	16
+	.byte	23
+	.ascii	"\264B"
+	.byte	25
+	.byte	17
+	.byte	1
+	.byte	18
+	.byte	6
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	46
+	.byte	0
+	.byte	17
+	.byte	1
+	.byte	18
+	.byte	6
+	.byte	110
+	.byte	14
+	.byte	3
+	.byte	14
+	.byte	63
+	.byte	25
+	.byte	0
+	.byte	0
+	.byte	0
+	.section	.debug_info
+.Lcu_begin0:
+	.long	.Ldebug_info_end0-.Ldebug_info_start0
+.Ldebug_info_start0:
+	.short	4
+	.long	.debug_abbrev
+	.byte	8
+	.byte	1
+	.long	.Linfo_string0
+	.short	2
+	.long	.Linfo_string1
+	.long	.Lline_table_start0
+
+	.quad	.Lfunc_begin0
+	.long	.Lfunc_end0-.Lfunc_begin0
+	.byte	2
+	.quad	.Lfunc_begin0
+	.long	.Lfunc_end0-.Lfunc_begin0
+	.long	.Linfo_string2
+	.long	.Linfo_string2
+
+	.byte	0
+.Ldebug_info_end0:
+	.section	.debug_str,"MS",@progbits,1
+.Linfo_string0:
+	.asciz	"triton"
+.Linfo_string1:
+	.asciz	"<unknown>"
+.Linfo_string2:
+	.asciz	"_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de"
+	.section	.debug_pubnames
+	.long	.LpubNames_end0-.LpubNames_start0
+.LpubNames_start0:
+	.short	2
+	.long	.Lcu_begin0
+	.long	60
+	.long	38
+	.asciz	"_attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de"
+	.long	0
+.LpubNames_end0:
+	.section	.debug_pubtypes
+	.long	.LpubTypes_end0-.LpubTypes_start0
+.LpubTypes_start0:
+	.short	2
+	.long	.Lcu_begin0
+	.long	60
+	.long	0
+.LpubTypes_end0:
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"clang version 14.0.0"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 14.0.0 (https://github.com/RadeonOpenCompute/llvm-project roc-5.2.0 22204 50d6d5d5b608d2abd6af44314abc6ad20036af3b)"
+	.ident	"AMD clang version 17.0.0 (ssh://gerritgit/lightning/ec/llvm-project amd-mainline-open 23425 56ebc6a00586c4107105c18e3dc4cc0966d7e8e2)"
+	.section	".note.GNU-stack"
+	.amdgpu_metadata
+---
+amdhsa.kernels:
+  - .agpr_count:     0
+    .args:
+      - .address_space:  global
+        .offset:         0
+        .size:           8
+        .value_kind:     global_buffer
+      - .address_space:  global
+        .offset:         8
+        .size:           8
+        .value_kind:     global_buffer
+      - .address_space:  global
+        .offset:         16
+        .size:           8
+        .value_kind:     global_buffer
+      - .offset:         24
+        .size:           4
+        .value_kind:     by_value
+      - .address_space:  global
+        .offset:         32
+        .size:           8
+        .value_kind:     global_buffer
+      - .address_space:  global
+        .offset:         40
+        .size:           8
+        .value_kind:     global_buffer
+      - .offset:         48
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         52
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         56
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         60
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         64
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         68
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         72
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         76
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         80
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         84
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         88
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         92
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         96
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         100
+        .size:           4
+        .value_kind:     by_value
+      - .offset:         104
+        .size:           4
+        .value_kind:     by_value
+    .group_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .kernarg_segment_size: 108
+    .language:       OpenCL C
+    .language_version:
+      - 2
+      - 0
+    .max_flat_workgroup_size: 256
+    .name:           _attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de
+    .private_segment_fixed_size: 164
+    .sgpr_count:     28
+    .sgpr_spill_count: 0
+    .symbol:         _attn_fwd_0d1d2d34d5d6de7de8de9c10de11de12de13c14de15de16de17c18de19de20de21c2223de24de.kd
+    .vgpr_count:     256
+    .vgpr_spill_count: 40
+    .wavefront_size: 64
+amdhsa.target:   amdgcn-amd-amdhsa--gfx942
+amdhsa.version:
+  - 1
+  - 1
+...
+
+	.end_amdgpu_metadata
+	.section	.debug_line
+.Lline_table_start0:

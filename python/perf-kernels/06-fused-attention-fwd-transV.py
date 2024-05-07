@@ -92,19 +92,14 @@ def _attn_fwd(
     # So conversion is quite cheap
     q = (q * qk_scale).to(q.dtype)
 
-    k = tl.load(K_block_ptr)
-    qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-    qk += tl.dot(q, k)
-
     lo, hi = 0, N_CTX
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        if start_n != lo:
-            k = tl.load(K_block_ptr)
-            qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-            qk += tl.dot(q, k)
+        k = tl.load(K_block_ptr)
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        qk += tl.dot(q, k)
 
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         qk = qk - m_ij[:, None]
@@ -177,7 +172,7 @@ class _attention(torch.autograd.Function):
             num_stages = 1
             pre_load_v = False
             slice_k_tile = 32
-            kpack = 1
+            kpack = 2
 
         grid = ( triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)
         M = torch.empty((q.shape[0] * q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)

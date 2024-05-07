@@ -408,10 +408,10 @@ public:
     for (auto chain : dotChains) {
       scheduleSlicedDot(chain, stages, sinkLDSRd, sinkLDSWr,
                         interleaveLoadWithLDSOps);
-      // stages = 4;
-      // sinkLDSRd = false;
-      // sinkLDSWr = false;
-      // interleaveLoadWithLDSOps = false;
+      stages = 4;
+      sinkLDSRd = false;
+      sinkLDSWr = false;
+      interleaveLoadWithLDSOps = false;
     }
   }
 };

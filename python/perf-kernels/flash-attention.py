@@ -2,16 +2,21 @@
 Fused Attention
 ===============
 
-This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao (https://tridao.me/publications/flash2/flash2.pdf)
-Credits: OpenAI kernel team, AMD ML Frameworks Triton team
+This is a Triton implementation of the Flash Attention v2 algorithm
+See https://tridao.me/publications/flash2/flash2.pdf
 
-Features supported:
+Credits: 
+AMD Triton kernels team
+OpenAI Triton team
+
+Currently only the forward kernel is supported, and contains these features:
 
 1) Fwd with causal masking
-2) Arbitrary Q and KV sequence lengths (currently fwd kernel only)
-3) Arbitrary head sizes (currently fwd kernel only)
-4) Matrix bias (currently fwd kernel only)
-5) ALiBi bias (currently fwd kernel only)
+2) Arbitrary Q and KV sequence lengths
+3) Arbitrary head sizes
+4) Multi and grouped query attention
+5) Variable sequence lengths
+6) ALiBi and matrix bias
 
 """
 
@@ -25,10 +30,6 @@ import triton
 import triton.language as tl
 
 torch_dtype:tl.constexpr = torch.float16
-
-TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
-if TORCH_HAS_FP8E5:
-    torch_dtype:tl.constexpr = torch.float8_e5m2fnuz
 
 class MetaData():
     cu_seqlens_q = None
@@ -267,18 +268,18 @@ def _attn_fwd_inner(
 
 @triton.autotune(
    configs=[
-    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
-    #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
+       triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
-    #    triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
    ],
    key=['IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
    use_cuda_graph=True,
@@ -1113,7 +1114,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
                           (4, 4, 4, 128, 128, 65),
                           (4, 4, 4, 113, 123, 1),
                           ])
-@pytest.mark.parametrize('causal', [False, True])
+@pytest.mark.parametrize('causal', [True, False])
 @pytest.mark.parametrize('use_alibi', [True, False])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
     torch.manual_seed(20)
@@ -1553,4 +1554,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-

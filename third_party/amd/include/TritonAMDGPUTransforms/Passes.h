@@ -23,6 +23,8 @@ std::unique_ptr<Pass> createTritonAMDGPUVerifier();
 
 std::unique_ptr<Pass> createTritonAMDGPUOptimizeEpiloguePass();
 
+std::unique_ptr<Pass> createTritonAMDGPUTransposeCoalescePass(int kpack = 1);
+
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
 #include "TritonAMDGPUTransforms/Passes.h.inc"

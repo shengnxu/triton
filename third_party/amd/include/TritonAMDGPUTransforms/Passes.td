@@ -77,4 +77,21 @@ def TritonAMDGPUReorderInstructions: Pass<"tritonamdgpu-reorder-instructions", "
   let dependentDialects = [];
 }
 
+def TritonAMDGPUTransposeCoalesce: Pass<"tritonamdgpu-transpose-coalesce", "mlir::ModuleOp"> {
+  let summary = "Transpose coalesce";
+
+  let description = "This pass optimizes the global load the LDS write of the matrices not pre-tranposed, e.g."
+                    "in GEMM C = A * B, column-major A or row-majorB.";
+
+  let constructor = "mlir::createTritonAMDGPUTransposeCoalescePass()";
+
+  let dependentDialects = [];
+
+  let options = [
+    Option<"kPack", "kPack",
+           "int32_t", /*default*/"1",
+           "KWidth / kBase">
+  ];
+}
+
 #endif

@@ -57,6 +57,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::registerTritonAMDGPURemoveLayoutConversions();
   mlir::registerTritonAMDGPUReorderInstructions();
   mlir::registerTritonAMDGPUStreamPipeline();
+  mlir::registerTritonAMDGPUTransposeCoalesce();
 
 #endif // USE_ROCM
 

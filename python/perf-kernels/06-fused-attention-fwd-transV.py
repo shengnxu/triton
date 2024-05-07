@@ -112,7 +112,7 @@ def _attn_fwd(
         # -- update output accumulator --
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
-        
+
         v = tl.load(V_block_ptr)
         acc += tl.dot(p.to(v.dtype), v)
         # -- update m_i and l_i
@@ -122,6 +122,7 @@ def _attn_fwd(
         m_i = m_ij
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+
     acc = acc / l_i[:, None]
     # write back O
     O_block_ptr = tl.make_block_ptr(
@@ -164,7 +165,7 @@ class _attention(torch.autograd.Function):
             ## causal=False likes to pre load v but causal=True does not
             pre_load_v = False if causal else True
             slice_k_tile = 32
-            kpack = 1
+            kpack = 2
         else:
             ## D_HEAD = 128
             ## For fp16, pick BLOCK_M=256, num_warps=8

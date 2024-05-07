@@ -82,6 +82,11 @@ SmallVector<unsigned> getRepShapeForCvtLayout(triton::gpu::ConvertLayoutOp op) {
       dstLayout.isa<DotOperandEncodingAttr>())
     if (isMfmaToDotShortcut(srcTy, dstTy))
       return {};
+
+  if (srcLayout.isa<BlockedEncodingAttr>() &&
+      dstLayout.isa<DotOperandEncodingAttr>())
+      return {};
+
 #endif
 
   assert(srcLayout && dstLayout && "Unexpected layout in getRepShape()");
@@ -324,14 +329,15 @@ private:
       unsigned inVec = 0;
       unsigned outVec = 0;
       auto smemShape = getScratchConfigForCvtLayout(cvtLayout, inVec, outVec);
-      unsigned elems = std::accumulate(smemShape.begin(), smemShape.end(), 1,
-                                       std::multiplies{});
-      auto bytes =
-          srcTy.getElementType().isa<triton::PointerType>()
-              ? elems * kPtrBitWidth / 8
-              : elems * std::max<int>(8, srcTy.getElementTypeBitWidth()) / 8;
-      maybeAddScratchBuffer<BufferT::BufferKind::Scratch>(op, bytes,
-                                                          scratchAlignment);
+        unsigned elems = std::accumulate(smemShape.begin(), smemShape.end(), 1,
+                                         std::multiplies{});
+
+        auto bytes =
+            srcTy.getElementType().isa<triton::PointerType>()
+                ? elems * kPtrBitWidth / 8
+                : elems * std::max<int>(8, srcTy.getElementTypeBitWidth()) / 8;
+        maybeAddScratchBuffer<BufferT::BufferKind::Scratch>(op, bytes,
+                                                            scratchAlignment);
     } else if (auto storeAsyncOp =
                    dyn_cast<triton::nvidia_gpu::StoreAsyncOp>(op)) {
       auto srcTy = storeAsyncOp.getSrc().getType().cast<RankedTensorType>();

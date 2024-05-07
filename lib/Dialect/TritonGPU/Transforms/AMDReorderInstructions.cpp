@@ -404,21 +404,22 @@ public:
     // bool sinkLDSWr = false;
     // bool interleaveLoadWithLDSOps = false;
 
+      int stages = 2;
+      bool sinkLDSRd = true;
+      bool sinkLDSWr = true;
+      bool interleaveLoadWithLDSOps = true;
+
     // For CK-like FA fwd pass schedule of sliced dots use following configuration:
-    int stages = 2;
-    bool sinkLDSRd = true;
-    bool sinkLDSWr = true;
-    bool interleaveLoadWithLDSOps = true;
 
     SmallVector<SmallVector<Operation *>> dotChains;
     findDotChains(m, dotChains);
     for (auto chain : dotChains) {
       scheduleSlicedDot(chain, stages, sinkLDSRd, sinkLDSWr,
                         interleaveLoadWithLDSOps);
-      // stages = 4;
-      // sinkLDSRd = false;
-      // sinkLDSWr = false;
-      // interleaveLoadWithLDSOps = false;
+      stages = 4;
+      sinkLDSRd = false;
+      sinkLDSWr = false;
+      interleaveLoadWithLDSOps = false;
     }
   }
 };

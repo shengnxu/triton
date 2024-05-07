@@ -434,8 +434,8 @@ struct ConvertTritonGPUToLLVM
     // Allocate shared memory and set barrier
     ModuleAllocation allocation(mod);
     ModuleMembarAnalysis membarPass(&allocation);
-    membarPass.run();
-
+    // membarPass.run();
+    // mod.dump();
     /* Get tensorPtrMap before conversion */
     TensorPtrMapT tensorPtrMap;
     mod.walk([&tensorPtrMap](

@@ -217,12 +217,7 @@ def _attn_fwd_inner(
             global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
 
-            # Compute the relative position using the global positions
-            relative_pos_block = global_m_positions[:,None] + actual_seqlen_k - global_n_positions[None,:] - actual_seqlen_q
-            relative_pos_block = tl.abs(relative_pos_block)
-
-
-            alibi_block = -1 * alibi_slope  * relative_pos_block
+            alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_k, actual_seqlen_q, global_m_positions, global_n_positions)
 
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
@@ -626,6 +621,17 @@ def print_gpu(prefix, val=None):
             tl.device_print(prefix)
 
 @triton.jit
+def compute_alibi_block(alibi_slope, seqlen_k, seqlen_q, offs_m, offs_n, transpose = False):
+    # compute the relative position using the global positions
+    if transpose:
+        relative_pos_block = offs_n[:,None] + seqlen_q - offs_m[None,:] - seqlen_k
+    else:
+        relative_pos_block = offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q
+    relative_pos_block = tl.abs(relative_pos_block)
+    
+    return -1 * alibi_slope  * relative_pos_block
+
+@triton.jit
 def _bwd_kernel_dk_dv(
                    dk, dv,
                    Q, k, v, sm_scale, alibi_slope,
@@ -669,12 +675,7 @@ def _bwd_kernel_dk_dv(
         m = tl.load(M + offs_m)
         kqT = tl.dot(k, qT)
         if alibi_slope is not None:
-            # compute the relative position using the global positions
-            relative_pos_block = offs_n[:,None] + N_CTX - offs_m[None,:] - N_CTX
-            relative_pos_block = tl.abs(relative_pos_block)
-            
-            # add alibi
-            alibi_block = -1 * alibi_slope  * relative_pos_block
+            alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX,  offs_m, offs_n, True)
             kqT += alibi_block * 1.44269504089
 
         pT = tl.math.exp2(kqT - m[None, :])
@@ -702,7 +703,7 @@ def _bwd_kernel_dk_dv(
 
 @triton.jit
 def _bwd_kernel_dq(dq, q, K, V,
-                 do, m, D,  alibi_slope,
+                 do, m, D, alibi_slope,
                  # shared by Q/K/V/DO.
                  stride_tok, stride_d,
                  H, N_CTX,
@@ -741,11 +742,7 @@ def _bwd_kernel_dq(dq, q, K, V,
         kT = tl.load(KT_block_ptr)
         qk = tl.dot(q, kT)
         if alibi_slope is not None:  
-            # Compute the relative position using the global positions
-            relative_pos_block = offs_m[:,None] + N_CTX - offs_n[None,:] - N_CTX
-            relative_pos_block = tl.abs(relative_pos_block)
-
-            alibi_block = -1 * alibi_slope  * relative_pos_block
+            alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n)
             qk += alibi_block * 1.44269504089
 
         p = tl.math.exp2(qk - m)
@@ -1410,8 +1407,6 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
         # for n heads the set of slopes is the geometric sequence that starts 2^(-8/n)
         alibi_slopes = torch.tensor([2**(-8/H*i) for i in range(1, H+1)], dtype=torch.float32, device="cuda").repeat(Z, 1)
         input_metadata.need_alibi(alibi_slopes, Z, H)
-
-   
     dout = torch.randn_like(q)
     # reference implementation
     if torch_sdpa_test:

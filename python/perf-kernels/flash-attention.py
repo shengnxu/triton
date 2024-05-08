@@ -28,9 +28,6 @@ import torch
 import triton
 import triton.language as tl
 
-DEBUG = False
-ALT = False
-
 torch_dtype:tl.constexpr = torch.float16
 
 TORCH_HAS_FP8E5 = hasattr(torch, 'float8_e5m2fnuz')
@@ -642,17 +639,6 @@ def _bwd_kernel_dk_dv(
                    # Filled in by the wrapper.
                    start_n, start_m, num_steps,
                    MASK: tl.constexpr):
-    if DEBUG:
-        print_gpu("_bwd_kernel_dk_dv")
-        # print_gpu("BLOCK_M1", BLOCK_M1)
-        # print_gpu("BLOCK_N1", BLOCK_N1)
-        # print_gpu("BLOCK_DMODEL", BLOCK_DMODEL)
-        # print_gpu("N_CTX", N_CTX)
-        # print_gpu("start_n", start_n)
-        # print_gpu("start_m", start_m)
-        # print_gpu("num_steps", num_steps)
-
-
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, BLOCK_DMODEL)
@@ -677,32 +663,20 @@ def _bwd_kernel_dk_dv(
     curr_m = start_m
     step_m = BLOCK_M1
     for blk_idx in range(num_steps):
-        # print_gpu("blk_idx", blk_idx)
         qT = tl.load(QT_block_ptr)
         # Load m before computing qk to reduce pipeline stall.
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         m = tl.load(M + offs_m)
-        # print_gpu("k", k) # BLOCK_N1 x BLOCK_DMODEL
-        # print_gpu("qT", qT) # BLOCK_DMODEL x BLOCK_M_STEP
         kqT = tl.dot(k, qT)
-        # print_gpu("kqT", kqT)
-        if alibi_slope is not None:  
-
-            # Compute the relative position using the global positions
+        if alibi_slope is not None:
+            # compute the relative position using the global positions
             relative_pos_block = offs_n[:,None] + N_CTX - offs_m[None,:] - N_CTX
             relative_pos_block = tl.abs(relative_pos_block)
-            # print_gpu("relative_pos_block", relative_pos_block)
-
-
+            
+            # add alibi
             alibi_block = -1 * alibi_slope  * relative_pos_block
-            # print_gpu("alibi_block", alibi_block)
-            if ALT:
-                kqT += alibi_block
-            else:
-                kqT += alibi_block * 1.44269504089
-        # print_gpu("kqT + alibi_block", kqT)
-        
-       
+            kqT += alibi_block * 1.44269504089
+
         pT = tl.math.exp2(kqT - m[None, :])
         # Autoregressive masking.
         if MASK:
@@ -766,21 +740,13 @@ def _bwd_kernel_dq(dq, q, K, V,
     for blk_idx in range(num_steps):
         kT = tl.load(KT_block_ptr)
         qk = tl.dot(q, kT)
-        
-
         if alibi_slope is not None:  
-
             # Compute the relative position using the global positions
             relative_pos_block = offs_m[:,None] + N_CTX - offs_n[None,:] - N_CTX
             relative_pos_block = tl.abs(relative_pos_block)
-            # print_gpu("relative_pos_block", relative_pos_block)
-
 
             alibi_block = -1 * alibi_slope  * relative_pos_block
-            if ALT:
-                qk += alibi_block
-            else:
-                qk += alibi_block * 1.44269504089
+            qk += alibi_block * 1.44269504089
 
         p = tl.math.exp2(qk - m)
         # Autoregressive masking.
@@ -842,9 +808,9 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes,
     # This assignment is important. It is what allows us to pick the diagonal
     # blocks. Later, when we want to do the lower triangular, we update start_m
     # after the first dkdv call.
-    start_m = start_n # ?
+    start_m = start_n
 
-    MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR # 32/2 = 16
+    MASK_BLOCK_M1: tl.constexpr = BLOCK_M1 // BLK_SLICE_FACTOR
     offs_n = start_n + tl.arange(0, BLOCK_N1)
 
     dv = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
@@ -870,19 +836,15 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes,
     # load K and V: they stay in SRAM throughout the inner loop for dkdv.
     k = tl.load(K_block_ptr)
     v = tl.load(V_block_ptr)
-    # print_gpu("k", k)
-    # print_gpu("v", v)
 
     if USE_ALIBI != 0:
         a_offset = bhid
         alibi_slope = tl.load(alibi_slopes + a_offset)
     else:
         alibi_slope = None
-    if DEBUG:
-        print_gpu("alibi_slope", alibi_slope)
 
-    # compute dK and dV for masked blocks.
-    num_steps = BLOCK_N1 // MASK_BLOCK_M1 # 64//16= 4
+    # compute dK and dV for blocks close to the diagonal that need to be masked
+    num_steps = BLOCK_N1 // MASK_BLOCK_M1
     dk, dv = _bwd_kernel_dk_dv(
                             dk, dv,
                             Q, k, v, sm_scale, alibi_slope,
@@ -895,9 +857,9 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes,
                             MASK=True
                             )
 
-    # Compute dK and dV for non-masked blocks.
-    start_m += num_steps * MASK_BLOCK_M1 # 4 * 16 = 64
-    num_steps = (N_CTX - start_m) // BLOCK_M1 # (128 - 64)//32 = 64//32 = 2
+    # compute dK and dV for blocks that don't need masking further from the diagonal
+    start_m += num_steps * MASK_BLOCK_M1
+    num_steps = (N_CTX - start_m) // BLOCK_M1
 
     dk, dv = _bwd_kernel_dk_dv(
         dk, dv,
@@ -1120,13 +1082,10 @@ class _attention(torch.autograd.Function):
         NUM_WARPS, NUM_STAGES = 4, 1
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
         BLK_SLICE_FACTOR = 2
-        if ALT:
-            arg_k = k
-        else:
-            RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
-            arg_k = k
-            arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
-            assert N_CTX % PRE_BLOCK == 0
+        RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
+        arg_k = k
+        arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
+        assert N_CTX % PRE_BLOCK == 0
         delta = torch.empty_like(M)
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         padded_head = (Lk != ctx.BLOCK_DMODEL)
@@ -1139,21 +1098,11 @@ class _attention(torch.autograd.Function):
             head_dim=Lk,
             BLOCK_M=BLOCK, D_HEAD=ctx.BLOCK_DMODEL,
         )
-
         grid = lambda META: (
             triton.cdiv(N_CTX, META['BLOCK_N1']),
             1,
             BATCH * N_HEAD
         )
-        
-        if DEBUG:
-            print("BLOCK_M1:", BLOCK_M1)
-            print("BLOCK_N1:", BLOCK_N1)
-            print("BLOCK_DMODEL:", ctx.BLOCK_DMODEL)
-            print("BLK_SLICE_FACTOR:", BLK_SLICE_FACTOR)
-            # print("BLOCK_M2:", BLOCK_M2)
-            # print("BLOCK_N2:", BLOCK_N2)
-
         _attn_bwd[grid](
             q, arg_k, v, ctx.sm_scale, ctx.alibi_slopes, do, dq, dk, dv,
             M, delta,
@@ -1418,15 +1367,7 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD',
-                         [
-                        #    (1, 1, 1, 16),
-                            # (1, 1, 2, 16),
-                            # (1, 1, 64, 16),
-                            # (1, 2, 64, 16),
-                        #   (1, 2, 128, 16),
-                            # (1, 1, 1024, 64),
-                            # (1, 2, 128, 16),  
-                          (4, 48, 1024, 64),
+                         [(4, 48, 1024, 64),
                           (4, 48, 2048, 64),
                           (4, 48, 4096, 64),
                           (1, 16, 1024, 64),
@@ -1435,20 +1376,10 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
                           #(1, 16, 1022, 64),
                           ])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [None])
-@pytest.mark.parametrize('torch_sdpa_test', [False])
+@pytest.mark.parametrize('torch_sdpa_test', [False, True])
 @pytest.mark.parametrize('causal', [True])
 @pytest.mark.parametrize('use_alibi', [False, True])
 def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sdpa_test, use_alibi, dtype=torch.float16):
-    if DEBUG:
-        print()
-        print("Z:", Z)
-        print("H:", H)
-        print("N_CTX:", N_CTX)
-        print("D_HEAD:", D_HEAD)
-        print("torch_sdpa_test:", torch_sdpa_test)
-        print("causal:", causal)
-        print("use_alibi:", use_alibi)
-
     torch.manual_seed(20)
     if qseqlen_not_equal_kseqlen is not None:
         seqlen_q = qseqlen_not_equal_kseqlen
@@ -1461,31 +1392,17 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
     if causal and seqlen_q != seqlen_k:
         pytest.skip()
 
-    if ALT:
-        sm_scale = 1
-    else:
-        sm_scale = D_HEAD ** -0.5
+    sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(sm_scale=sm_scale)
     input_metadata.max_seqlens_q = seqlen_q
     input_metadata.max_seqlens_k = seqlen_k
 
     dropout_p = 0
-
-    if ALT:
-        q = (torch.ones((Z, H, seqlen_q, D_HEAD), dtype=dtype, device="cuda").requires_grad_())
-        k = (torch.ones((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").requires_grad_())
-        v = (torch.ones((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").requires_grad_())
-    else:
-        q = (torch.empty((Z, H, seqlen_q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
-        k = (torch.empty((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
-        v = (torch.empty((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
+    q = (torch.empty((Z, H, seqlen_q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
+    k = (torch.empty((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
+    v = (torch.empty((Z, H, seqlen_k, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0.0, std=0.5).requires_grad_())
     o = torch.empty_like(q)
-    if DEBUG:
-        print("q:", q, q.shape)
-        print("k:", k, k.shape)
-        print("v:", v, v.shape)
-        print("o:", o, o.shape)
-    
+
     if causal:
         input_metadata.need_causal()
 
@@ -1494,13 +1411,8 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
         alibi_slopes = torch.tensor([2**(-8/H*i) for i in range(1, H+1)], dtype=torch.float32, device="cuda").repeat(Z, 1)
         input_metadata.need_alibi(alibi_slopes, Z, H)
 
-        if DEBUG:
-            print("alibi_slopes:", alibi_slopes, alibi_slopes.shape)
-
    
     dout = torch.randn_like(q)
-    if DEBUG:
-        print("dout:", dout, dout.shape)
     # reference implementation
     if torch_sdpa_test:
         ref_out, ref_softmax = torch.ops.aten._scaled_dot_product_attention_math(q, k, v,
@@ -1514,27 +1426,17 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
         ref_dq, q.grad = q.grad.clone(), None
     else:
         M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
-        # print("M:", M, M.shape)
         p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
-        if DEBUG:
-            print("p:", p, p.shape)
         if causal:
             p[:, :, M == 0] = float("-inf")
         if use_alibi:
             q_idx = torch.arange(N_CTX, dtype=torch.int32, device="cuda").unsqueeze(-1)
             k_idx = torch.arange(N_CTX, dtype=torch.int32, device="cuda").unsqueeze(0)
             relative_pos = torch.abs(q_idx + N_CTX - N_CTX - k_idx)
-            if DEBUG:
-                print("relative_pos:", relative_pos, relative_pos.shape)
             alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
-            if DEBUG: 
-                print("alibi:", alibi, alibi.shape)
             p+= alibi
-            if DEBUG: 
-                print("p + alibi:", p, p.shape)
         
         p = torch.softmax(p.float(), dim=-1).type(dtype=p.dtype)
-        # print("softmax(p):", p, p.shape)
         ref_out = torch.matmul(p, v)
         ref_out.backward(dout)
         ref_dv, v.grad = v.grad.clone(), None
@@ -1553,9 +1455,6 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
     #print("tri")
     #print(tri_dv)
     # compare
-    if DEBUG:
-        print("ref_out:", ref_out, ref_out.shape)
-        print("tri_out:", tri_out, tri_out.shape)
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=0)
     # The current block size for MI200 series is 64x64. This results in
     # larger differences in float results due to rounding.
@@ -1569,13 +1468,6 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
 
     RTOL = 0
 
-    if DEBUG:
-        print("ref_dv:", ref_dv, ref_dv.shape)  
-        print("tri_dv:", tri_dv, tri_dv.shape)
-        print("ref_dk:", ref_dk, ref_dk.shape)
-        print("tri_dk:", tri_dk, tri_dk.shape)
-        print("ref_dq:", ref_dq, ref_dq.shape)
-        print("tri_dq:", tri_dq, tri_dq.shape)
     torch.testing.assert_close(ref_dv, tri_dv, atol=ATOL, rtol=RTOL)
     torch.testing.assert_close(ref_dk, tri_dk, atol=ATOL, rtol=RTOL)
     torch.testing.assert_close(ref_dq, tri_dq, atol=ATOL, rtol=RTOL)

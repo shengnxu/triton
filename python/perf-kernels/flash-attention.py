@@ -149,6 +149,45 @@ def load_fn(block_ptr, first, second, pad):
     return tensor
 
 @triton.jit
+def print_gpu(prefix, val=None):
+    if (tl.program_id(0) == 0) and ((tl.program_id(1) == 0) and (tl.program_id(2) == 0)):
+        if val is not None:
+            tl.device_print(prefix, val)
+        else:
+            tl.device_print(prefix)
+
+@triton.jit
+def compute_alibi_block(alibi_slope, seqlen_k, seqlen_q, offs_m, offs_n, transpose = False):
+    # compute the relative position using the global positions
+    # e.g. alibi_slope = 1, seqlen_q = 4, seqlen_k = 4, offs_m = [0, 1, 2, 3], offs_n = [0, 1, 2, 4], transpose = False
+    # 1. offs_m[:,None] = [[0],
+    #                       [1],
+    #                       [2],
+    #                       [3]]
+    # 2. offs_m[:,None] + seqlen_k = [[4],
+    #                                  [5],
+    #                                   [6],
+    #                                   [7]]
+    # 3. offs_m[:,None] + seqlen_k - offs_n[None,:] = [[4], - [[0, 1, 2, 3]] =  [[4, 3, 2, 1],
+    #                                                  [5],                    [5, 4, 3, 2],
+    #                                                   [6],                   [6, 5, 4, 3]]
+    #                                                   [7]]                   [7, 6, 5, 4]]
+    #                                                   
+    # 4. offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q = [[0, 1, 2, 3],
+    #                                                              [-1, 0, 1, 2],
+    #                                                              [-2, -1, 0, 1],
+    #                                                              [-3, -2 , -1, 0]]
+    # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[0, -1, -2, -3],
+    #                                                     [-1, 0, -1, -2],
+    #                                                     [-2, -1, 0, -1],
+    #                                                     [-3, -2 , -1, 0]]
+    if transpose:
+        relative_pos_block = offs_n[:,None] + seqlen_q - offs_m[None,:] - seqlen_k
+    else:
+        relative_pos_block = offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q
+    return -1 * alibi_slope * tl.abs(relative_pos_block)
+
+@triton.jit
 def _attn_fwd_inner(
     acc, l_i, m_i, q,
     K_block_ptr, V_block_ptr,
@@ -611,25 +650,6 @@ def _attn_bwd_preprocess(
         tl.store(delta_ptrs, delta, mask=mask)
     else:
         tl.store(delta_ptrs, delta)
-
-@triton.jit
-def print_gpu(prefix, val=None):
-    if (tl.program_id(0) == 0) and ((tl.program_id(1) == 0) and (tl.program_id(2) == 0)):
-        if val is not None:
-            tl.device_print(prefix, val)
-        else:
-            tl.device_print(prefix)
-
-@triton.jit
-def compute_alibi_block(alibi_slope, seqlen_k, seqlen_q, offs_m, offs_n, transpose = False):
-    # compute the relative position using the global positions
-    if transpose:
-        relative_pos_block = offs_n[:,None] + seqlen_q - offs_m[None,:] - seqlen_k
-    else:
-        relative_pos_block = offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q
-    relative_pos_block = tl.abs(relative_pos_block)
-    
-    return -1 * alibi_slope  * relative_pos_block
 
 @triton.jit
 def _bwd_kernel_dk_dv(

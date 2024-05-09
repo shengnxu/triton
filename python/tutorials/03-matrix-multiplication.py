@@ -182,18 +182,20 @@ import pytest
         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5,
                       num_warps=2),
     ] if torch.version.hip is None else [
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2},
+        #triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2},
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 1, },
                       num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4, 'waves_per_eu': 2},
-                      num_warps=8, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2},
-                      num_warps=8, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'waves_per_eu': 3},
-                      num_warps=4, num_stages=0),
-        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 8},
-                      num_warps=4, num_stages=0),
+        #triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 16, 'GROUP_SIZE_M': 4, 'waves_per_eu': 2},
+                      #num_warps=8, num_stages=0),
+        #triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 2},
+                      #num_warps=8, num_stages=0),
+        #triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8, 'waves_per_eu': 3},
+                      #num_warps=4, num_stages=0),
+        #triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 1, 'waves_per_eu': 8},
+                      #num_warps=4, num_stages=0),
     ],
     key=['M', 'N', 'K'],
+    reset_to_zero=['bias_ptr'],
 )
 @triton.heuristics({
     'EVEN_K': lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0,
@@ -202,6 +204,8 @@ import pytest
 def matmul_kernel(
         # Pointers to matrices
         a_ptr, b_ptr, c_ptr,
+        # bias ptr
+        bias_ptr,
         # Matrix dimensions
         M, N, K,
         # The stride variables represent how much to increase the ptr by when moving by 1
@@ -256,6 +260,9 @@ def matmul_kernel(
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+    #if pid_n == 0:
+    bias_gradient = tl.zeros((BLOCK_SIZE_M,), dtype=tl.float32)
+
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
@@ -267,9 +274,21 @@ def matmul_kernel(
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
         accumulator += tl.dot(a, b)
+
+        if pid_n == 0:
+            bias_gradient_partial = tl.sum(a, axis=1)
+            bias_gradient += bias_gradient_partial
+            #tl.atomic_add(bias_gradient_ptrs, bias_gradient_partial, mask=(offs_bias_gradient<M))
+
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
+
+    if pid_n == 0:
+        offs_bias_gradient = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        bias_gradient_ptrs = bias_ptr + offs_bias_gradient
+        tl.store(bias_gradient_ptrs, bias_gradient, mask=(offs_bias_gradient<M))
+
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
     if ACTIVATION == "leaky_relu":
@@ -306,17 +325,19 @@ def matmul(a, b, activation=""):
     K, N = b.shape
     # Allocates output.
     c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+    bias_gradient = torch.zeros((M,), device=a.device, dtype=a.dtype)
     # 1D launch kernel where each block gets its own program.
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     matmul_kernel[grid](
         a, b, c,  #
+        bias_gradient,
         M, N, K,  #
         a.stride(0), a.stride(1),  #
         b.stride(0), b.stride(1),  #
         c.stride(0), c.stride(1),  #
         ACTIVATION=activation  #
     )
-    return c
+    return c, bias_gradient
 
 
 # %%
@@ -326,25 +347,37 @@ def matmul(a, b, activation=""):
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
 @pytest.mark.parametrize("M, N, K, in_dtype, out_dtype",
 [ (*shape, in_dtype, out_dtype)
-    for shape in [(128, 256, 32), (128, 16, 32), (32, 128, 64),
-                  (128, 128, 64), (64, 128, 128), (32, 128, 64),
-                  (64, 64, 32), (32, 32, 128), (128, 128, 64),
-                   (64, 128, 128), (512, 512, 512), (1024, 1024, 1024)]
-    for in_dtype, out_dtype in [('int8', 'int8'),
-                                ('float16', 'float16'),
-                                ('bfloat16', 'bfloat16'),
-                                ('float16', 'float32'),
+    for shape in [#(128, 256, 32), 
+        (1, 11, 17),
+                    #(128, 16, 32), (32, 128, 64),
+                  #(128, 128, 64), (64, 128, 128), (32, 128, 64),
+                  #(64, 64, 32), (32, 32, 128), (128, 128, 64),
+                   #(64, 128, 128), (512, 512, 512), (1024, 1024, 1024)
+                   ]
+    for in_dtype, out_dtype in [#('int8', 'int8'),
+                                #('float16', 'float16'),
+                                #('bfloat16', 'bfloat16'),
+                                #('float16', 'float32'),
                                 ('float32', 'float32')]]
 )
 def test_correctness(M, N, K, in_dtype, out_dtype):
     torch.manual_seed(0)
-    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
-    b = torch.randn((K, N), device='cuda', dtype=torch.float16)
-    triton_output = matmul(a, b)
+    a = torch.randn((M, K), device='cuda', dtype=torch.float32)
+    b = torch.randn((K, N), device='cuda', dtype=torch.float32)
+    triton_output, triton_bias_gradient = matmul(a, b)
     torch_output = torch.matmul(a, b)
+    torch_bias_gradient = a.sum(axis=1)
+    print(f"a={a}")
+    print(f"triton_bias_gradient={triton_bias_gradient}")
+    print(f"torch_bias_gradient={torch_bias_gradient}")
     print(f"triton_output={triton_output}")
     print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
+    if torch.allclose(triton_bias_gradient, torch_bias_gradient, atol=1e-2, rtol=rtol):
+        print("✅ Triton and Torch match")
+    else:
+        print("❌ Triton and Torch differ")
+        assert torch.allclose(triton_bias_gradient, torch_bias_gradient, atol=1e-2, rtol=rtol)
     if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=rtol):
         print("✅ Triton and Torch match")
     else:

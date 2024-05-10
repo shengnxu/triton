@@ -983,8 +983,7 @@ class _attention(torch.autograd.Function):
             USE_ALIBI=False if metadata.alibi_slopes is None else True,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
             RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
-            BATCH_SIZE= q.shape[0],
-            allow_flush_denorm=True
+            BATCH_SIZE= q.shape[0]
         )
 
         ctx.save_for_backward(q, k, v, o, M)

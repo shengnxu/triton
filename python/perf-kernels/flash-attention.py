@@ -157,35 +157,32 @@ def print_gpu(prefix, val=None):
             tl.device_print(prefix)
 
 @triton.jit
-def compute_alibi_block(alibi_slope, seqlen_k, seqlen_q, offs_m, offs_n, transpose = False):
+def compute_alibi_block(alibi_slope, offs_m, offs_n, transpose = False):
     # compute the relative position using the global positions
-    # e.g. alibi_slope = 1, seqlen_q = 4, seqlen_k = 4, offs_m = [0, 1, 2, 3], offs_n = [0, 1, 2, 4], transpose = False
+    # e.g. alibi_slope = 1, offs_m = [0, 1, 2, 3], offs_n = [0, 1, 2, 3, 4], transpose = False
     # 1. offs_m[:,None] = [[0],
     #                       [1],
     #                       [2],
     #                       [3]]
-    # 2. offs_m[:,None] + seqlen_k = [[4],
-    #                                  [5],
-    #                                   [6],
-    #                                   [7]]
-    # 3. offs_m[:,None] + seqlen_k - offs_n[None,:] = [[4], - [[0, 1, 2, 3]] =  [[4, 3, 2, 1],
-    #                                                  [5],                    [5, 4, 3, 2],
-    #                                                   [6],                   [6, 5, 4, 3]]
-    #                                                   [7]]                   [7, 6, 5, 4]]
-    #                                                   
-    # 4. offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q = [[0, 1, 2, 3],
-    #                                                              [-1, 0, 1, 2],
-    #                                                              [-2, -1, 0, 1],
-    #                                                              [-3, -2 , -1, 0]]
-    # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[0, -1, -2, -3],
-    #                                                     [-1, 0, -1, -2],
-    #                                                     [-2, -1, 0, -1],
-    #                                                     [-3, -2 , -1, 0]]
+    # 2. offs_m[:,None] - offs_n[None,:] [[0], - [[0, 1, 2, 3, 4]] =  [[ 0, -1, -2, -3, -4],
+    #                                      [1],                    [ 1, 0, -1, -2, -3],
+    #                                      [2],                    [ 2, 1, 0, -1, -2]]
+    #                                      [3]]                   [ 3, 2 , 1, 0, -1]]
+    # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[ 0, -1, -2, -3, -4],
+    #                                                     [-1, 0, -1, -2, -3],
+    #                                                     [-2, -1, 0, -1, -2],
+    #                                                     [-3, -2 , -1, 0, - 1]]
     if transpose:
-        relative_pos_block = offs_n[:,None] + seqlen_q - offs_m[None,:] - seqlen_k
+        relative_pos_block = offs_n[:,None] - offs_m[None,:]
     else:
-        relative_pos_block = offs_m[:,None] + seqlen_k - offs_n[None,:] - seqlen_q
+        relative_pos_block = offs_m[:,None] - offs_n[None,:]
     return -1 * alibi_slope * tl.abs(relative_pos_block)
+
+def compute_alibi_tensor(alibi_slopes, seqlen_q, seqlen_k):
+    q_idx = torch.arange(seqlen_q, dtype=torch.int32, device="cuda").unsqueeze(-1) # (N_CTX_Q, 1)
+    k_idx = torch.arange(seqlen_k, dtype=torch.int32, device="cuda").unsqueeze(0) # (1, N_CTX_K)
+    relative_pos = torch.abs(q_idx - k_idx) # (N_CTX_Q, N_CTX_K)
+    return -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
 
 @triton.jit
 def _attn_fwd_inner(
@@ -458,7 +455,7 @@ def attn_fwd(
     else:
         bias_ptr = None
 
-    if USE_ALIBI != 0:
+    if USE_ALIBI:
         a_offset = off_z * stride_az +  off_h_q * stride_ah 
         alibi_slope = tl.load(alibi_slopes + a_offset)
     else:
@@ -854,7 +851,7 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes,
     k = tl.load(K_block_ptr)
     v = tl.load(V_block_ptr)
 
-    if USE_ALIBI != 0:
+    if USE_ALIBI:
         a_offset = bhid
         alibi_slope = tl.load(alibi_slopes + a_offset)
     else:
@@ -1062,7 +1059,7 @@ class _attention(torch.autograd.Function):
             VARLEN=metadata.varlen,
             BLOCK_DMODEL=padded_d_model,
             BIAS_TYPE=0 if metadata.bias is None else 1,
-            USE_ALIBI=0 if metadata.alibi_slopes is None else 1,
+            USE_ALIBI=False if metadata.alibi_slopes is None else True,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
             RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
             BATCH_SIZE= q.shape[0]
@@ -1128,7 +1125,7 @@ class _attention(torch.autograd.Function):
             BLOCK_DMODEL=ctx.BLOCK_DMODEL,
             BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1, BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
             BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,
-            USE_ALIBI= 0 if ctx.alibi_slopes is None else 1,
+            USE_ALIBI= False if ctx.alibi_slopes is None else True,
         )
 
         return dq, dk, dv, None, None
@@ -1234,11 +1231,7 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
                           diagonal=N_CTX_K-N_CTX_Q)
         scores[:, :, mask==0] = float("-inf")
     if use_alibi:
-        q_idx = torch.arange(N_CTX_Q, dtype=torch.int32, device="cuda").unsqueeze(-1)
-        k_idx = torch.arange(N_CTX_K, dtype=torch.int32, device="cuda").unsqueeze(0)
-        relative_pos = torch.abs(q_idx + N_CTX_K - N_CTX_Q - k_idx)
-        alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, HQ, N_CTX_Q, N_CTX_K)
-        scores+= alibi
+        scores+= compute_alibi_tensor(alibi_slopes, N_CTX_Q, N_CTX_K)
 
     p = torch.softmax(scores, dim=-1)
     if causal:
@@ -1442,14 +1435,10 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
     else:
         M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
         p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
+        if use_alibi:
+            p+= compute_alibi_tensor(alibi_slopes, N_CTX, N_CTX) 
         if causal:
             p[:, :, M == 0] = float("-inf")
-        if use_alibi:
-            q_idx = torch.arange(N_CTX, dtype=torch.int32, device="cuda").unsqueeze(-1)
-            k_idx = torch.arange(N_CTX, dtype=torch.int32, device="cuda").unsqueeze(0)
-            relative_pos = torch.abs(q_idx + N_CTX - N_CTX - k_idx)
-            alibi = -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
-            p+= alibi
         
         p = torch.softmax(p.float(), dim=-1).type(dtype=p.dtype)
         ref_out = torch.matmul(p, v)

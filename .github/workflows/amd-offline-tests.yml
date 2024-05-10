@@ -3,16 +3,16 @@ name: AMD Offline Tests
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, triton-mlir]
+    branches: [triton-mlir]
   merge_group:
-    branches: [main, triton-mlir]
+    branches: [triton-mlir]
     types: [checks_requested]
   push:
-    branches: [main, triton-mlir]
+    branches: [triton-mlir]
 
 concurrency:
   group: ${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/triton-mlir' }}
 
 permissions: read-all
 
@@ -22,7 +22,7 @@ env:
   TRITON_DISABLE_LINE_INFO: 1
 
 jobs:
-  Runner-Preparation:
+  Runner-Preparation-AMD:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -38,7 +38,7 @@ jobs:
           fi
 
   Integration-Tests-AMD:
-    needs: Runner-Preparation
+    needs: Runner-Preparation-AMD
     if: needs.Runner-Preparation.outputs.matrix-HIP != ''
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30

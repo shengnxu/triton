@@ -158,7 +158,7 @@ def print_gpu(prefix, val=None):
 
 @triton.jit
 def compute_alibi_block(alibi_slope, seqlen_q, seqlen_k, offs_m, offs_n, transpose = False):
-    # when seqlen_k and seqlen_q are different we want to stick to diagonal to stick to the bottom right of the attention matrix
+    # when seqlen_k and seqlen_q are different we want the diagonal to stick to the bottom right of the attention matrix
     # for casual mask we want something like this where (1 is kept and 0 is masked)
     # seqlen_q = 2 and seqlen_k = 5
     #   1 1 1 1 0

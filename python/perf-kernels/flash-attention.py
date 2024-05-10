@@ -157,31 +157,41 @@ def print_gpu(prefix, val=None):
             tl.device_print(prefix)
 
 @triton.jit
-def compute_alibi_block(alibi_slope, offs_m, offs_n, transpose = False):
-    # compute the relative position using the global positions
-    # e.g. alibi_slope = 1, offs_m = [0, 1, 2, 3], offs_n = [0, 1, 2, 3, 4], transpose = False
+def compute_alibi_block(alibi_slope, seqlen_q, seqlen_k, offs_m, offs_n, transpose = False):
+    # when seqlen_k and seqlen_q are different we want to stick to diagonal to stick to the bottom right of the attention matrix
+    # for casual mask we want something like this where (1 is kept and 0 is masked)
+    # seqlen_q = 2 and seqlen_k = 5
+    #   1 1 1 1 0
+    #   1 1 1 1 1
+    # seqlen_q = 5 and seqlen_k = 2
+    #        0 0
+    #        0 0
+    #        0 0
+    #        1 0
+    #        1 1
+    # for alibi the diagonal is 0 indicating no penalty for attending to that spot and increasing penalty for attending further from the diagonal
+    # e.g. alibi_slope = 1, seqlen_q = 2, seqlen_k = 5, offs_m = [0, 1, 2, 3], offs_n = [0, 1, 2, 3, 4], transpose = False
     # 1. offs_m[:,None] = [[0],
     #                       [1],
-    #                       [2],
-    #                       [3]]
-    # 2. offs_m[:,None] - offs_n[None,:] [[0], - [[0, 1, 2, 3, 4]] =  [[ 0, -1, -2, -3, -4],
-    #                                      [1],                    [ 1, 0, -1, -2, -3],
-    #                                      [2],                    [ 2, 1, 0, -1, -2]]
-    #                                      [3]]                   [ 3, 2 , 1, 0, -1]]
-    # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[ 0, -1, -2, -3, -4],
-    #                                                     [-1, 0, -1, -2, -3],
-    #                                                     [-2, -1, 0, -1, -2],
-    #                                                     [-3, -2 , -1, 0, - 1]]
+    # 2. offs_m[:,None] + seqlen_k = [[5],
+    #                                  [6],
+    # 3. offs_m[:,None] + seqlen_k - seqlen_q = [[3],
+    #                                             [4],
+    # 4. offs_m[:,None] + seqlen_k - seqlen_q - offs_n[None,:] = [[3], - [[0, 1, 2, 3, 4]] =  [[ 3, 2, 1, 0,-1],
+    #                                                            [4],                           [ 4, 3, 2, 1, 0]]
+    # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[ -3, -2, -1, 0,-1],
+    #                                                     [ -4, -3, -2, -1, 0]],
+    relative_pos_block = offs_m[:,None] + seqlen_k - seqlen_q - offs_n[None,:]
+    alibi_block = -1 * alibi_slope * tl.abs(relative_pos_block)
     if transpose:
-        relative_pos_block = offs_n[:,None] - offs_m[None,:]
+        return alibi_block.T
     else:
-        relative_pos_block = offs_m[:,None] - offs_n[None,:]
-    return -1 * alibi_slope * tl.abs(relative_pos_block)
+        return alibi_block
 
 def compute_alibi_tensor(alibi_slopes, seqlen_q, seqlen_k):
     q_idx = torch.arange(seqlen_q, dtype=torch.int32, device="cuda").unsqueeze(-1) # (N_CTX_Q, 1)
     k_idx = torch.arange(seqlen_k, dtype=torch.int32, device="cuda").unsqueeze(0) # (1, N_CTX_K)
-    relative_pos = torch.abs(q_idx - k_idx) # (N_CTX_Q, N_CTX_K)
+    relative_pos = torch.abs(q_idx + seqlen_k - seqlen_q - k_idx) # (N_CTX_Q, N_CTX_K)
     return -1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos # (Z, H, N_CTX_Q, N_CTX_K)
 
 @triton.jit
@@ -253,7 +263,7 @@ def _attn_fwd_inner(
             global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
 
-            alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_k, actual_seqlen_q, global_m_positions, global_n_positions)
+            alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_q, actual_seqlen_k, global_m_positions, global_n_positions)
 
             qk += (alibi_block * 1.44269504089) # scale factor of log2(e)
 
@@ -692,7 +702,7 @@ def _bwd_kernel_dk_dv(
         m = tl.load(M + offs_m)
         kqT = tl.dot(k, qT)
         if alibi_slope is not None:
-            alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX,  offs_m, offs_n, True)
+            alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n, True)
             kqT += alibi_block * 1.44269504089
 
         pT = tl.math.exp2(kqT - m[None, :])

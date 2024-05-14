@@ -64,3 +64,19 @@ docs/sg_execution_times.rst
 
 # Vim
 *.swp
+
+# AMD
+scripts
+workloads
+log*
+*.html
+*.csv
+*.png
+*.db
+*.json
+*.txt
+*.att
+*.out
+*_ui
+
+baseartifacts_ROCm-6.0

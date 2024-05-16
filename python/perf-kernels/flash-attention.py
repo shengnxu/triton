@@ -79,10 +79,10 @@ class MetaData():
 
     def check_args(self, q, k, v, o):
         assert q.dim() == k.dim() and q.dim() == v.dim()
+
+        batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, self)
         if self.varlen:
             assert q.dim() == 3
-            total_q, nheads_q, head_size = q.shape
-            total_k, nheads_k, _ = k.shape
             assert self.cu_seqlens_q is not None
             assert self.cu_seqlens_k is not None
             assert len(self.cu_seqlens_q) == len(self.cu_seqlens_k)
@@ -93,8 +93,6 @@ class MetaData():
             assert not self.return_encoded_softmax
         else:
             assert q.dim() == 4
-            batch, nheads_q, seqlen_q, head_size = q.shape
-            _, nheads_k, seqlen_k, _ = k.shape
             assert self.max_seqlens_q > 0 and self.max_seqlens_k > 0
             assert self.cu_seqlens_q is None and self.cu_seqlens_k is None
         assert k.shape == v.shape
@@ -827,32 +825,41 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes, DO, DQ, DK, DV, M, D,
 empty = torch.empty(128, device="cuda")
 
 
-# TODO: This can probably optimized to have fewer lines of code.
-def get_strides_from_layout(metadata, q, k, v, o):
+def get_shape_from_layout(q, k, metadata):
     if metadata.layout == 'thd':
-        batch, nheads_q = metadata.num_contexts, q.shape[1]
+        nheads_q, nheads_k = q.shape[1], k.shape[1]
+        batch = metadata.num_contexts
+    elif metadata.layout == 'bhsd':
+        batch, nheads_q, _, head_size = q.shape
         nheads_k = k.shape[1]
+    elif metadata.layout == 'bshd':
+        batch, _, nheads_q, head_size = q.shape
+        nheads_k = k.shape[2]
+    else:
+        assert False, "Got unsupported layout."
+    return batch, nheads_q, nheads_k, head_size
+
+
+# TODO: This can probably optimized to have fewer lines of code.
+def get_strides_from_layout(q, k, v, o, metadata):
+    if metadata.layout == 'thd':
         q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
         k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
         v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
         o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
     elif metadata.layout == 'bhsd':
-        batch, nheads_q, _, head_size = q.shape
-        nheads_k = k.shape[1]
         q_strides = (q.stride(0), q.stride(1), q.stride(2), q.stride(3))
         k_strides = (k.stride(0), k.stride(1), k.stride(2), k.stride(3))
         v_strides = (v.stride(0), v.stride(1), v.stride(2), v.stride(3))
         o_strides = (o.stride(0), o.stride(1), o.stride(2), o.stride(3))
     elif metadata.layout == 'bshd':
-        batch, _, nheads_q, head_size = q.shape
-        nheads_k = k.shape[2]
         q_strides = (q.stride(0), q.stride(2), q.stride(1), q.stride(3))
         k_strides = (k.stride(0), k.stride(2), k.stride(1), k.stride(3))
         v_strides = (v.stride(0), v.stride(2), v.stride(1), v.stride(3))
         o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
     else:
         assert False, 'Got unsupported layout.'
-    return batch, nheads_q, nheads_k, q_strides, k_strides, v_strides, o_strides
+    return q_strides, k_strides, v_strides, o_strides
 
 
 class _attention(torch.autograd.Function):
@@ -867,9 +874,9 @@ class _attention(torch.autograd.Function):
             o = torch.empty_like(q, dtype=v.dtype)
         metadata.check_args(q, k, v, o)
 
-        batch, nheads_q, nheads_k, q_strides, k_strides, v_strides, o_strides = \
-            get_strides_from_layout(metadata, q, k, v, o)
-        head_size = q.shape[-1]
+        batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, metadata)
+        q_strides, k_strides, v_strides, o_strides = get_strides_from_layout(
+                                                         q, k, v, o, metadata)
 
         # Get closest power of 2 over or equal to 32.
         padded_d_model = 1 << (head_size - 1).bit_length()
@@ -1015,7 +1022,7 @@ def input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout):
         k_tensor_shape = (Z, HK, N_CTX_K, D_HEAD)
     elif layout == 'bshd':
         q_tensor_shape = (Z, N_CTX_Q, HQ, D_HEAD)
-        k_tensor_shape = (Z, N_CTX_K, HQ, D_HEAD)
+        k_tensor_shape = (Z, N_CTX_K, HK, D_HEAD)
     else:
         assert False, 'Got unsupported tensor layout'
     q = torch.randn(q_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
@@ -1080,10 +1087,10 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 ])
 @pytest.mark.parametrize('causal', [True, False])
 @pytest.mark.parametrize('use_alibi', [True, False])
-def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=torch.float16):
+@pytest.mark.parametrize('layout', ['bshd', 'bhsd'])
+def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, dtype=torch.float16):
     torch.manual_seed(20)
     # TODO: Adapt test for bshd
-    layout = 'bhsd'
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
     if causal:
         input_metadata.need_causal()
@@ -1101,6 +1108,11 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
     # triton implementation
     tri_out, _ = attention(q, k, v, o, input_metadata)
 
+    # Transpose here if layout is bshd so we have same reference code for all layouts
+    if layout == 'bshd':
+        q = q.transpose(1,2).clone()
+        k = k.transpose(1,2).clone()
+        v = v.transpose(1,2).clone()
     # Replicate K and V if using MQA/GQA
     if HQ != HK:
         k = k.view(k.shape[0], k.shape[1], -1, k.shape[2],
@@ -1124,6 +1136,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, dtype=to
         p[nan_mask == 1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
     # compare
+    if layout == 'bshd':
+        ref_out = ref_out.transpose(1,2).clone()
     torch.testing.assert_close(ref_out, tri_out, atol=2e-2, rtol=2e-2)
 
 

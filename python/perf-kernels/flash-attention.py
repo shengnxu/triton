@@ -5,7 +5,7 @@ Fused Attention
 This is a Triton implementation of the Flash Attention v2 algorithm
 See https://tridao.me/publications/flash2/flash2.pdf
 
-Credits: 
+Credits:
 AMD Triton kernels team
 OpenAI kernel team
 
@@ -29,8 +29,6 @@ import torch
 import triton
 import triton.language as tl
 
-torch_dtype:tl.constexpr = torch.float16
-
 class MetaData():
     cu_seqlens_q = None
     cu_seqlens_k = None
@@ -41,6 +39,7 @@ class MetaData():
     causal = False
     num_contexts = 0
     varlen = False
+    layout = None
     dropout_p, return_encoded_softmax = 0.0, False
     x, y = None, None
     enable_masking = False
@@ -68,18 +67,18 @@ class MetaData():
             if seqlen_q == seqlen_k:
                 x = 0
             else:
-                # X is this value because when causal=True, and q < k, 
-                # the mask is bottom right aligned. It ends on the top edge 
+                # X is this value because when causal=True, and q < k,
+                # the mask is bottom right aligned. It ends on the top edge
                 # as q < k. Its intercept is the height it traveled which is q.
                 # When q > k, the intercept is on the left edge. It travels
-                # seqlen k (so again, q - k), but because it is the right mask 
+                # seqlen k (so again, q - k), but because it is the right mask
                 # on the left edge, x should be negative.
                 x = seqlen_k - seqlen_q
             print(f"y = {y}, x = {x}")
         # This is for causal + SWA
         else:
             # If causal masking is enabled and the attn scores are square, causal mask
-            # is the lower triangular of the square matrix, until the left window edge. 
+            # is the lower triangular of the square matrix, until the left window edge.
             if seqlen_q == seqlen_k:
                 y, x = window_left, 0
             elif seqlen_q < seqlen_k:
@@ -89,7 +88,7 @@ class MetaData():
                 # the delta is small, y might start on the left edge. Detect that here.
                 # We multiply by -1 because a positive value means we are still on the top edge
                 # which makes y negative. A negative value puts y on left edge, making it positive.
-                y = -1 * (k_minus_q - window_left) 
+                y = -1 * (k_minus_q - window_left)
                 x = k_minus_q
             # seqlen q > seqlen k
             else:
@@ -106,6 +105,7 @@ class MetaData():
 
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
+        self.layout = 'thd'
         self.cu_seqlens_q = cu_seqlens_q
         self.cu_seqlens_k = cu_seqlens_k
         # Without "varlen", there should still be one sequence.
@@ -142,10 +142,10 @@ class MetaData():
 
     def check_args(self, q, k, v, o, x, y):
         assert q.dim() == k.dim() and q.dim() == v.dim()
+
+        batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, self)
         if self.varlen:
             assert q.dim() == 3
-            total_q, nheads_q, head_size = q.shape
-            total_k, nheads_k, _ = k.shape
             assert self.cu_seqlens_q is not None
             assert self.cu_seqlens_k is not None
             assert len(self.cu_seqlens_q) == len(self.cu_seqlens_k)
@@ -156,8 +156,6 @@ class MetaData():
             assert not self.return_encoded_softmax
         else:
             assert q.dim() == 4
-            batch, nheads_q, seqlen_q, head_size = q.shape
-            _, nheads_k, seqlen_k, _ = k.shape
             assert self.max_seqlens_q > 0 and self.max_seqlens_k > 0
             assert self.cu_seqlens_q is None and self.cu_seqlens_k is None
         assert k.shape == v.shape
@@ -178,6 +176,9 @@ class MetaData():
             window_width = x + y
         # We cannot currently handle the case where BLOCK_M == window_width.
         assert window_width > 256
+        assert self.layout is not None
+        assert self.layout == 'thd' or not self.varlen
+
 
 @triton.jit
 def cdiv_fn(x,y):
@@ -331,7 +332,7 @@ def _attn_fwd_inner(
                 size_n = start_n + OFFS_N[None,:]
                 mask = size_n < boundary_m[:,None]
                 qk = tl.where(mask, qk, float("-inf"))
-        if ENABLE_MASKING: 
+        if ENABLE_MASKING:
             causal_boundary = start_n + offs_n_masked
             if MASKING_DIR == 0:
                 causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
@@ -347,7 +348,7 @@ def _attn_fwd_inner(
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
             qk += (bias * 1.44269504089)
-           
+
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
             global_m_positions = start_m*BLOCK_M + tl.arange(0, BLOCK_M)
@@ -428,7 +429,6 @@ def attn_fwd(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
     USE_ALIBI: tl.constexpr,
-    BATCH_SIZE: tl.constexpr,
 ):
     start_m = tl.program_id(0)
     off_h_q = tl.program_id(1)
@@ -508,13 +508,13 @@ def attn_fwd(
     v_ptrs = v_offset + offs_n[:, None] * stride_vk + offs_d[None, :] * stride_vn
     if USE_BIAS:
         # Note: this might get large enough to overflow on some configs
-        bias_offset = off_h_q * stride_bh 
+        bias_offset = off_h_q * stride_bh
         bias_ptrs = bias + bias_offset + offs_m[:, None] * stride_bm + offs_n[None, :] * stride_bn
     else:
         bias_ptrs = None
 
     if USE_ALIBI:
-        a_offset = off_z * stride_az +  off_h_q * stride_ah 
+        a_offset = off_z * stride_az +  off_h_q * stride_ah
         alibi_slope = tl.load(alibi_slopes + a_offset)
     else:
         alibi_slope = None
@@ -612,7 +612,7 @@ def attn_fwd(
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
-    if (n_masked_blocks > 0): 
+    if (n_masked_blocks > 0):
         # ENABLE_MASKING is for causal and windowed masking. But we can
         # also enter here if we have irregular K sequence length
         if ENABLE_MASKING:
@@ -841,7 +841,7 @@ def _bwd_kernel_dq(dq, q, K, V,
     for blk_idx in range(num_steps):
         kT = tl.load(KT_block_ptr)
         qk = tl.dot(q, kT)
-        if alibi_slope is not None:  
+        if alibi_slope is not None:
             alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n)
             qk += alibi_block * 1.44269504089
 
@@ -1059,8 +1059,46 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes,
     )
     dq *= LN2
     tl.store(DQ_block_ptr, dq.to(q.dtype))
-        
+
 empty = torch.empty(128, device="cuda")
+
+
+def get_shape_from_layout(q, k, metadata):
+    if metadata.layout == 'thd':
+        nheads_q, nheads_k = q.shape[1], k.shape[1]
+        head_size = q.shape[-1]
+        batch = metadata.num_contexts
+    elif metadata.layout == 'bhsd':
+        batch, nheads_q, _, head_size = q.shape
+        nheads_k = k.shape[1]
+    elif metadata.layout == 'bshd':
+        batch, _, nheads_q, head_size = q.shape
+        nheads_k = k.shape[2]
+    else:
+        assert False, "Got unsupported layout."
+    return batch, nheads_q, nheads_k, head_size
+
+
+# TODO: This can probably optimized to have fewer lines of code.
+def get_strides_from_layout(q, k, v, o, metadata):
+    if metadata.layout == 'thd':
+        q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
+        k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
+        v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
+        o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
+    elif metadata.layout == 'bhsd':
+        q_strides = (q.stride(0), q.stride(1), q.stride(2), q.stride(3))
+        k_strides = (k.stride(0), k.stride(1), k.stride(2), k.stride(3))
+        v_strides = (v.stride(0), v.stride(1), v.stride(2), v.stride(3))
+        o_strides = (o.stride(0), o.stride(1), o.stride(2), o.stride(3))
+    elif metadata.layout == 'bshd':
+        q_strides = (q.stride(0), q.stride(2), q.stride(1), q.stride(3))
+        k_strides = (k.stride(0), k.stride(2), k.stride(1), k.stride(3))
+        v_strides = (v.stride(0), v.stride(2), v.stride(1), v.stride(3))
+        o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
+    else:
+        assert False, 'Got unsupported layout.'
+    return q_strides, k_strides, v_strides, o_strides
 
 
 class _attention(torch.autograd.Function):
@@ -1068,29 +1106,19 @@ class _attention(torch.autograd.Function):
     def forward(ctx, q, k, v, o, metadata):
         # NOTE: a large bias tensor leads to overflow during pointer arithmetic
         if (metadata.bias is not None):
-            assert(metadata.bias.numel() < 2 ** 31)    
+            assert(metadata.bias.numel() < 2 ** 31)
 
         if o is None:
             o = torch.empty_like(q, dtype=v.dtype)
-        metadata.check_args(q, k, v, o, metadata.x, metadata.y)
-        if metadata.varlen:
-            total_q, nheads_q, head_size = q.shape
-            total_k, nheads_k, _ = k.shape
-            batch = metadata.num_contexts
-            q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
-            k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
-            v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
-            o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
-        else:
-            batch, nheads_q, seqlen_q, head_size = q.shape
-            _, nheads_k, seqlen_k, _ = k.shape
-            q_strides = (q.stride(0), q.stride(1), q.stride(2), q.stride(3))
-            k_strides = (k.stride(0), k.stride(1), k.stride(2), k.stride(3))
-            v_strides = (v.stride(0), v.stride(1), v.stride(2), v.stride(3))
-            o_strides = (o.stride(0), o.stride(1), o.stride(2), o.stride(3))
+        metadata.check_args(q, k, v, o)
+
+        batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, metadata)
+        q_strides, k_strides, v_strides, o_strides = get_strides_from_layout(q, k, v, o, metadata)
 
         # Get closest power of 2 over or equal to 32.
         padded_d_model = 1 << (head_size - 1).bit_length()
+        # Smallest head_dim supported is 16. If smaller, the tile in the
+        # kernel is padded - there is no padding in memory for any dims.
         padded_d_model = max(padded_d_model, 16)
 
         grid = lambda META: (
@@ -1119,7 +1147,7 @@ class _attention(torch.autograd.Function):
                             metadata.bias.stride(2), metadata.bias.stride(3))
         else:
             bias_strides = (0,0,0,0)
-        
+
         if metadata.alibi_slopes is not None:
             alibi_strides = (metadata.alibi_slopes.stride(0), metadata.alibi_slopes.stride(1))
         else:
@@ -1130,7 +1158,7 @@ class _attention(torch.autograd.Function):
         print(f"swa = {metadata.swa}")
         print(f"causal = {metadata.causal}")
         print(f"enable masking = {metadata.enable_masking}")
-        
+
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
             *q_strides, *k_strides, *v_strides, *o_strides, *bias_strides, *alibi_strides,
@@ -1140,7 +1168,7 @@ class _attention(torch.autograd.Function):
             philox_offset_base=philox_offset,
             encoded_softmax=encoded_softmax,
             alibi_slopes = metadata.alibi_slopes,
-            X=metadata.x, Y=metadata.y, 
+            X=metadata.x, Y=metadata.y,
             SWA=metadata.swa, ENABLE_MASKING=metadata.enable_masking,
             HQ=nheads_q, HK=nheads_k,
             ACTUAL_BLOCK_DMODEL=head_size,
@@ -1222,29 +1250,42 @@ class _attention(torch.autograd.Function):
 
 attention = _attention.apply
 
-def input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
+
+def input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout):
     torch.manual_seed(20)
 
     # Initialize q, k, v
-    q = torch.randn((Z, HQ, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-    k = torch.randn((Z, HK, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
-    v = torch.randn((Z, HK, N_CTX_K, D_HEAD), dtype=dtype, device="cuda", requires_grad=True)
+    if layout == 'bhsd':
+        q_tensor_shape = (Z, HQ, N_CTX_Q, D_HEAD)
+        k_tensor_shape = (Z, HK, N_CTX_K, D_HEAD)
+    elif layout == 'bshd':
+        q_tensor_shape = (Z, N_CTX_Q, HQ, D_HEAD)
+        k_tensor_shape = (Z, N_CTX_K, HK, D_HEAD)
+    else:
+        assert False, 'Got unsupported tensor layout'
+    q = torch.randn(q_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
+    k = torch.randn(k_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
+    v = torch.randn(k_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
     sm_scale = D_HEAD**-0.5
     input_metadata = MetaData(sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
     input_metadata.max_seqlens_k = N_CTX_K
+    input_metadata.layout = layout
     return q, k, v, input_metadata
 
-def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
+
+def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlens=False):
     torch.manual_seed(20)
 
     # Random sequence lengths. Using N_CTX as kind of max of sum of individual seqs
-    max_seqlens_q = N_CTX_Q // Z
-    max_seqlens_k = N_CTX_K // Z
-    seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z,), dtype=torch.int32)
-    seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z,), dtype=torch.int32)
-    max_seqlens_q = torch.max(seqlens_q).item()
-    max_seqlens_k = torch.max(seqlens_k).item()
+    if not equal_seqlens:
+        max_seqlens_q = N_CTX_Q // Z
+        max_seqlens_k = N_CTX_K // Z
+        seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z, ), dtype=torch.int32)
+        seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z, ), dtype=torch.int32)
+    else:
+        seqlens_q = torch.full((Z, ), N_CTX_Q // Z)
+        seqlens_k = torch.full((Z, ), N_CTX_K // Z)
 
     # Calculate cumulative sequence lengths
     cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_q.cumsum(dim=0, dtype=torch.int32)])
@@ -1288,13 +1329,13 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype):
 @pytest.mark.parametrize('sliding_window', [(126, -1)])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
-    q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype)
+    q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
     window_left = N_CTX_Q if sliding_window[0] == -1 else sliding_window[0]
     window_right = N_CTX_K if sliding_window[1] == -1 else sliding_window[1]
-    sm_scale = D_HEAD ** -0.5
     input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
     input_metadata.max_seqlens_k = N_CTX_K
+
     if causal:
         input_metadata.need_causal()
 
@@ -1319,6 +1360,11 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_
     # Causal is special case of SWA with window right = 0.
     if causal:
         window_right = 0
+    # Transpose here if layout is bshd so we have same reference code for all layouts
+    if layout == 'bshd':
+        q = q.transpose(1, 2).clone()
+        k = k.transpose(1, 2).clone()
+        v = v.transpose(1, 2).clone()
     # Replicate K and V if using MQA/GQA
     if HQ != HK:
         k = k.view(
@@ -1330,7 +1376,7 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_
 
     scores = torch.einsum('bhqd,bhkd->bhqk', q, k).float() * input_metadata.sm_scale
     if causal:
-        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=N_CTX_K-N_CTX_Q)
         scores[:, :, mask==0] = float("-inf")
     if use_alibi:
@@ -1339,7 +1385,7 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_
         mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=-window_left)
         scores[:, :, mask==0] = float("-inf")
-        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=window_right)
         scores[:, :, mask==0] = float("-inf")
     p = torch.softmax(scores, dim=-1)
@@ -1381,21 +1427,16 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_
 @pytest.mark.parametrize('sliding_window', [(512, 512)])
 def test_op_fwd_bias(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
-    sm_scale = D_HEAD ** -0.5
-    input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale=sm_scale)
-    input_metadata.max_seqlens_q = N_CTX_Q
-    input_metadata.max_seqlens_k = N_CTX_K
+    sm_scale = D_HEAD**-0.5
+    input_metadata = MetaData(sm_scale=sm_scale)
+    q, k, v, input_metadata = input_helper(Z, H, H, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout='bhsd')
     if causal:
         input_metadata.need_causal()
-    bias = torch.randn((1, H, N_CTX_Q, N_CTX_K), dtype=torch.float32, device="cuda")
-    input_metadata.need_bias(bias, Z, H, N_CTX_Q, N_CTX_K)
-    window_left, window_right = sliding_window[0], sliding_window[1]
-    # Causal is special case of SWA with window right = 0.
-    if causal:
-        window_right = 0
-    q = torch.randn((Z, H, N_CTX_Q, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    k = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
-    v = torch.randn((Z, H, N_CTX_K, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
+    if use_bias:
+        bias = torch.randn((1, H, N_CTX_Q, N_CTX_K), dtype=torch.float32, device="cuda")
+        input_metadata.need_bias(bias, Z, H, N_CTX_Q, N_CTX_K)
+    else:
+        bias = None
     o = torch.empty_like(q)
 
     # triton implementation
@@ -1413,7 +1454,7 @@ def test_op_fwd_bias(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_w
         mask = torch.triu(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=-window_left+1)
         scores[:, :, mask==0] = float("-inf")
-        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"), 
+        mask = torch.tril(torch.ones(N_CTX_Q, N_CTX_K, device="cuda"),
                           diagonal=window_right-1)
         scores[:, :, mask==0] = float("-inf")
     p = torch.softmax(scores, dim=-1)
@@ -1443,6 +1484,7 @@ def test_op_fwd_bias(Z, H, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_bias, sliding_w
                           ])
 @pytest.mark.parametrize('causal', [True, False])
 def test_op_varlen_fwd(Z, H, N_CTX, D_HEAD, causal, dtype=torch.float16):
+
     q, k, v, input_metadata = varlen_input_helper(Z, H, H, N_CTX, N_CTX, D_HEAD, dtype)
 
     tri_out = torch.empty_like(q)
@@ -1553,10 +1595,10 @@ def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sd
         M = torch.tril(torch.ones((seqlen_q, seqlen_k), device="cuda"))
         p = torch.matmul(q, k.transpose(2, 3)) * sm_scale
         if use_alibi:
-            p+= compute_alibi_tensor(alibi_slopes, N_CTX, N_CTX) 
+            p+= compute_alibi_tensor(alibi_slopes, N_CTX, N_CTX)
         if causal:
             p[:, :, M == 0] = float("-inf")
-        
+
         p = torch.softmax(p.float(), dim=-1).type(dtype=p.dtype)
         ref_out = torch.matmul(p, v)
         ref_out.backward(dout)
@@ -1634,9 +1676,8 @@ def varlen_benchmark_configs():
             ]
     return configs
 
-def run_benchmark(custom):
+def run_benchmark(custom, args):
 
-    args = parse_args()
     dtype = arg_to_torch_dtype[args.dtype]
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
@@ -1644,7 +1685,7 @@ def run_benchmark(custom):
     mode = 'fwd'
     x_names=['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = args.causal
-    varlen = args.varlen
+    varlen = args.layout == 'thd'
     configs = []
     if custom:
         x_vals_list=[(args.b, args.hq, args.hk, args.sq, args.sk)]
@@ -1655,21 +1696,11 @@ def run_benchmark(custom):
             x_vals_list = nonvarlen_benchmark_configs()
     print_time = args.return_time
     line_names = 'Time (ms)' if print_time else 'TFLOPS'
-    configs.append(triton.testing.Benchmark(
-        x_names=x_names,
-        x_vals=x_vals_list,
-        line_arg='provider',
-        line_vals=['triton'],
-        line_names=[line_names],
-        styles=[('red', '-')],
-        ylabel='ms',
-        plot_name=f'fused-attention-{mode}-d{head_size}{"-varlen" if varlen else ""}',
-        args={
-            'D_HEAD': head_size,
-            'dtype': dtype,
-            'causal': causal,
-            'mode': mode})
-    )
+    configs.append(
+        triton.testing.Benchmark(x_names=x_names, x_vals=x_vals_list, line_arg='provider', line_vals=['triton'],
+                                 line_names=[line_names], styles=[('red', '-')], ylabel='ms',
+                                 plot_name=f'fused-attention-{mode}-d{head_size}-layout{args.layout}',
+                                 args={'D_HEAD': head_size, 'dtype': dtype, 'causal': causal, 'mode': mode}))
 
     @triton.testing.perf_report(configs)
     def bench_flash_attention(
@@ -1692,14 +1723,15 @@ def run_benchmark(custom):
 
         flops_per_matmul = 0
         if varlen:
-            q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype)
-            for i in range (0, input_metadata.num_contexts):
-                seqlen_q = input_metadata.cu_seqlens_q[i+1] - input_metadata.cu_seqlens_q[i]
-                seqlen_k = input_metadata.cu_seqlens_k[i+1] - input_metadata.cu_seqlens_k[i]
+            q, k, v, input_metadata = varlen_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype,
+                                                          args.equal_seqlens)
+            for i in range(0, input_metadata.num_contexts):
+                seqlen_q = input_metadata.cu_seqlens_q[i + 1] - input_metadata.cu_seqlens_q[i]
+                seqlen_k = input_metadata.cu_seqlens_k[i + 1] - input_metadata.cu_seqlens_k[i]
                 # x2 for 2 GEMMs
                 flops_per_matmul += seqlen_q.item() * seqlen_k.item() * HQ * D_HEAD * 2
         else:
-            q, k, v, input_metadata = input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype)
+            q, k, v, input_metadata = input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, args.layout)
             flops_per_matmul = 2.0 * BATCH * HQ * N_CTX_Q * N_CTX_K * D_HEAD
         if causal:
             input_metadata.need_causal()
@@ -1723,6 +1755,16 @@ def run_benchmark(custom):
 
     bench_flash_attention.run(save_path=".", print_data=True)
 
+
+def supported_layouts():
+    layouts = \
+        'bhsd: Q, K, V are individual tensors of [batch, num_heads, seqlen_q/k, head_size]' \
+        'bshd: Q, K, V are individual tensors of [batch, seqlen_q/k, num_heads, head_size]' \
+        'thd: Q, K, V are individual tensors of [total_q/k, num_heads, head_size]' \
+        'This layout is sometimes called "varlen" or "grouped" layout.'
+    return layouts
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="Benchmark FlashAttention",
@@ -1733,11 +1775,14 @@ def parse_args():
     parser.add_argument("-hk", type=int, default=0)
     parser.add_argument("-sq", type=int, default=0)
     parser.add_argument("-sk", type=int, default=0)
+    parser.add_argument("-equal_seqlens", action='store_true', default=False,
+                        help='If specified, each context within the thd layout' \
+                            ' has same seqlen as sq and sk')
     parser.add_argument("-d", type=int, default=0)
     parser.add_argument("-causal", action='store_true', default=False)
-    parser.add_argument("-varlen", action='store_true', default=False)
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-return_time", action='store_true', default=False)
+    parser.add_argument("-layout", type=str, default='bhsd', help=supported_layouts())
     return parser.parse_args()
 
 arg_to_torch_dtype = {
@@ -1749,6 +1794,8 @@ arg_to_torch_dtype = {
 def main():
     args = parse_args()
     custom_config = False
+    assert args.layout == 'thd' or not args.equal_seqlens, \
+           "Equal sequence lengths arg must be used with the thd layout."
     if args.b or args.hq or args.hk or args.sq or args.sk or args.d:
         custom_config = True
         assert args.b and args.hq and args.sq and args.d, \
@@ -1759,7 +1806,7 @@ def main():
     assert args.dtype in arg_to_torch_dtype, \
            "Only fp16, bf16 and f32 types currently supported."
 
-    run_benchmark(custom_config)
+    run_benchmark(custom_config, args)
 
 if __name__ == '__main__':
     sys.exit(main())

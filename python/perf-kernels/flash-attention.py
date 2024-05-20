@@ -833,6 +833,7 @@ empty = torch.empty(128, device="cuda")
 def get_shape_from_layout(q, k, metadata):
     if metadata.layout == 'thd':
         nheads_q, nheads_k = q.shape[1], k.shape[1]
+        head_size = q.shape[-1]
         batch = metadata.num_contexts
     elif metadata.layout == 'bhsd':
         batch, nheads_q, _, head_size = q.shape

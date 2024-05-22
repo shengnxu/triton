@@ -10,7 +10,7 @@ import torch
 import triton
 import triton.language as tl
 
-from matmul_kernel import matmul_kernel
+from matmul_dep_load import matmul_kernel
 
 from datetime import datetime
 import multiprocessing
@@ -167,12 +167,13 @@ def gen_kernel_and_configStr_from_config(M, N, K, config, dtype_a, dtype_b, dtyp
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_SK{split_k}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
 
     matmul_def_str = f"""
-def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
+def matmul_{configStr}(a, b, c, offsA, offsB, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
     grid = triton.cdiv(M, {block_m}) * triton.cdiv(N, {block_n}), {split_k}
     #print(f'config: matmul_kernel_{configStr}', flush=True)
     if warmup:
         matmul_kernel_{configStr}.warmup(
             {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c},
+            {torch.int64}, {torch.int64},
             M, N, K,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},
@@ -190,7 +191,7 @@ def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
         return None
     else:
         matmul_kernel_{configStr}[grid](
-            a, b, c,
+            a, b, c, offsA, offsB,
             M, N, K,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},
@@ -208,7 +209,7 @@ def matmul_{configStr}(a, b, c, M, N, K, am, ak, bk, bn, cm, cn, warmup=False):
 
 def try_config_{configStr}(M, N, K, am, ak, bk, bn, cm, cn):
     try:
-        matmul_{configStr}(None, None, None, M, N, K, am, ak, bk, bn, cm, cn, True)
+        matmul_{configStr}(None, None, None, None, None, M, N, K, am, ak, bk, bn, cm, cn, True)
         return True
     except Exception as e:
         print(f'invalid config(compilation): {configStr}: ', e, flush=True)
@@ -251,7 +252,7 @@ from tune_gemm import gen_input
 
     # write definitions of matmul_kernel_xxx
     # and matmul_xxx and try_config
-    with open(os.path.dirname(os.path.abspath(__file__))+"/matmul_kernel.py") as file:
+    with open(os.path.dirname(os.path.abspath(__file__))+"/matmul_dep_load.py") as file:
         matmul_kernel_code = file.read()
     idx = 0
     for config in configs:
@@ -319,10 +320,15 @@ from tune_gemm import gen_input
     runs = iters if run_bench else 200
     for config in configs:
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None)
+        block_m, block_n, block_k, _, _, _, _, _, _, _ = read_config(config)
         matmul_call_str = f"""
         if '{configStr}' not in failed_configs:
+            offsA = torch.full((a.shape[1] // {block_k}, {block_m}), {block_k} * a.stride(1), device=a.device, dtype=torch.int64)
+            offsA[0, :] = 0
+            offsB = torch.full((a.shape[1] // {block_k}, {block_k}), {block_k} * b.stride(0), device=a.device, dtype=torch.int64)
+            offsB[0, :] = 0
             for i in range({runs}):
-                d = matmul_{configStr}(a, b, c, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
+                d = matmul_{configStr}(a, b, c, offsA, offsB, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
         f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
@@ -484,10 +490,14 @@ def matmul(a, b, c, block_m, block_n, block_k, group_m, split_k, num_warps, num_
     K, N = b.shape
     # 1D launch kernel where each block gets its own program.
 
+    offsA = torch.full((a.shape[1] // block_k, block_m), block_k * a.stride(1), device=a.device, dtype=torch.int64)
+    offsA[0, :] = 0
+    offsB = torch.full((a.shape[1] // block_k, block_k), block_k * b.stride(0), device=a.device, dtype=torch.int64)
+    offsB[0, :] = 0
     grid = triton.cdiv(M, block_m) * triton.cdiv(N, block_n), split_k
 
     matmul_kernel[grid](
-        a, b, c,
+        a, b, c, offsA, offsB,
         M, N, K,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),

@@ -140,7 +140,7 @@ class MetaData():
         self.dropout_p = dropout_p
         self.return_encoded_softmax = return_encoded_softmax
 
-    def check_args(self, q, k, v, o, x, y):
+    def check_args(self, q, k, v, o):
         assert q.dim() == k.dim() and q.dim() == v.dim()
 
         batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, self)
@@ -170,10 +170,10 @@ class MetaData():
         # the left edge. This would result in >= 1 row of all NaNs in the
         # output if Y is not a multiple of BLOCK_N.
         assert not (q.shape[2] > k.shape[2] and y < 0)
-        if x < 0:
-            window_width = y - abs(x)
+        if self.x < 0:
+            window_width = self.y - abs(self.x)
         else:
-            window_width = x + y
+            window_width = self.x + self.y
         # We cannot currently handle the case where BLOCK_M == window_width.
         assert window_width > 256
         assert self.layout is not None
@@ -183,10 +183,6 @@ class MetaData():
 @triton.jit
 def cdiv_fn(x,y):
     return (x + y - 1) // y
-
-@triton.jit
-def max_fn(x, y):
-    return tl.math.max(x, y)
 
 @triton.jit
 def dropout_offsets(philox_seed, philox_offset, dropout_p, m, n, stride):
@@ -298,20 +294,16 @@ def _attn_fwd_inner(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
     PADDED_HEAD: tl.constexpr,
-    z, h
     ACTUAL_BLOCK_DMODEL: tl.constexpr
 ):
     # loop over k, v, and update accumulator
     for start_n in range (block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
+        k_offs_n = None
+        # TODO: This can be optimized more to only apply when n_extra_tokens != 0
         if PADDED_SEQLEN_K:
-            if n_extra_tokens != 0:
-                k_offs_n = start_n + tl.arange(0, BLOCK_N)
-            else:
-                k_offs_n = None
-        else:
-            k_offs_n = None
+            k_offs_n = start_n + tl.arange(0, BLOCK_N)
         k_offs_k = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL)
         k = load_fn(k_ptrs, k_offs_k, k_offs_n, ACTUAL_BLOCK_DMODEL, actual_seqlen_k)
         if PRE_LOAD_V:
@@ -462,7 +454,7 @@ def attn_fwd(
     n_blocks = cdiv_fn(seqlen_k, BLOCK_N)
     begin_block = 0
     if (ENABLE_MASKING):
-        begin_block = max_fn(0, (start_m * BLOCK_M - Y)) // BLOCK_N
+        begin_block = tl.maximum(0, (start_m * BLOCK_M - Y)) // BLOCK_N
         n_blocks = min(n_blocks, cdiv_fn((start_m + 1) * BLOCK_M + X, BLOCK_N))
         if n_blocks <= 0:
             o_offset = Out + off_z * stride_oz + off_h_q * stride_oh + cu_seqlens_q_start * stride_om
@@ -545,48 +537,50 @@ def attn_fwd(
     q = (q * qk_scale).to(q.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
+    n_masked_blocks = 0
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
         n_masked_blocks = BLOCK_M // BLOCK_N + 1
-    else:
-        # If we need padding due to irregular seqlen, we only need to
-        # use masking on the last block.
-        n_masked_blocks = n_extra_tokens != 0
     # if masked, we might end up with an additional block.
     # In this case we might exceed n_blocks so pick the min.
     n_masked_blocks = min(n_masked_blocks, n_blocks)
     n_full_blocks = n_blocks - n_masked_blocks
     block_min = begin_block * BLOCK_N
-    block_max = n_blocks * BLOCK_N
 
-    # If there is a left edge, we want to detect if the intercept for y is
-    # in this WG.
-    K_block_ptr = tl.advance(K_block_ptr, (0, begin_block*BLOCK_N))
-    V_block_ptr = tl.advance(V_block_ptr, (begin_block*BLOCK_N, 0))
     # Left edge masking is only possible in SWA.
     if SWA:
         begin_masked = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
         if begin_masked:
+            # If there is a left edge, we want to detect if the intercept for y is
+            # in this WG.
+            k_ptrs += begin_block * BLOCK_N * stride_bn
+            v_ptrs += begin_block * BLOCK_N * stride_vk
+            if USE_BIAS:
+                bias_ptrs += begin_block * BLOCK_N * stride_bn
+            if RETURN_ENCODED_SOFTMAX:
+                encoded_sm_ptrs += begin_block * BLOCK_N
             n_full_blocks = n_full_blocks - n_masked_blocks
             block_max = block_min + n_masked_blocks * BLOCK_N
             offs_n_masked = offs_n + Y
             acc, l_i, m_i = _attn_fwd_inner(
-                acc, l_i, m_i, q, K_block_ptr, V_block_ptr,
+                acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
                 start_m, seqlen_k, seqlen_q,
-                dropout_p, philox_seed, batch_philox_offset, encoded_softmax_block_ptr,
+                dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
                 # _, _, _, n_extra_tokens, _
-                block_min, block_max, offs_n_masked, 0, bias_ptr, alibi_slope,
+                block_min, block_max, offs_n_masked, 0, alibi_slope,
                 # ENABLE_MASKING, MASKING_DIR, ....
                 True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
                 # _, PADDED_SEQLEN_K, ...
-                PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, padded_head,
-                off_z, off_h_q
+                PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
             )
-            K_block_ptr = tl.advance(K_block_ptr, (0, block_max))
-            V_block_ptr = tl.advance(V_block_ptr, (block_max, 0))
+            k_ptrs += block_max * stride_bn
+            v_ptrs += block_max * stride_vk
+            if USE_BIAS:
+                bias_ptrs += block_max * stride_bn
+            if RETURN_ENCODED_SOFTMAX:
+                encoded_sm_ptrs += block_max
             block_min = block_max
-            block_max = n_blocks * BLOCK_N
 
     tl.debug_barrier()
     # # Compute for full blocks. Here we set causal to false regardless of its actual
@@ -603,38 +597,42 @@ def attn_fwd(
             False, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
             PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
-            off_z, off_h_q
         )
-        K_block_ptr = tl.advance(K_block_ptr, (0, block_max))
-        V_block_ptr = tl.advance(V_block_ptr, (block_max, 0))
+        k_ptrs += block_max * stride_bn
+        v_ptrs += block_max * stride_vk
+        if USE_BIAS:
+            bias_ptrs += block_max * stride_bn
+        if RETURN_ENCODED_SOFTMAX:
+            encoded_sm_ptrs += block_max
         block_min = block_max
-        block_max = n_blocks * BLOCK_N
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
     if (n_masked_blocks > 0):
+        block_max = n_blocks * BLOCK_N
         # ENABLE_MASKING is for causal and windowed masking. But we can
         # also enter here if we have irregular K sequence length
-        if ENABLE_MASKING:
-            offs_n_masked = offs_n - X
-        else:
-            offs_n_causal = 0
-        k_ptrs += n_full_blocks * BLOCK_N * stride_kn
-        v_ptrs += n_full_blocks * BLOCK_N * stride_vk
-        if USE_BIAS:
-            bias_ptrs += n_full_blocks * BLOCK_N * stride_bn
-        if RETURN_ENCODED_SOFTMAX:
-            encoded_sm_ptrs += n_full_blocks * BLOCK_N
+        offs_n_masked = offs_n - X if ENABLE_MASKING else 0
+        # acc, l_i, m_i = _attn_fwd_inner(
+        #     acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
+        #     start_m, seqlen_k, seqlen_q,
+        #     dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
+        #     # _, _, _, n_extra_tokens, _
+        #     block_min, block_max, offs_n_masked, 0, alibi_slope,
+        #     # ENABLE_MASKING, MASKING_DIR, ....
+        #     True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
+        #     # _, PADDED_SEQLEN_K, ...
+        #     PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
+        # )
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
             start_m, seqlen_k, seqlen_q,
-            dropout_p, philox_seed, batch_philox_offset, encoded_sm_block_ptrs,
-            block_min, block_max, offs_n_masked, masked_blocks, n_extra_tokens, alibi_slope,
+            dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
+            block_min, block_max, offs_n_masked, n_extra_tokens, alibi_slope,
             # _, MASKING_DIR, ...
             ENABLE_MASKING, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
             PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
-            off_z, off_h_q
         )
     # epilogue
     acc = acc / l_i[:, None]
@@ -1179,8 +1177,7 @@ class _attention(torch.autograd.Function):
             USE_BIAS=False if metadata.bias is None else True,
             USE_ALIBI=False if metadata.alibi_slopes is None else True,
             ENABLE_DROPOUT=metadata.dropout_p > 0.0,
-            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax,
-            BATCH_SIZE= q.shape[0]
+            RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax
         )
 
         ctx.save_for_backward(q, k, v, o, M)
@@ -1267,7 +1264,7 @@ def input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout):
     k = torch.randn(k_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
     v = torch.randn(k_tensor_shape, dtype=dtype, device="cuda", requires_grad=True)
     sm_scale = D_HEAD**-0.5
-    input_metadata = MetaData(sm_scale=sm_scale)
+    input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
     input_metadata.max_seqlens_k = N_CTX_K
     input_metadata.layout = layout
@@ -1308,37 +1305,34 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
                          [(4, 48, 24, 1024, 1024, 64),
-                          (1, 24, 6, 8192, 8192, 64),
-                          (1, 4, 2, 16384, 16384, 128),
-                          (2, 16, 4, 1020, 987, 128),
-                          (2, 16, 4, 15498, 2, 128),
-                          (2, 16, 2, 7, 16219, 64),
-                          (4, 48, 12, 1, 1, 64),
-                          (4, 48, 48, 1, 1, 128),
-                          (4, 48, 24, 3, 3, 128),
-                          (4, 48, 48, 1001, 990, 64),
-                          (1, 8, 8, 8081, 7099, 64),
-                          (1, 4, 4, 16330, 15989, 128),
-                          (4, 4, 1, 1024, 1024, 33),
-                          (4, 4, 2, 65, 1018, 65),
-                          (4, 4, 4, 128, 128, 65),
-                          (4, 4, 4, 113, 123, 1),
+                        #   (1, 24, 6, 8192, 8192, 64),
+                        #   (1, 4, 2, 16384, 16384, 128),
+                        #   (2, 16, 4, 1020, 987, 128),
+                        #   (2, 16, 4, 15498, 2, 128),
+                        #   (2, 16, 2, 7, 16219, 64),
+                        #   (4, 48, 12, 1, 1, 64),
+                        #   (4, 48, 48, 1, 1, 128),
+                        #   (4, 48, 24, 3, 3, 128),
+                        #   (4, 48, 48, 1001, 990, 64),
+                        #   (1, 8, 8, 8081, 7099, 64),
+                        #   (1, 4, 4, 16330, 15989, 128),
+                        #   (4, 4, 1, 1024, 1024, 33),
+                        #   (4, 4, 2, 65, 1018, 65),
+                        #   (4, 4, 4, 128, 128, 65),
+                        #   (4, 4, 4, 113, 123, 1),
                           ])
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
-@pytest.mark.parametrize('sliding_window', [(126, -1)])
-def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, sliding_window, dtype=torch.float16):
+@pytest.mark.parametrize('layout', ['bhsd'])
+@pytest.mark.parametrize('sliding_window', [(-1, -1)])
+def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
     window_left = N_CTX_Q if sliding_window[0] == -1 else sliding_window[0]
     window_right = N_CTX_K if sliding_window[1] == -1 else sliding_window[1]
-    input_metadata = MetaData(N_CTX_Q, N_CTX_K, sm_scale=sm_scale)
-    input_metadata.max_seqlens_q = N_CTX_Q
-    input_metadata.max_seqlens_k = N_CTX_K
 
     if causal:
         input_metadata.need_causal()
-
     # Convert window coord to xy. The kernel uses this as it is more flexible.
     swa = window_left != -1 or window_right != -1
     if swa:

@@ -2,6 +2,20 @@ import triton
 import triton.language as tl
 
 @triton.jit()
+def get_new_pid(current_pid, num_sms):
+    # Number of XCDs
+    num_xcds = 8
+    # Number of pids per XCD in the new arrangement
+    pids_per_xcd = num_sms // num_xcds
+    # Compute current XCD and local pid within the XCD
+    xcd = current_pid % num_xcds
+    local_pid = current_pid // num_xcds
+
+    # Calculate new pid based on the new grouping
+    new_pid = xcd * pids_per_xcd + local_pid
+    return new_pid
+
+@triton.jit()
 def get_tiles_config(M, N, K, num_sms,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -10,7 +24,7 @@ def get_tiles_config(M, N, K, num_sms,
     iters_per_tile = tl.cdiv(K, BLOCK_SIZE_K)
 
     total_tiles = total_blocks_M * total_blocks_N
-    if num_sms > 0:  # Stream-K
+    if num_sms > 0 and total_tiles > num_sms:  # Stream-K
         total_full_tiles_pcu = total_tiles // num_sms
         total_streamk_tiles = total_tiles % num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
@@ -37,7 +51,8 @@ def persistent_streamk_gemm(
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
         GROUP_SIZE_M: tl.constexpr,
 ):
-    pid = tl.program_id(0)
+    old_pid = tl.program_id(0)
+    pid = get_new_pid(old_pid, num_sms)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 

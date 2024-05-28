@@ -49,6 +49,8 @@ class MetaData():
         self.sm_scale = sm_scale
         assert seqlen_q > 0 and seqlen_k > 0
         self.x, self.y = seqlen_k, seqlen_q
+        print(f"in metadata x = {self.x}")
+        print(f"in metadata y = {self.y}")
 
     def convert_window_coord_to_xy(self, seqlen_q, seqlen_k, window_left, window_right, causal):
         # We should not call this function if we do not want to use SWA.
@@ -169,7 +171,7 @@ class MetaData():
         # This would mean the Y window edge starts top edge and ends on
         # the left edge. This would result in >= 1 row of all NaNs in the
         # output if Y is not a multiple of BLOCK_N.
-        assert not (q.shape[2] > k.shape[2] and y < 0)
+        assert not (q.shape[2] > k.shape[2] and self.y < 0)
         if self.x < 0:
             window_width = self.y - abs(self.x)
         else:
@@ -1304,7 +1306,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 24, 1024, 1024, 64),
+                         [(4, 48, 24, 1024, 1004, 64),
                         #   (1, 24, 6, 8192, 8192, 64),
                         #   (1, 4, 2, 16384, 16384, 128),
                         #   (2, 16, 4, 1020, 987, 128),
@@ -1334,7 +1336,7 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
     if causal:
         input_metadata.need_causal()
     # Convert window coord to xy. The kernel uses this as it is more flexible.
-    swa = window_left != -1 or window_right != -1
+    swa = window_left != N_CTX_Q or window_right != N_CTX_K
     if swa:
         input_metadata.need_swa()
     if swa or causal:

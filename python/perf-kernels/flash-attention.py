@@ -539,11 +539,13 @@ def attn_fwd(
     q = (q * qk_scale).to(q.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
-    n_masked_blocks = 0
+    padded_block_n = n_extra_tokens != 0
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
         n_masked_blocks = BLOCK_M // BLOCK_N + 1
+    else:
+        n_masked_blocks = 1 if padded_block_n else 0
     # if masked, we might end up with an additional block.
     # In this case we might exceed n_blocks so pick the min.
     n_masked_blocks = min(n_masked_blocks, n_blocks)
@@ -588,7 +590,7 @@ def attn_fwd(
     # # Compute for full blocks. Here we set causal to false regardless of its actual
     # # value because there is no masking. Similarly we do not need padding.
     if n_full_blocks > 0:
-        block_max = (n_blocks - n_masked_blocks) * BLOCK_N
+        block_max = n_full_blocks * BLOCK_N
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
             start_m, seqlen_k, seqlen_q,
@@ -600,32 +602,21 @@ def attn_fwd(
             # _, PADDED_SEQLEN_K, ...
             PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
         )
-        k_ptrs += block_max * stride_bn
-        v_ptrs += block_max * stride_vk
-        if USE_BIAS:
-            bias_ptrs += block_max * stride_bn
-        if RETURN_ENCODED_SOFTMAX:
-            encoded_sm_ptrs += block_max
         block_min = block_max
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
     if (n_masked_blocks > 0):
         block_max = n_blocks * BLOCK_N
+        k_ptrs += block_min * stride_kn
+        v_ptrs += block_min * stride_vk
+        if USE_BIAS:
+            bias_ptrs += block_max * stride_bn
+        if RETURN_ENCODED_SOFTMAX:
+            encoded_sm_ptrs += block_max
         # ENABLE_MASKING is for causal and windowed masking. But we can
         # also enter here if we have irregular K sequence length
         offs_n_masked = offs_n - X if ENABLE_MASKING else 0
-        # acc, l_i, m_i = _attn_fwd_inner(
-        #     acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
-        #     start_m, seqlen_k, seqlen_q,
-        #     dropout_p, philox_seed, batch_philox_offset, encoded_sm_ptrs,
-        #     # _, _, _, n_extra_tokens, _
-        #     block_min, block_max, offs_n_masked, 0, alibi_slope,
-        #     # ENABLE_MASKING, MASKING_DIR, ....
-        #     True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
-        #     # _, PADDED_SEQLEN_K, ...
-        #     PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
-        # )
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
             start_m, seqlen_k, seqlen_q,
@@ -1158,6 +1149,10 @@ class _attention(torch.autograd.Function):
         print(f"swa = {metadata.swa}")
         print(f"causal = {metadata.causal}")
         print(f"enable masking = {metadata.enable_masking}")
+        print(f"seqlen q = {metadata.max_seqlens_q}")
+        print(f"seqlen k = {metadata.max_seqlens_k}")
+        print(f"padded_head = {padded_d_model}")
+        print(f"head_size = {head_size}")
 
         attn_fwd[grid](
             q, k, v, metadata.bias, metadata.sm_scale, M, o,
@@ -1306,7 +1301,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 24, 1024, 1004, 64),
+                         [(4, 48, 48, 1024, 1004, 64),
                         #   (1, 24, 6, 8192, 8192, 64),
                         #   (1, 4, 2, 16384, 16384, 128),
                         #   (2, 16, 4, 1020, 987, 128),
@@ -1392,8 +1387,9 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[0][0][0][0]}")
-    print(f"ref_out = {ref_out[0][0][0][0]}")
+    print(f"tri_out = {tri_out[1][37][902][59]}")
+    print(f"ref_out = {ref_out[1][37][902][59]}")
+    print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")
     # compare

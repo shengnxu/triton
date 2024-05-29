@@ -539,10 +539,12 @@ def attn_fwd(
 
     # Here we compute how many full and masked blocks we have.
     padded_block_n = n_extra_tokens != 0
+    BEGIN_MASKED: tl.constexpr = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
+    end_masked = X <= 0 or (start_m * BLOCK_M) < (seqlen_k - X)
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
-        n_masked_blocks = BLOCK_M // BLOCK_N + 1
+        n_masked_blocks = (BEGIN_MASKED + end_masked) * (BLOCK_M // BLOCK_N + 1)
     else:
         n_masked_blocks = 1 if padded_block_n else 0
     # if masked, we might end up with an additional block.
@@ -553,17 +555,16 @@ def attn_fwd(
 
     # Left edge masking is only possible in SWA.
     if SWA:
-        begin_masked = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
-        if begin_masked:
+        if BEGIN_MASKED:
+            n_full_blocks = n_full_blocks - n_masked_blocks
             # If there is a left edge, we want to detect if the intercept for y is
             # in this WG.
-            k_ptrs += begin_block * BLOCK_N * stride_bn
-            v_ptrs += begin_block * BLOCK_N * stride_vk
+            k_ptrs += block_min * stride_kn
+            v_ptrs += block_min * stride_vk
             if USE_BIAS:
                 bias_ptrs += begin_block * BLOCK_N * stride_bn
             if RETURN_ENCODED_SOFTMAX:
                 encoded_sm_ptrs += begin_block * BLOCK_N
-            n_full_blocks = n_full_blocks - n_masked_blocks
             block_max = block_min + n_masked_blocks * BLOCK_N
             offs_n_masked = offs_n + Y
             acc, l_i, m_i = _attn_fwd_inner(
@@ -577,12 +578,12 @@ def attn_fwd(
                 # _, PADDED_SEQLEN_K, ...
                 PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
             )
-            k_ptrs += block_min * stride_bn
-            v_ptrs += block_min * stride_vk
+            k_ptrs += block_max * stride_kn
+            v_ptrs += block_max * stride_vk
             if USE_BIAS:
-                bias_ptrs += block_min * stride_bn
+                bias_ptrs += block_max * stride_bn
             if RETURN_ENCODED_SOFTMAX:
-                encoded_sm_ptrs += block_min
+                encoded_sm_ptrs += block_max
             block_min = block_max
 
     tl.debug_barrier()
@@ -605,7 +606,7 @@ def attn_fwd(
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
-    if (n_masked_blocks > 0):
+    if end_masked:
         block_max = n_blocks * BLOCK_N
         k_ptrs += block_min * stride_kn
         v_ptrs += block_min * stride_vk

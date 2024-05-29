@@ -1,6 +1,6 @@
-#include "PipelineExpander.h"
-#include "PipeliningUtility.h"
-#include "Schedule.h"
+#include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
+#include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
+#include "triton/Dialect/TritonGPU/Transforms/Schedule.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 using namespace mlir;

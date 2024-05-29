@@ -1,4 +1,4 @@
-#include "PipeliningUtility.h"
+#include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
 
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/TypeUtilities.h"

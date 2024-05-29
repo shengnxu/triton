@@ -1,7 +1,7 @@
 #ifndef TRITON_TRITONGPU_TRANSFORM_PIPELINE_SCHEDULE_H_
 #define TRITON_TRITONGPU_TRANSFORM_PIPELINE_SCHEDULE_H_
 
-#include "PipelineExpander.h"
+#include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/ArrayRef.h"

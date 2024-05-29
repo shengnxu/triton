@@ -16,6 +16,19 @@ def TritonAMDGPUStreamPipeline : Pass<"tritonamdgpu-stream-pipeline", "mlir::Mod
   let dependentDialects = [];
 }
 
+def TritonAMDGPUSoftwarePipeline : Pass<"tritonamdgpu-software-pipeline", "mlir::ModuleOp"> {
+  let summary = "pipeline";
+
+  let description = [{
+    Pipeline global loads through registers to shared memory while computing on previous
+    tile
+  }];
+
+  let constructor = "mlir::createTritonAMDGPUSoftwarePipelinePass()";
+
+  let dependentDialects = [];
+}
+
 def TritonAMDGPUAccelerateMatmul : Pass<"tritonamdgpu-accelerate-matmul", "mlir::ModuleOp"> {
   let summary = "accelerate matmul";
 

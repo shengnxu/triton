@@ -48,6 +48,18 @@ static Value getMemAccessPtr(Operation *op) {
   return nullptr;
 }
 
+template<class T>
+void print(const std::string& name, const T& vec) {
+  llvm::outs() << name << " = ";
+  char c = '{';
+  llvm::outs() << c;
+  for (auto& v : vec) {
+    llvm::outs() << c << v;
+    if (c == '{') c = ',';
+  }
+  llvm::outs() << "}\n";
+}
+
 struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
   void
   setCoalescedEncoding(ModuleAxisInfoAnalysis &axisInfoAnalysis, Operation *op,
@@ -66,15 +78,20 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       // Tensor pointer
       // TODO(Chenggang): encoding for tensor pointers is meaningless, remove
       // these later while merging into the GitHub main
+      llvm::outs() << "before ptrType check\n";
       if (auto ptrType = valType.dyn_cast<PointerType>()) {
+       llvm::outs() << "In ptrType check\n";
         auto tensorTy = ptrType.getPointeeType().dyn_cast<RankedTensorType>();
         assert(tensorTy);
         auto makeTensorPtr = getMakeTensorPtrOp(val);
         auto order = makeTensorPtr.getOrder();
+        print("order", order);
         auto tileShape = triton::gpu::getShapePerCTA(tensorTy);
+        print("tileShape", order);
         size_t rank = order.size();
         auto elemSizeInBytes =
             tensorTy.getElementType().getIntOrFloatBitWidth() / 8;
+        llvm::outs() << "elemSizeInBytes = " << elemSizeInBytes << "\n";
         SmallVector<int64_t> contiguity(rank, 1);
         SmallVector<int64_t> divisibility(rank, 1);
         SmallVector<int64_t> constancy(rank, 1);
@@ -151,6 +168,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
 
     auto getNumElementPerThread = [&](Operation *op) {
       Value val = getMemAccessPtr(op);
+      llvm::outs() << "val = " << val << "\n";
       auto valInfo = queryAxisInfo(val);
       unsigned elemNumBits = getElementBitWidth(val);
       unsigned elemNumBytes = std::max(elemNumBits / 8, 1u);
@@ -160,9 +178,12 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
           std::min(valInfo.getContiguity(order[0]), shapePerCTA[order[0]]);
       unsigned alignment = std::min(maxMultiple, maxContig);
       unsigned currPerThread = std::min(alignment, 128 / elemNumBits);
+      llvm::outs() << "order[0] = " << order[0] << "\n";
+      llvm::outs() << "elemNumBits = " << elemNumBits << ", maxMultipleBytes = " << maxMultipleBytes << ", maxMultiple = " << maxMultiple << ", maxConfig = " << maxContig << ", alignment = " << alignment << ", curPerThread = " << currPerThread << "\n";
       return currPerThread;
     };
     unsigned perThread = getNumElementPerThread(op);
+    llvm::outs() << "perThread = " << perThread << "\n";
     for (Operation *op : memAccessesSameOrder) {
       unsigned currPerThread = getNumElementPerThread(op);
       perThread = std::max(perThread, currPerThread);

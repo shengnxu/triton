@@ -248,6 +248,7 @@ private:
       elemSize = std::max<unsigned int>(
           1, triton::getPointeeBitWidth(op.getPtr().getType()) / 8);
     }
+    llvm::outs() << "elemSize = " << elemSize << ", l_divisibility = " << lhs.getDivisibility(dim) << ", r_divisibility = " << rhs.getDivisibility(dim) << "\n";
     return gcd(lhs.getDivisibility(dim), rhs.getDivisibility(dim) * elemSize);
   }
 

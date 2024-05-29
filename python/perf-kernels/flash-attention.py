@@ -62,8 +62,8 @@ class MetaData():
         if not causal:
             y = seqlen_q if window_left == -1 else window_left
             x = seqlen_k if window_right == -1 else window_right
-        # We just want to apply causal mask, no windowing here.
-        elif window_left == -1 and window_right == -1:
+        # This is for causal only, no SWA.
+        elif window_left == seqlen_q and window_right == seqlen_k:
             # If causal and no window, then there is no left mask
             y = seqlen_q
             if seqlen_q == seqlen_k:
@@ -76,7 +76,6 @@ class MetaData():
                 # seqlen k (so again, q - k), but because it is the right mask
                 # on the left edge, x should be negative.
                 x = seqlen_k - seqlen_q
-            print(f"y = {y}, x = {x}")
         # This is for causal + SWA
         else:
             # If causal masking is enabled and the attn scores are square, causal mask
@@ -177,7 +176,7 @@ class MetaData():
         else:
             window_width = self.x + self.y
         # We cannot currently handle the case where BLOCK_M == window_width.
-        assert window_width > 256
+        assert not self.swa or self.causal or window_width > 256
         assert self.layout is not None
         assert self.layout == 'thd' or not self.varlen
 
@@ -578,12 +577,12 @@ def attn_fwd(
                 # _, PADDED_SEQLEN_K, ...
                 PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
             )
-            k_ptrs += block_max * stride_bn
-            v_ptrs += block_max * stride_vk
+            k_ptrs += block_min * stride_bn
+            v_ptrs += block_min * stride_vk
             if USE_BIAS:
-                bias_ptrs += block_max * stride_bn
+                bias_ptrs += block_min * stride_bn
             if RETURN_ENCODED_SOFTMAX:
-                encoded_sm_ptrs += block_max
+                encoded_sm_ptrs += block_min
             block_min = block_max
 
     tl.debug_barrier()
@@ -611,9 +610,9 @@ def attn_fwd(
         k_ptrs += block_min * stride_kn
         v_ptrs += block_min * stride_vk
         if USE_BIAS:
-            bias_ptrs += block_max * stride_bn
+            bias_ptrs += block_min * stride_bn
         if RETURN_ENCODED_SOFTMAX:
-            encoded_sm_ptrs += block_max
+            encoded_sm_ptrs += block_min
         # ENABLE_MASKING is for causal and windowed masking. But we can
         # also enter here if we have irregular K sequence length
         offs_n_masked = offs_n - X if ENABLE_MASKING else 0
@@ -1301,7 +1300,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 48, 1024, 1004, 64),
+                         [(4, 48, 48, 1024, 1024, 64),
                         #   (1, 24, 6, 8192, 8192, 64),
                         #   (1, 4, 2, 16384, 16384, 128),
                         #   (2, 16, 4, 1020, 987, 128),
@@ -1321,7 +1320,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
 @pytest.mark.parametrize('layout', ['bhsd'])
-@pytest.mark.parametrize('sliding_window', [(-1, -1)])
+@pytest.mark.parametrize('sliding_window', [(512, -1)])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
@@ -1387,8 +1386,11 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
         nan_mask = torch.isnan(p)
         p[nan_mask==1] = 0
     ref_out = torch.einsum('bhqk,bhkd->bhqd', p.half(), v)
-    print(f"tri_out = {tri_out[1][37][902][59]}")
-    print(f"ref_out = {ref_out[1][37][902][59]}")
+    # compare
+    if layout == 'bshd':
+        ref_out = ref_out.transpose(1, 2).clone()
+    print(f"tri_out = {tri_out[0][0][0][0]}")
+    print(f"ref_out = {ref_out[0][0][0][0]}")
     print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")

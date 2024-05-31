@@ -22,7 +22,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
   void
   setCoalescedEncoding(ModuleAxisInfoAnalysis &axisInfoAnalysis, Operation *op,
                        int numWarps, int threadsPerWarp,
-                       llvm::MapVector<Operation *, Attribute> &layoutMap) {
+                       llvm::MapVector<Operation *, Attribute> &layoutMap,
+                       bool notTransposed) {
     Value ptr = getMemAccessPtr(op);
     auto refTensorType = cast<RankedTensorType>(ptr.getType());
 
@@ -94,6 +95,9 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     }
     SmallVector<unsigned> sizePerThread(refTensorType.getRank(), 1);
     sizePerThread[order[0]] = perThread;
+    llvm::outs() << "Encoding Order: " << sizePerThread[0] << " " << sizePerThread[1] << "\n";
+    if (notTransposed)
+      sizePerThread[order[1]] = 4;
 
     auto CTALayout = triton::gpu::getCTALayout(refTensorType.getEncoding());
     layoutMap[op] = triton::gpu::BlockedEncodingAttr::get(
@@ -150,6 +154,61 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     op->erase();
   }
 
+  bool checkTransposition(Value ptr) {
+    SmallVector<unsigned int> optimalOrderA = {1, 0};
+    SmallVector<unsigned int> optimalOrderB = {0, 1};
+
+    LDBG("Checking this op for transposition: " << ptr);
+    // the memAccessPtr can be load/store or addptr
+    auto memOps = ptr.getUsers();
+    for (auto memOp : memOps) {
+      // only start tracking down dotOp from a
+      if (!isa<triton::LoadOp>(memOp))
+        continue;
+      // this assumes the load -> ConvertLayoutOp -> dot chain
+      auto cvtOps = memOp->getUsers();
+      for (auto cvtOp : cvtOps) {
+        // here should be only 1 ConvertLayoutOp presumably
+        if (!isa<triton::gpu::ConvertLayoutOp>(cvtOp))
+          continue;
+        LDBG("cvtOp: " << *cvtOp);
+        auto dots = cvtOp->getUsers();
+        // here should be only 1 dotOp presumably, but multiple are fine
+        for (auto dot : dots) {
+          if (!isa<triton::DotOp>(dot))
+            continue;
+          auto dotOp = cast<triton::DotOp>(dot);
+          auto opA = dotOp.getOperand(0);
+          auto opB = dotOp.getOperand(1);
+          if (cvtOp->getResult(0) == opA) {
+            LDBG("This is opA");
+            auto opAEncoding = cast<RankedTensorType>(opA.getType()).getEncoding();
+            auto orderA = triton::gpu::getOrder(opAEncoding);
+            LDBG("Order A: " << orderA[0] << " " << orderA[1]);
+            if (orderA != optimalOrderA) {
+              llvm::outs() << "opB is not transposed\n";
+              return true;
+            }
+          }
+          else if (cvtOp->getResult(0) == opB) {
+            LDBG("This is opB");
+            auto opBEncoding = cast<RankedTensorType>(opB.getType()).getEncoding();
+            auto orderB = triton::gpu::getOrder(opBEncoding);
+            LDBG("Order B: " << orderB[0] << " " << orderB[1]);
+            if (orderB != optimalOrderB) {
+              llvm::outs() << "opB is not transposed\n";
+              return true;
+            }
+          }
+          else {
+            return false;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   void runOnOperation() override {
     // Run axis info analysis
     ModuleOp moduleOp = getOperation();
@@ -170,12 +229,13 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         isTensorPointer = isa<RankedTensorType>(ptrType.getPointeeType());
       if (!isPtrTensor && !isTensorPointer)
         return;
+      bool notTransposed = checkTransposition(ptr);
       auto mod = curr->getParentOfType<ModuleOp>();
       int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
       int threadsPerWarp =
           triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
       setCoalescedEncoding(axisInfoAnalysis, curr, numWarps, threadsPerWarp,
-                           layoutMap);
+                           layoutMap, notTransposed);
     });
 
     // For each memory op that has a layout L1:
@@ -185,6 +245,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     //    produces a tensor with layout L2
     // 4. Convert the output of this new memory op back to L1
     // 5. Replace all the uses of the original memory op by the new one
+    LDBG(layoutMap.size());
     for (auto &kv : layoutMap) {
       coalesceOp(kv.second, kv.first);
     }

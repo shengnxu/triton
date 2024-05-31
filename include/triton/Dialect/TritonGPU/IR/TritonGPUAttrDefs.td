@@ -307,7 +307,7 @@ compared to 1*64 when the hasLeadingOffset is false.
           } else {
             // Do not swizzle in case k dimension is not innermost.
             // In this case accesses will go in different banks even without swizzling.
-            return get(context, 1, 1, 1, order, CTALayout);
+            return get(context, 4, 1, 4, order, CTALayout);
           }
         }
 

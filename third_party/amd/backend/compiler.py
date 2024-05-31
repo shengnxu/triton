@@ -122,6 +122,7 @@ class HIPBackend(BaseBackend):
         pm.enable_debug()
         passes.ttgpuir.add_coalesce(pm)
         amd.passes.ttgpuir.add_remove_layout_conversions(pm)
+        # amd.passes.ttgpuir.add_transpose_coalesce(pm, options.kpack)
         passes.ttgpuir.add_optimize_thread_locality(pm)
         amd.passes.ttgpuir.add_accelerate_matmul(pm, options.arch, options.matrix_instr_nonkdim, options.kpack)
         amd.passes.ttgpuir.add_remove_layout_conversions(pm)
@@ -131,7 +132,6 @@ class HIPBackend(BaseBackend):
             amd.passes.ttgpuir.add_stream_pipeline(pm)
             passes.common.add_canonicalizer(pm)
         passes.ttgpuir.add_optimize_dot_operands(pm, True)
-        amd.passes.ttgpuir.add_transpose_coalesce(pm, options.kpack)
         amd.passes.ttgpuir.add_remove_layout_conversions(pm)
         passes.ttgpuir.add_reduce_data_duplication(pm)
         if options.num_stages != 0:

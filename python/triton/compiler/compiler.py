@@ -238,6 +238,7 @@ def compile(src, target=None, options=None):
     # create cache manager
     key = f"{triton_key()}-{src.hash()}-{backend.hash()}-{options.hash()}-{str(sorted(get_env_vars().items()))}"
     hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    print(hash)
     fn_cache_manager = get_cache_manager(hash)
     # For dumping/overriding only hash the source as we want it to be independent of triton
     # core changes to make it easier to track kernels by hash.

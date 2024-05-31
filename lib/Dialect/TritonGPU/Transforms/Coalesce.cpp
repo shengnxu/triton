@@ -245,7 +245,6 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     //    produces a tensor with layout L2
     // 4. Convert the output of this new memory op back to L1
     // 5. Replace all the uses of the original memory op by the new one
-    LDBG(layoutMap.size());
     for (auto &kv : layoutMap) {
       coalesceOp(kv.second, kv.first);
     }

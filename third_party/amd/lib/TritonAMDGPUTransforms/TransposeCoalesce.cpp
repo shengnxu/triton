@@ -59,13 +59,17 @@ public:
     LDBG("kPack: " << kPack);
     LDBG("Order A: " << orderA[0] << " " << orderA[1]);
     LDBG("sizePerThread A: " << szPerTdA[0] << " " << szPerTdA[1]);
-    if (orderA != optimalAOrder)
-      return failure();
+    // if (orderA != optimalAOrder)
+    //   return failure();
 
     // For operand B, optimal would be row-major, i.e. order of (1, 0)
     SmallVector<unsigned int> optimalBOrder({0, 1});
     auto opB = dotOp.getB();
     auto opBEncoding = cast<RankedTensorType>(opB.getType()).getEncoding();
+    if (auto dotOpEncB = dyn_cast<ttg::DotOperandEncodingAttr>(opBEncoding))
+    {
+      LDBG("KWidth: " << dotOpEncB.getKWidth());
+    }
     auto szPerTdB = ttg::getSizePerThread(opBEncoding);
     auto orderB = ttg::getOrder(opBEncoding);
     LDBG("Order B: " << orderB[0] << " " << orderB[1]);
@@ -74,8 +78,10 @@ public:
       LDBG("B is not optimal");
       // Assume the chain is tt.load -> ttg.convert_layout -> tt.dot
       auto cvtLayoutOpB = cast<ttg::ConvertLayoutOp>(opB.getDefiningOp());
-      auto loadOpB = cast<tt::LoadOp>(
+      auto loadOpB = dyn_cast<tt::LoadOp>(
         cvtLayoutOpB.getOperand().getDefiningOp());
+      if (!loadOpB)
+        return failure();
       auto b = loadOpB.getResult();
       auto opBTy = cast<RankedTensorType>(b.getType());
       opBEncoding = opBTy.getEncoding();
@@ -89,10 +95,20 @@ public:
         ttg::getCTALayout(opBEncoding));
       auto newBType = RankedTensorType::get(
         opBTy.getShape(), opBTy.getElementType(), newBlkEncodingB);
-      b = rewriter.create<ttg::ConvertLayoutOp>(loadOpB.getLoc(), newBType, loadOpB.getResult());
-      szPerTdB = ttg::getSizePerThread(newBlkEncodingB);
-      LDBG("New sizePerThread B: " << szPerTdB[0] << " " << szPerTdB[1]);
-      return success();
+      LDBG("loadOpB: " << loadOpB);
+      LDBG("cvtLayoutOpB: " << cvtLayoutOpB);
+      LDBG("dotOp: " << dotOp);
+      LDBG("\n\n");
+      rewriter.setInsertionPoint(cvtLayoutOpB);
+      auto newCvtOp = rewriter.create<ttg::ConvertLayoutOp>(loadOpB.getLoc(), newBType, b);
+      cvtLayoutOpB.setOperand(newCvtOp.getResult());
+      LDBG("loadOpB: " << loadOpB);
+      LDBG("newCvtOp: " << newCvtOp);
+      LDBG("cvtLayoutOpB: " << cvtLayoutOpB);
+      LDBG("dotOp: " << dotOp);
+      // szPerTdB = ttg::getSizePerThread(newBlkEncodingB);
+      // LDBG("New sizePerThread B: " << szPerTdB[0] << " " << szPerTdB[1]);
+      // return success();
     }
     return success();
   }

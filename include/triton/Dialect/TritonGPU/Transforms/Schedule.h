@@ -6,6 +6,7 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/ArrayRef.h"
 #include <vector>
+#include <list>
 
 namespace mlir {
 namespace triton {
@@ -33,6 +34,73 @@ void asyncLaunchDots(scf::ForOp forOp);
 /// Post process the pipelined loop by updating the wait ops with the right
 /// number of groups in flight.
 void updateWaits(ModuleOp module);
+
+class CoarseSchedule {
+public:
+  class ClusterList {
+    std::list<int> orderClusters;
+
+  public:
+    using iterator = decltype(orderClusters)::iterator;
+    ClusterList() = default;
+    iterator begin() { return orderClusters.begin(); }
+    iterator end() { return orderClusters.end(); }
+    size_t size() { return orderClusters.size(); }
+    iterator newAtBack() {
+      orderClusters.push_back(orderClusters.size());
+      return std::prev(orderClusters.end());
+    }
+    iterator newAtFront() {
+      orderClusters.push_front(-1);
+      for (auto &clusterId : orderClusters) {
+        clusterId++;
+      }
+      return orderClusters.begin();
+    }
+    iterator newBefore(iterator cluster) {
+      auto ret = orderClusters.insert(cluster, *cluster);
+      for (auto &clusterId : llvm::make_range(cluster, orderClusters.end())) {
+        clusterId++;
+      }
+      return ret;
+    }
+  };
+
+  CoarseSchedule(int numStages) : numStages(numStages) {}
+  int numStages;
+  ClusterList clusters;
+  using Cluster = decltype(clusters)::iterator;
+
+  DenseMap<Operation *, std::pair<int, Cluster>> opToStageAndCluster;
+
+  void insert(Operation *op, int stage, Cluster cluster) {
+    opToStageAndCluster[op] = {stage, cluster};
+  }
+
+  bool insertIfAbsent(Operation *op, int stage, Cluster cluster) {
+    if (opToStageAndCluster.count(op))
+      return false;
+    insert(op, stage, cluster);
+    return true;
+  }
+
+  void insertDepsOfOp(Operation *op, int stage, CoarseSchedule::Cluster cluster,
+                      bool includeArg);
+
+  void erase(Operation *op) { opToStageAndCluster.erase(op); }
+
+  int count(Operation *op) { return opToStageAndCluster.count(op); }
+
+  std::pair<int, Cluster> operator[](Operation *op) {
+    return opToStageAndCluster[op];
+  }
+
+  SmallVector<std::tuple<Operation *, int, Cluster>>
+  getOpsInOrder(scf::ForOp forOp);
+  std::vector<std::pair<Operation *, unsigned>>
+  createFinalSchedule(scf::ForOp forOp);
+  void dump();
+};
 
 } // namespace triton
 } // namespace mlir

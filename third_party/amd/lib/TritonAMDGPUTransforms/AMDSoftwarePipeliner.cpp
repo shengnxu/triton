@@ -60,144 +60,6 @@ struct LoadInfo {
 
 } // namespace
 
-// SJW:  move to header
-class CoarseSchedule {
-public:
-  class ClusterList {
-    std::list<int> orderClusters;
-
-  public:
-    using iterator = decltype(orderClusters)::iterator;
-    ClusterList() = default;
-    iterator begin() { return orderClusters.begin(); }
-    iterator end() { return orderClusters.end(); }
-    size_t size() { return orderClusters.size(); }
-    iterator newAtBack() {
-      orderClusters.push_back(orderClusters.size());
-      return std::prev(orderClusters.end());
-    }
-    iterator newAtFront() {
-      orderClusters.push_front(-1);
-      for (auto &clusterId : orderClusters) {
-        clusterId++;
-      }
-      return orderClusters.begin();
-    }
-    iterator newBefore(iterator cluster) {
-      auto ret = orderClusters.insert(cluster, *cluster);
-      for (auto &clusterId : llvm::make_range(cluster, orderClusters.end())) {
-        clusterId++;
-      }
-      return ret;
-    }
-  };
-
-  CoarseSchedule(int numStages) : numStages(numStages) {}
-  int numStages;
-  ClusterList clusters;
-  using Cluster = decltype(clusters)::iterator;
-
-  DenseMap<Operation *, std::pair<int, Cluster>> opToStageAndCluster;
-
-  void insert(Operation *op, int stage, Cluster cluster) {
-    opToStageAndCluster[op] = {stage, cluster};
-  }
-
-  bool insertIfAbsent(Operation *op, int stage, Cluster cluster) {
-    if (opToStageAndCluster.count(op))
-      return false;
-    insert(op, stage, cluster);
-    return true;
-  }
-
-  void insertDepsOfOp(Operation *op, int stage, CoarseSchedule::Cluster cluster,
-                      bool includeArg) {
-    for (Value operand : op->getOperands()) {
-      Value v = operand;
-      llvm::SmallDenseSet<Value> seen;
-      while (auto arg = dyn_cast<BlockArgument>(v)) {
-        if (!includeArg)
-          break;
-        if (!seen.insert(v).second)
-          break;
-        if (arg.getArgNumber() > 0 && arg.getOwner() == op->getBlock()) {
-          auto yieldOp = op->getBlock()->getTerminator();
-          v = yieldOp->getOperand(arg.getArgNumber() - 1);
-          continue;
-        }
-        break;
-      }
-      Operation *defOp = v.getDefiningOp();
-      if (defOp && defOp->getBlock() == op->getBlock()) {
-        if (insertIfAbsent(defOp, stage, cluster)) {
-          insertDepsOfOp(defOp, stage, cluster, includeArg);
-        }
-      }
-    }
-  }
-
-  void erase(Operation *op) { opToStageAndCluster.erase(op); }
-
-  int count(Operation *op) { return opToStageAndCluster.count(op); }
-
-  std::pair<int, Cluster> operator[](Operation *op) {
-    return opToStageAndCluster[op];
-  }
-
-  SmallVector<std::tuple<Operation *, int, Cluster>>
-  getOpsInOrder(scf::ForOp forOp) {
-    SmallVector<SmallVector<std::tuple<Operation *, int, Cluster>>, 8>
-        orderClusters(clusters.size());
-    for (auto &op : forOp.getBody()->without_terminator()) {
-      if (opToStageAndCluster.count(&op) == 0) {
-        continue;
-      }
-      assert(opToStageAndCluster[&op].first < numStages &&
-             "Op with invalid stage!");
-      int clusterId = *opToStageAndCluster[&op].second;
-      assert(clusterId == std::distance(clusters.begin(),
-                                        opToStageAndCluster[&op].second) &&
-             "Cluster ID mismatch!");
-      orderClusters[clusterId].push_back(
-          make_tuple(&op, opToStageAndCluster[&op].first,
-                     opToStageAndCluster[&op].second));
-    }
-    SmallVector<std::tuple<Operation *, int, Cluster>> opsInOrder;
-    for (int i = 0; i < orderClusters.size(); i++) {
-      for (auto [op, stage, cluster] : orderClusters[i]) {
-        opsInOrder.push_back({op, stage, cluster});
-      }
-    }
-
-    return opsInOrder;
-  }
-
-  std::vector<std::pair<Operation *, unsigned>>
-  createFinalSchedule(scf::ForOp forOp) {
-    SmallVector<std::tuple<Operation *, int, Cluster>> opsInOrder =
-        getOpsInOrder(forOp);
-    std::vector<std::pair<Operation *, unsigned>> schedule;
-    for (auto [op, stage, cluster] : opsInOrder) {
-      LDBG("Adding op to schedule at stage " << stage << " cluster " << *cluster
-                                             << ":" << *op);
-      schedule.push_back({op, stage});
-    }
-    return schedule;
-  }
-
-  void dump() {
-    for (int i = 0; i < numStages; i++) {
-      LDBG("- Ops in stage " << i);
-      for (auto &[op, stageAndCluster] : opToStageAndCluster) {
-        if (i == stageAndCluster.first) {
-          llvm::dbgs() << " cluster: " << *stageAndCluster.second << " ";
-          op->print(llvm::dbgs());
-        }
-      }
-    }
-  }
-};
-
 static bool isMMAv3Dot(Operation *op) {
   auto dot = dyn_cast<tt::DotOp>(op);
   if (!dot)
@@ -221,8 +83,8 @@ static void appendToYield(scf::ForOp forOp, ArrayRef<Value> newOperands) {
 
 static void createAsyncCopy(scf::ForOp &forOp, tt::LoadOp loadOp, Value alloc,
                             Value insertIdx, Value extractIdx,
-                            CoarseSchedule &schedule,
-                            CoarseSchedule::Cluster prefetchCluster,
+                            tt::CoarseSchedule &schedule,
+                            tt::CoarseSchedule::Cluster prefetchCluster,
                             llvm::MapVector<Operation *, LoadInfo> &loadToInfo,
                             int numStages) {
   OpBuilder builder(forOp);
@@ -260,7 +122,7 @@ static void createAsyncCopy(scf::ForOp &forOp, tt::LoadOp loadOp, Value alloc,
       allocTy.getEncoding(), /*mutableMemory=*/true);
   auto view =
       builder.create<ttg::MemDescSubviewOp>(loc, subviewTy, alloc, copyOffsets);
-  Operation *copy = loadOp;
+  Operation *copy = builder.clone(*loadOp);
   // Operation *copy = builder.create<ttg::AsyncCopyGlobalToLocalOp>(
   //     loc, src, view, mask, other, loadOp.getCache(), loadOp.getEvict(),
   //     loadOp.getIsVolatile());
@@ -330,7 +192,7 @@ static void createAsyncCopy(scf::ForOp &forOp, tt::LoadOp loadOp, Value alloc,
 static void createTMAAsyncCopy(
     scf::ForOp &forOp, tt::ExperimentalDescriptorLoadOp loadOp, Value alloc,
     Value insertIdx, Value extractIdx, Value barrier, Operation *waitOp,
-    Value phase, CoarseSchedule &schedule,
+    Value phase, tt::CoarseSchedule &schedule,
     llvm::MapVector<Operation *, LoadInfo> &loadToInfo, int numStages) {
   assert(phase && "Phase value is required for TMA async copy.");
   OpBuilder builder(forOp);
@@ -682,7 +544,7 @@ assignMemoryLayouts(llvm::SmallVector<std::tuple<Operation *, int, Operation *>>
 }
 
 static llvm::MapVector<Operation *, LoadInfo>
-scheduleLoads(scf::ForOp forOp, CoarseSchedule &schedule,
+scheduleLoads(scf::ForOp forOp, tt::CoarseSchedule &schedule,
               DenseSet<Operation *> &rootUsers, int numStages) {
   ModuleOp moduleOp = forOp->getParentOfType<ModuleOp>();
   tt::ModuleAxisInfoAnalysis axisInfoAnalysis(moduleOp);
@@ -720,7 +582,7 @@ scheduleLoads(scf::ForOp forOp, CoarseSchedule &schedule,
   unsigned stagesBetweenLoads =
       ceil<unsigned>(numStages - 2, maxIndirectionLevel + 1);
 
-  CoarseSchedule::Cluster rootUsersCluster = schedule.clusters.newAtFront();
+  tt::CoarseSchedule::Cluster rootUsersCluster = schedule.clusters.newAtFront();
   // Put the root uses of the loads in the last stage.
   for (auto &[loadOp, dist, use] : loadOpToIndLevelAndUse) {
     if (loadToInfo.count(loadOp) == 0)
@@ -733,7 +595,7 @@ scheduleLoads(scf::ForOp forOp, CoarseSchedule &schedule,
     }
   }
 
-  SmallVector<CoarseSchedule::Cluster> loadsClusters;
+  SmallVector<tt::CoarseSchedule::Cluster> loadsClusters;
   for (int i = 0; i < maxIndirectionLevel + 1; i++) {
     loadsClusters.push_back(schedule.clusters.newAtBack());
   }
@@ -758,10 +620,10 @@ scheduleLoads(scf::ForOp forOp, CoarseSchedule &schedule,
 // Schedule the prologue and epilogue `if` ops in the loop, pushing them as
 // close to the loop boundaries as possible. Return the cluster after the
 // prologue (or the beginning of the loop if there is no prologue).
-static CoarseSchedule::Cluster
-schedulePrologueAndEpilogue(scf::ForOp forOp, CoarseSchedule &schedule,
+static tt::CoarseSchedule::Cluster
+schedulePrologueAndEpilogue(scf::ForOp forOp, tt::CoarseSchedule &schedule,
                             DenseSet<Operation *> &rootUsers, int numStages) {
-  CoarseSchedule::Cluster afterPrologue = schedule.clusters.begin();
+  tt::CoarseSchedule::Cluster afterPrologue = schedule.clusters.begin();
 
   // Look for the IfOp that is in the backward slice any of the currently
   // scheduled ops and put it at the beginning of the loop.
@@ -779,14 +641,14 @@ schedulePrologueAndEpilogue(scf::ForOp forOp, CoarseSchedule &schedule,
       }
     }
   }
-  CoarseSchedule::Cluster prologueCluster = schedule.clusters.newAtFront();
+  tt::CoarseSchedule::Cluster prologueCluster = schedule.clusters.newAtFront();
   for (auto [ifOp, stage] : ifsToStage) {
     schedule.insert(ifOp, stage, prologueCluster);
   }
 
   // Look for the IfOp that is in the forward slice of the root users and put it
   // at the end of the loop.
-  CoarseSchedule::Cluster epilogueCluster = schedule.clusters.newAtBack();
+  tt::CoarseSchedule::Cluster epilogueCluster = schedule.clusters.newAtBack();
   for (auto rootUser : rootUsers) {
     SetVector<Operation *> forwardSlice;
     getForwardSlice(rootUser, &forwardSlice);
@@ -813,9 +675,9 @@ schedulePrologueAndEpilogue(scf::ForOp forOp, CoarseSchedule &schedule,
 
 // Add dependencies of anchor ops to the coarse schedule. Schedule them to
 // the same stage and ordering cluster as the anchor op.
-static void scheduleDependencies(scf::ForOp forOp, CoarseSchedule &schedule,
+static void scheduleDependencies(scf::ForOp forOp, tt::CoarseSchedule &schedule,
                                  int numStages) {
-  SmallVector<std::tuple<Operation *, int, CoarseSchedule::Cluster>>
+  SmallVector<std::tuple<Operation *, int, tt::CoarseSchedule::Cluster>>
       opsInOrder = schedule.getOpsInOrder(forOp);
   // Schedule dependencies stage by stage.
   for (int stage = 0; stage < numStages; stage++) {
@@ -830,7 +692,7 @@ static void scheduleDependencies(scf::ForOp forOp, CoarseSchedule &schedule,
 // Find dependencies with distance of 1. They will go to the next stage,
 // but in the cluster before the current op.
 static void scheduleDistanceOneDependencies(scf::ForOp forOp,
-                                            CoarseSchedule &schedule,
+                                            tt::CoarseSchedule &schedule,
                                             int numStages) {
   auto getNestedOperands = [](Operation *op) -> SmallVector<Value> {
     SmallVector<Value> operands;
@@ -844,7 +706,7 @@ static void scheduleDistanceOneDependencies(scf::ForOp forOp,
   };
 
   // Mapping from the cluster to the cluster before it.
-  DenseMap<CoarseSchedule::Cluster *, CoarseSchedule::Cluster> dist1Cluster;
+  DenseMap<tt::CoarseSchedule::Cluster *, tt::CoarseSchedule::Cluster> dist1Cluster;
   for (auto &op : forOp.getBody()->without_terminator()) {
     if (schedule.count(&op) == 0)
       continue;
@@ -880,13 +742,13 @@ static void scheduleDistanceOneDependencies(scf::ForOp forOp,
 }
 
 static void scheduleRemainingToLastStage(scf::ForOp forOp,
-                                         CoarseSchedule &schedule,
-                                         CoarseSchedule::Cluster afterPrologue,
+                                         tt::CoarseSchedule &schedule,
+                                         tt::CoarseSchedule::Cluster afterPrologue,
                                          int numStages) {
   // Assign the rest of the ops to the last stage.
   // Take care of the ordering of the ops - uses cannot be scheduled to the
   // cluster before the definition.
-  DenseMap<Operation *, CoarseSchedule::Cluster> opToCluster;
+  DenseMap<Operation *, tt::CoarseSchedule::Cluster> opToCluster;
   for (auto &op : forOp.getBody()->without_terminator()) {
     if (schedule.count(&op) == 0) {
       opToCluster[&op] = afterPrologue;
@@ -904,8 +766,8 @@ static void scheduleRemainingToLastStage(scf::ForOp forOp,
     Operation *op = queue.pop_back_val();
     for (auto user : op->getUsers()) {
       if (opToCluster.count(user)) {
-        CoarseSchedule::Cluster userCluster = opToCluster[user];
-        CoarseSchedule::Cluster opCluster = schedule[op].second;
+        tt::CoarseSchedule::Cluster userCluster = opToCluster[user];
+        tt::CoarseSchedule::Cluster opCluster = schedule[op].second;
         if (*userCluster < *opCluster) {
           opToCluster[user] = opCluster;
           queue.push_back(user);
@@ -971,7 +833,7 @@ struct AsyncLoad {
 // multiple loads is the schedule allows it.
 static void createTMABarrierAndWait(
     scf::ForOp &forOp, SmallVector<AsyncLoad> &asyncLoads, Value insertIdx,
-    Value extractIdx, Value phase, int numBuffers, CoarseSchedule &schedule,
+    Value extractIdx, Value phase, int numBuffers, tt::CoarseSchedule &schedule,
     SmallVector<Value> &barriers,
     const llvm::MapVector<Operation *, LoadInfo> &loadToInfo) {
   llvm::SmallDenseMap<Operation *, AsyncLoad *> loadToAsyncLoad;
@@ -1071,7 +933,7 @@ static void createTMABarrierAndWait(
 // Convert load ops into their asyn version and apply multi-buffering based on
 // the required number of buffers.
 static SmallVector<Value>
-createAsyncOps(scf::ForOp &forOp, CoarseSchedule &schedule,
+createAsyncOps(scf::ForOp &forOp, tt::CoarseSchedule &schedule,
                llvm::MapVector<Operation *, LoadInfo> &loadToInfo,
                SmallVector<Value> &barriers, int numStages) {
   // Calculate the number of buffers needed for each load.
@@ -1169,7 +1031,7 @@ createAsyncOps(scf::ForOp &forOp, CoarseSchedule &schedule,
 
   // Create a cluster for the prefetches. It may end up being empty, but this
   // is OK.
-  CoarseSchedule::Cluster prefetchCluster = schedule.clusters.newAtBack();
+  tt::CoarseSchedule::Cluster prefetchCluster = schedule.clusters.newAtBack();
 
   for (AsyncLoad &asyncLoad : asyncLoads) {
     if (auto loadOp = dyn_cast<tt::LoadOp>(asyncLoad.loadOp)) {
@@ -1213,7 +1075,7 @@ static bool preProcessLoopAndGetSchedule2(
   // Schedule the loads and root ops (dot ops) in the loop. This will give us
   // a scaffold for the final schedule.
   DenseSet<Operation *> rootUsers;
-  CoarseSchedule coarseSchedule(numStages);
+  tt::CoarseSchedule coarseSchedule(numStages);
   llvm::MapVector<Operation *, LoadInfo> loadToInfo =
       scheduleLoads(forOp, coarseSchedule, rootUsers, numStages);
   if (loadToInfo.empty())
@@ -1234,7 +1096,7 @@ static bool preProcessLoopAndGetSchedule2(
     coarseSchedule.dump();
   });
 
-  CoarseSchedule::Cluster afterPrologue =
+  tt::CoarseSchedule::Cluster afterPrologue =
       schedulePrologueAndEpilogue(forOp, coarseSchedule, rootUsers, numStages);
   LLVM_DEBUG({
     LDBG("Coarse schedule with prologue and epilogue:");

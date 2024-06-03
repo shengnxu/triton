@@ -49,19 +49,18 @@ class MetaData():
         self.sm_scale = sm_scale
         assert seqlen_q > 0 and seqlen_k > 0
         self.x, self.y = seqlen_k, seqlen_q
-        print(f"in metadata x = {self.x}")
-        print(f"in metadata y = {self.y}")
 
     def convert_window_coord_to_xy(self, seqlen_q, seqlen_k, window_left, window_right, causal):
         # We should not call this function if we do not want to use SWA.
-        assert window_left != -1 or window_right != -1 or causal
+        assert window_left != seqlen_q or window_right !=seqlen_k or causal
         # We don't have an implementation for negative window coords.
         assert window_left >= -1 and window_right >= -1
         # This is the traditional SWA case. For this, x and y have the same coordinates
         # as window left/right.
         if not causal:
-            y = seqlen_q if window_left == -1 else window_left
-            x = seqlen_k if window_right == -1 else window_right
+            # We add +1 because the window is inclusive of the boundary.
+            y = seqlen_q if window_left == seqlen_q else window_left + 1
+            x = seqlen_k if window_right == seqlen_k else window_right + 1
         # This is for causal only, no SWA.
         elif window_left == seqlen_q and window_right == seqlen_k:
             # If causal and no window, then there is no left mask
@@ -328,9 +327,9 @@ def _attn_fwd_inner(
         if ENABLE_MASKING:
             causal_boundary = start_n + offs_n_masked
             if MASKING_DIR == 0:
-                causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
+                causal_mask = OFFS_M[:, None] > causal_boundary[None, :]
             else:
-                causal_mask = OFFS_M[:, None] <= causal_boundary[None, :]
+                causal_mask = OFFS_M[:, None] < causal_boundary[None, :]
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
@@ -555,8 +554,7 @@ def attn_fwd(
 
     # Left edge masking is only possible in SWA.
     if SWA:
-        if BEGIN_MASKED:
-            n_full_blocks = n_full_blocks - n_masked_blocks
+        if BEGIN_MASKED is True:
             # If there is a left edge, we want to detect if the intercept for y is
             # in this WG.
             k_ptrs += block_min * stride_kn
@@ -565,7 +563,7 @@ def attn_fwd(
                 bias_ptrs += begin_block * BLOCK_N * stride_bn
             if RETURN_ENCODED_SOFTMAX:
                 encoded_sm_ptrs += begin_block * BLOCK_N
-            block_max = block_min + n_masked_blocks * BLOCK_N
+            block_max = block_min + (BLOCK_M // BLOCK_N + 1) * BLOCK_N
             offs_n_masked = offs_n + Y
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
@@ -1321,7 +1319,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
 @pytest.mark.parametrize('layout', ['bhsd'])
-@pytest.mark.parametrize('sliding_window', [(512, -1)])
+@pytest.mark.parametrize('sliding_window', [(512, 512)])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
@@ -1390,8 +1388,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
     # compare
     if layout == 'bshd':
         ref_out = ref_out.transpose(1, 2).clone()
-    print(f"tri_out = {tri_out[0][0][0][0]}")
-    print(f"ref_out = {ref_out[0][0][0][0]}")
+    print(f"tri_out = {tri_out[0][0][512][0]}")
+    print(f"ref_out = {ref_out[0][0][512][0]}")
     print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")

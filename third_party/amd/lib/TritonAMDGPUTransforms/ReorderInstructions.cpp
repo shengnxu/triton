@@ -34,6 +34,33 @@ static bool willIncreaseRegisterPressure(Operation *op) {
   return false;
 }
 
+static Operation *gatherDFG(Operation *op, SmallVector<Operation *> &ops) {
+  Operation *lastOp = nullptr;
+  // auto getLast = [&lastOp](Operation *op) {
+  //   if (!lastOp || op->getIndex() > lastOp->getIndex()) {
+  //     lastOp = op;
+  //   }
+  // };
+  // BFS (filo)
+  Block *block = op->getBlock();
+  SmallVector<Operation *> oprs;
+  for (auto operand : op->getOperands()) {
+    if (Operation *pop = operand.getDefiningOp()) {
+      if (pop->getBlock() == block) {
+        // must reside in same block
+        oprs.push_back(pop);
+        ops.push_back(pop);
+      // } else {
+      //   getLast(pop);
+      }
+    }
+  }
+  for (auto *op : oprs) {
+    gatherDFG(op, ops);
+  }
+  return lastOp;
+}
+
 class TritonAMDGPUReorderInstructionsPass
     : public TritonAMDGPUReorderInstructionsBase<
           TritonAMDGPUReorderInstructionsPass> {
@@ -54,7 +81,7 @@ public:
         return;
       auto user_begin = op->user_begin();
       auto user_end = op->user_end();
-      if (std::distance(user_begin, user_end) != 1)
+      if (std::distance(user_begin, user_end) != 1) // hasOneUse??
         return;
       if (user_begin->getParentOfType<scf::ForOp>() ==
           op->getParentOfType<scf::ForOp>())
@@ -63,9 +90,11 @@ public:
     });
     for (auto &kv : opToMove)
       kv.first->moveBefore(kv.second);
+    opToMove.clear();
     // Move LocalLoadOp and LocalAllocOp immediately after their operands.
     m.walk([&](Operation *op) {
-      if (!isa<triton::gpu::LocalLoadOp, triton::gpu::LocalAllocOp>(op)) {
+      if (!isa<triton::gpu::LocalLoadOp, triton::gpu::LocalAllocOp>(op) ||
+          op->getNumOperands() < 1) {
         return;
       }
       Operation *argOp = op->getOperand(0).getDefiningOp();
@@ -74,12 +103,23 @@ public:
       moveAfter(op, argOp);
     });
     // Move transpositions just after their definition
-    opToMove.clear();
     m.walk([&](triton::TransOp op) {
       Operation *argOp = op.getSrc().getDefiningOp();
       if (!argOp)
         return;
       moveAfter(op, argOp);
+    });
+    // Move global loads early (prefetch)
+    m.walk([&](triton::LoadOp op) {
+      // 0. gather cone
+      SmallVector<Operation *> ops{op};
+      gatherDFG(op, ops);
+      Block *block = op->getBlock();
+      {
+        // 1. move right after last dep
+        for (auto *op : ops)
+          op->moveAfter(block, block->begin());
+      }
     });
     return;
   }

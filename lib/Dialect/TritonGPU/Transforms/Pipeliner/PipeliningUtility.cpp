@@ -192,10 +192,10 @@ tt::CoarseSchedule::createFinalSchedule(scf::ForOp forOp) {
 
 void tt::CoarseSchedule::dump() {
   for (int i = 0; i < numStages; i++) {
-    llvm::dbgs() << "- Ops in stage " << i;
+    llvm::dbgs() << "- Ops in stage " << i << "\n";
     for (auto &[op, stageAndCluster] : opToStageAndCluster) {
       if (i == stageAndCluster.first) {
-        llvm::dbgs() << "\n cluster: " << *stageAndCluster.second << ":\n\t" << *op;
+        llvm::dbgs() << " cluster: " << *stageAndCluster.second << ":\n\t" << *op << "\n";
       }
     }
   }

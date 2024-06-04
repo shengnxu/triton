@@ -182,11 +182,8 @@ tt::CoarseSchedule::createFinalSchedule(scf::ForOp forOp) {
   SmallVector<std::tuple<Operation *, int, tt::CoarseSchedule::Cluster>> opsInOrder =
     getOpsInOrder(forOp);
   std::vector<std::pair<Operation *, unsigned>> schedule;
-  for (auto [op, stage, cluster] : opsInOrder) {
-    llvm::dbgs() << "Adding op to schedule at stage " << stage << " cluster " << *cluster
-                 << ": " << *op << "\n";
+  for (auto [op, stage, cluster] : opsInOrder)
     schedule.push_back({op, stage});
-  }
   return schedule;
 }
 

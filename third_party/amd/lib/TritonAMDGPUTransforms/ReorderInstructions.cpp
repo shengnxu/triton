@@ -34,13 +34,8 @@ static bool willIncreaseRegisterPressure(Operation *op) {
   return false;
 }
 
-static Operation *gatherDFG(Operation *op, SmallVector<Operation *> &ops) {
-  Operation *lastOp = nullptr;
-  // auto getLast = [&lastOp](Operation *op) {
-  //   if (!lastOp || op->getIndex() > lastOp->getIndex()) {
-  //     lastOp = op;
-  //   }
-  // };
+static bool gatherDFG(Operation *op, SmallVector<Operation *> &ops) {
+  bool leadsToLoad = false;
   // BFS (filo)
   Block *block = op->getBlock();
   SmallVector<Operation *> oprs;
@@ -50,15 +45,15 @@ static Operation *gatherDFG(Operation *op, SmallVector<Operation *> &ops) {
         // must reside in same block
         oprs.push_back(pop);
         ops.push_back(pop);
-      // } else {
-      //   getLast(pop);
+        leadsToLoad |= isa<triton::LoadOp>(pop);
       }
     }
   }
   for (auto *op : oprs) {
-    gatherDFG(op, ops);
+    if (gatherDFG(op, ops))
+      leadsToLoad = true;
   }
-  return lastOp;
+  return leadsToLoad;
 }
 
 class TritonAMDGPUReorderInstructionsPass
@@ -109,17 +104,26 @@ public:
         return;
       moveAfter(op, argOp);
     });
+    // Move local stores early unless 
+    m.walk([&](triton::gpu::LocalStoreOp op) {
+      // 0. gather cone
+      SmallVector<Operation *> ops{op};
+      if (!gatherDFG(op, ops)) {
+        Block *block = op->getBlock();
+        // 1. move right after last dep
+        for (auto *op : ops)
+          op->moveAfter(block, block->begin());
+      }
+    });
     // Move global loads early (prefetch)
     m.walk([&](triton::LoadOp op) {
       // 0. gather cone
       SmallVector<Operation *> ops{op};
       gatherDFG(op, ops);
       Block *block = op->getBlock();
-      {
-        // 1. move right after last dep
-        for (auto *op : ops)
-          op->moveAfter(block, block->begin());
-      }
+      // 1. move right after last dep
+      for (auto *op : ops)
+        op->moveAfter(block, block->begin());
     });
     return;
   }

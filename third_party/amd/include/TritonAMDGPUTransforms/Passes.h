@@ -6,9 +6,7 @@
 
 namespace mlir {
 
-std::unique_ptr<Pass> createTritonAMDGPUStreamPipelinePass();
-
-std::unique_ptr<Pass> createTritonAMDGPUSoftwarePipelinePass(int numStages = 2);
+std::unique_ptr<Pass> createTritonAMDGPUStreamPipelinePass(int numStages = 2);
 
 std::unique_ptr<Pass>
 createTritonAMDGPUAccelerateMatmulPass(std::string archGenName = std::string(),

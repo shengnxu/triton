@@ -21,6 +21,7 @@ In doing so, you will learn about:
 # Custom GPU kernels for elementwise additions are educationally valuable but won't get you very far in practice.
 # Let us consider instead the case of a simple (numerically stabilized) softmax operation:
 
+import os
 import torch
 
 import triton
@@ -121,10 +122,10 @@ def softmax(x):
     # increasing the number of warps (`num_warps`) over which each row is distributed.
     # You will see in the next tutorial how to auto-tune this value in a more natural
     # way so you don't have to come up with manual heuristics yourself.
-    num_warps = 8
+    num_warps = int(os.getenv('TRITON_NUM_WARPS', '8'))
 
     # Number of software piepling stages.
-    num_stages = 4 if SIZE_SMEM > 200000 else 2
+    num_stages = 4 if SIZE_SMEM > 200000 else int(os.getenv('TRITON_NUM_STAGES', '1'))
 
     # Allocate output
     y = torch.empty_like(x)
@@ -137,10 +138,12 @@ def softmax(x):
         kernel._init_handles()
         n_regs = kernel.n_regs
         size_smem = kernel.metadata.shared
-        occupancy = NUM_REGS // (n_regs * WARP_SIZE * num_warps)
+        occupancy = NUM_REGS*2 // (n_regs * WARP_SIZE * num_warps)
         occupancy = min(occupancy, SIZE_SMEM // size_smem)
+        occupancy = max(occupancy, 1)
         num_programs = NUM_SM * occupancy
         kernels[BLOCK_SIZE] = (kernel, num_programs)
+        print(f"Num Rows: {NUM_REGS},{n_regs} -- Programs: {num_programs}")
 
     num_programs = min(num_programs, n_rows)
 

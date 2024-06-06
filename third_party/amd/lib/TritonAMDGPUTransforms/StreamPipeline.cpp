@@ -105,9 +105,11 @@ static void createAsyncCopy(scf::ForOp &forOp, tt::LoadOp loadOp, Value alloc,
   tt::MemDescType allocTy = cast<tt::MemDescType>(alloc.getType());
   SmallVector<Value> copyOffsets(allocTy.getRank(), zero);
   copyOffsets[0] = insertIdx;
+  Attribute sharedMemorySpace =
+      triton::gpu::SharedMemorySpaceAttr::get(forOp.getContext());
   tt::MemDescType subviewTy = tt::MemDescType::get(
       allocTy.getShape().drop_front(), allocTy.getElementType(),
-      allocTy.getEncoding(), /*mutableMemory=*/true);
+      allocTy.getEncoding(), sharedMemorySpace, /*mutableMemory=*/true);
   auto view =
       builder.create<ttg::MemDescSubviewOp>(loc, subviewTy, alloc, copyOffsets);
   Operation *copy = builder.clone(*loadOp);
@@ -584,8 +586,10 @@ static Value createAlloc(scf::ForOp &forOp, Operation *loadOp,
   auto ty = cast<RankedTensorType>(loadOp->getResultTypes()[0]);
   SmallVector<int64_t> bufferShape(ty.getShape().begin(), ty.getShape().end());
   bufferShape.insert(bufferShape.begin(), distance);
+  Attribute sharedMemorySpace =
+      triton::gpu::SharedMemorySpaceAttr::get(forOp.getContext());
   Type memdescType = mlir::triton::MemDescType::get(
-      bufferShape, ty.getElementType(), sharedEnc, /*mutableMemory*/ true);
+      bufferShape, ty.getElementType(), sharedEnc, sharedMemorySpace, /*mutableMemory*/ true);
   Value alloc = builder.create<mlir::triton::gpu::LocalAllocOp>(
       loadOp->getLoc(), memdescType, Value());
   return alloc;

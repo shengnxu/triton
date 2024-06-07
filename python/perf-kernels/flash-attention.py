@@ -28,6 +28,7 @@ import torch
 
 import triton
 import triton.language as tl
+from triton.language.extra.hip import libdevice
 
 class MetaData():
     cu_seqlens_q = None
@@ -294,7 +295,8 @@ def _attn_fwd_inner(
     ENABLE_DROPOUT: tl.constexpr,
     RETURN_ENCODED_SOFTMAX: tl.constexpr,
     PADDED_HEAD: tl.constexpr,
-    ACTUAL_BLOCK_DMODEL: tl.constexpr
+    ACTUAL_BLOCK_DMODEL: tl.constexpr,
+    Z, H, M
 ):
     # loop over k, v, and update accumulator
     for start_n in range (block_min, block_max, BLOCK_N):
@@ -333,6 +335,13 @@ def _attn_fwd_inner(
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
+        if Z == 0 and H == 0:
+            if M == 4 and start_n == 64:
+                tl.device_print("q = ", q)
+                tl.device_print("k = ", k)
+        # if Z == 0 and H == 0:
+        #     if M == 4 and start_n == 0:
+        #         tl.device_print("qk after = ", qk)
         if bias_ptrs is not None:
             bias_offs_n = start_n + tl.arange(0, BLOCK_N) if MASK_STEPS else None
             bias = load_fn(bias_ptrs, OFFS_M, bias_offs_n, actual_seqlen_q, actual_seqlen_k)
@@ -350,7 +359,11 @@ def _attn_fwd_inner(
 
         # softmax
         m_ij = tl.maximum(m_i, tl.max(qk,1))
-        qk = qk - m_ij[:, None]
+        m_ij_sub = tl.where(libdevice.isnan(m_ij - m_ij), 0.0, m_ij)
+        # if Z == 0 and H == 0:
+        #     if M == 4 and start_n == 0:
+        #         tl.device_print("qk sub = ", qk)
+        qk = qk - m_ij_sub[:, None]
         p = tl.math.exp2(qk)
 
         # CAVEAT: Must update l_ij before applying dropout
@@ -363,8 +376,9 @@ def _attn_fwd_inner(
             p = tl.where(keep, p, 0.0)
         elif RETURN_ENCODED_SOFTMAX:
             tl.store(encoded_sm_ptrs, p.to(encoded_sm_ptrs.type.element_ty))
-        # -- update output accumulator --
-        alpha = tl.math.exp2(m_i - m_ij)
+        # update output accumulator to correct multiplication with 
+        # previous block max.
+        alpha = tl.math.exp2(m_i - m_ij_sub)
         acc = acc * alpha[:, None]
         if not PRE_LOAD_V:
             v = load_fn(v_ptrs, k_offs_n, k_offs_k, actual_seqlen_k, ACTUAL_BLOCK_DMODEL)
@@ -387,7 +401,7 @@ def _attn_fwd_inner(
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=1),
     #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
@@ -538,8 +552,8 @@ def attn_fwd(
 
     # Here we compute how many full and masked blocks we have.
     padded_block_n = n_extra_tokens != 0
-    BEGIN_MASKED: tl.constexpr = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
-    end_masked = X <= 0 or (start_m * BLOCK_M) < (seqlen_k - X)
+    BEGIN_MASKED = (Y < 0) or (Y > 0 and (start_m + 1) * BLOCK_M > Y)
+    end_masked = X <= 0 or ((start_m * BLOCK_M) < (seqlen_k - X))
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
@@ -549,14 +563,13 @@ def attn_fwd(
     # if masked, we might end up with an additional block.
     # In this case we might exceed n_blocks so pick the min.
     n_masked_blocks = min(n_masked_blocks, n_blocks)
-    n_full_blocks = n_blocks - n_masked_blocks
+    n_full_blocks = n_blocks - n_masked_blocks - begin_block
     block_min = begin_block * BLOCK_N
+    block_max = n_full_blocks * BLOCK_N
 
     # Left edge masking is only possible in SWA.
     if SWA:
-        if BEGIN_MASKED is True:
-            # If there is a left edge, we want to detect if the intercept for y is
-            # in this WG.
+        if BEGIN_MASKED:
             k_ptrs += block_min * stride_kn
             v_ptrs += block_min * stride_vk
             if USE_BIAS:
@@ -574,21 +587,22 @@ def attn_fwd(
                 # ENABLE_MASKING, MASKING_DIR, ....
                 True, 1, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
                 # _, PADDED_SEQLEN_K, ...
-                PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
+                PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL,
+                off_z, off_h_q, start_m
             )
-            k_ptrs += block_max * stride_kn
-            v_ptrs += block_max * stride_vk
+            k_ptrs += (BLOCK_M // BLOCK_N + 1) * stride_kn
+            v_ptrs += (BLOCK_M // BLOCK_N + 1) * stride_vk
             if USE_BIAS:
                 bias_ptrs += block_max * stride_bn
             if RETURN_ENCODED_SOFTMAX:
                 encoded_sm_ptrs += block_max
             block_min = block_max
+            block_max += n_full_blocks * BLOCK_N
 
     tl.debug_barrier()
-    # # Compute for full blocks. Here we set causal to false regardless of its actual
-    # # value because there is no masking. Similarly we do not need padding.
+    # Compute for full blocks. Here we set causal to false regardless of its actual
+    # value because there is no masking. Similarly we do not need padding.
     if n_full_blocks > 0:
-        block_max = n_full_blocks * BLOCK_N
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
             start_m, seqlen_k, seqlen_q,
@@ -598,7 +612,8 @@ def attn_fwd(
             # ENABLE_MASKING, MASKING_DIR, ....
             False, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
-            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
+            PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL,
+            off_z, off_h_q, start_m
         )
         block_min = block_max
 
@@ -606,8 +621,8 @@ def attn_fwd(
     # Remaining blocks, if any, are full / not masked.
     if end_masked:
         block_max = n_blocks * BLOCK_N
-        k_ptrs += block_min * stride_kn
-        v_ptrs += block_min * stride_vk
+        k_ptrs += n_full_blocks * stride_kn
+        v_ptrs += n_full_blocks * stride_vk
         if USE_BIAS:
             bias_ptrs += block_min * stride_bn
         if RETURN_ENCODED_SOFTMAX:
@@ -623,7 +638,8 @@ def attn_fwd(
             # _, MASKING_DIR, ...
             ENABLE_MASKING, 0, BLOCK_M, BLOCK_DMODEL, BLOCK_N, offs_m, offs_n,
             # _, PADDED_SEQLEN_K, ...
-            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL
+            PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL,
+            off_z, off_h_q, start_m
         )
     # epilogue
     acc = acc / l_i[:, None]
@@ -1319,7 +1335,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
 @pytest.mark.parametrize('layout', ['bhsd'])
-@pytest.mark.parametrize('sliding_window', [(512, 512)])
+@pytest.mark.parametrize('sliding_window', [(512, -1)])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
@@ -1388,8 +1404,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
     # compare
     if layout == 'bshd':
         ref_out = ref_out.transpose(1, 2).clone()
-    print(f"tri_out = {tri_out[0][0][512][0]}")
-    print(f"ref_out = {ref_out[0][0][512][0]}")
+    print(f"tri_out = {tri_out[0][0][576][0]}")
+    print(f"ref_out = {ref_out[0][0][576][0]}")
     print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")

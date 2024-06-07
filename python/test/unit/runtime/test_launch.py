@@ -70,6 +70,14 @@ def test_memory_leak() -> None:
     finally:
         tracemalloc.stop()
 
+def test_dummy() -> None:
+
+    @triton.jit
+    def empty_kernel(x):
+        pass
+
+    empty_kernel[(1,1)](6)
+
 
 # LATENCY_THRESHOLD_US = 46
 

@@ -181,7 +181,9 @@ def benchmark(M, N, provider):
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: softmax(x), quantiles=quantiles)
     if provider == 'torch-jit':
         ms, min_ms, max_ms = triton.testing.do_bench(lambda: naive_softmax(x), quantiles=quantiles)
-    gbps = lambda ms: 2 * x.nelement() * x.element_size() * 1e-9 / (ms * 1e-3)
+    gb = 2 * x.nelement() * x.element_size()
+    print(ms)
+    gbps = lambda ms: gb * 1e-9 / (ms * 1e-3)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 

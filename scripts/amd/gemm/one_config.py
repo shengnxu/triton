@@ -16,6 +16,13 @@ def parse_args():
     parser.add_argument("-m", type=int, default=0)
     parser.add_argument("-n", type=int, default=0)
     parser.add_argument("-k", type=int, default=0)
+    parser.add_argument("-col_a", action='store_true', default=False, help='whether matrix a is column major')
+    parser.add_argument("-col_b", action='store_true', default=False, help='whether matrix b is column major')
+    parser.add_argument("-dtype_a", type=str, default='fp16', help="matrix a element data type")
+    parser.add_argument("-dtype_b", type=str, default='fp16', help="matrix b element data type")
+    parser.add_argument("-dtype_c", type=str, default='fp16', help="output element data type")
+    parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
+    parser.add_argument("--bias_vector", action='store_true', default=False, help="apply bias vector")
     parser.add_argument("--block_m", type=int, default=0)
     parser.add_argument("--block_n", type=int, default=0)
     parser.add_argument("--block_k", type=int, default=0)
@@ -24,8 +31,9 @@ def parse_args():
     parser.add_argument("--num_warps", type=int, default=0)
     parser.add_argument("--num_stages", type=int, default=0)
     parser.add_argument("--waves_per_eu", type=int, default=0)
-
-    parser.add_argument("--config_str", type=str, default="", help="can take from gemm_tune.py script output, looks like M16_N8_K128_BM64_BN64_BK64_GM1_SK2_nW2_nS0_EU0")
+    parser.add_argument("--matrix_instr_nonkdim", type=int, default=0)
+    parser.add_argument("--kpack", type=int, default=0)
+    parser.add_argument("--config_str", type=str, default="", help="can take from tune_gemm.py script output, looks like M16_N8_K128_BM64_BN64_BK64_GM1_SK2_nW2_nS0_EU0_kP2_mfma16")
     args = parser.parse_args()
 
     return args
@@ -44,6 +52,8 @@ def parse_config(cfg_str):
                    "nW": "num_warps",
                    "nS": "num_stages",
                    "EU": "waves_per_eu",
+                   "kP": "kpack",
+                   "mfma": "matrix_instr_nonkdim"
                   }
     config = {}
     for val in values:
@@ -70,8 +80,10 @@ def main():
                   "num_warps": args.num_warps,
                   "num_stages": args.num_stages,
                   "waves_per_eu": args.waves_per_eu,
+                  "kpack": args.kpack,
+                  "matrix_instr_nonkdim": args.matrix_instr_nonkdim
                  }
-    tune_gemm.test_correctness(config["M"], config["N"], config["K"], config, verbose=True)
+    tune_gemm.test_correctness(config["M"], config["N"], config["K"], args.col_a, args.col_b, args.dtype_a, args.dtype_b, args.dtype_c, args.init_type, config, args.bias_vector, verbose=True)
 
 
 if __name__ == "__main__":

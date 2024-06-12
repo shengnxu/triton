@@ -31,7 +31,7 @@ def get_tiles_config(M, N, K, num_sms,
 
 @triton.jit()
 def persistent_streamk_gemm(
-        A, B, C,
+        A, B, C, locks,
         M, N, K, num_sms,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
@@ -107,8 +107,19 @@ def persistent_streamk_gemm(
             A_BASE += BLOCK_SIZE_K * stride_ak
             B_BASE += BLOCK_SIZE_K * stride_bk
 
-        C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
-        mask = (rm < M)[:, None] & (rn < N)[None, :]
-        tl.atomic_add(C_, acc, mask=mask)
+        if end_iter % iters_per_tile == 0:  # last iteration of the tile always happens before its start on another SM
+            C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
+            mask = (rm < M)[:, None] & (rn < N)[None, :]
+            tl.store(C_, acc, mask=mask)
+            if start_iter % iters_per_tile != 0:  # only if tile has been partially processed
+                tl.atomic_xchg(locks + tile_id, 1)
+        else:
+            while tl.atomic_cas(locks + tile_id, 1, 1) != 1:
+                pass
+            C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn  # compute inside the if/else to avoid spilling!
+            mask = (rm < M)[:, None] & (rn < N)[None, :]
+            acc1 = tl.load(C_)
+            acc += acc1
+            tl.store(C_, acc, mask=mask)
 
         start_iter = end_iter

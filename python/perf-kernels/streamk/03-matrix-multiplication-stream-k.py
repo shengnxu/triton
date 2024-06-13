@@ -57,7 +57,7 @@ class matmul(torch.autograd.Function):
 
         if total_programs_streamk > 0:  # Stream-K
             # last wave may occupy less than total_programs_streamk SMs
-            total_tiles_streamk = total_tiles % total_programs_streamk
+            total_tiles_streamk = total_tiles % total_programs_streamk + total_programs_streamk
             # for two-tile Stream-K + data-parallel from original paper
 #            if two_tiles and total_tiles - total_tiles_streamk > total_programs_streamk:
 #                total_tiles_streamk += total_programs_streamk

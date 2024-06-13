@@ -12,7 +12,7 @@ def get_tiles_config(M, N, K, num_sms,
     total_tiles = total_blocks_M * total_blocks_N
     if num_sms > 0:  # Stream-K
         total_full_tiles_pcu = total_tiles // num_sms
-        total_streamk_tiles = total_tiles % num_sms
+        total_streamk_tiles = total_tiles % num_sms + num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
         total_streamk_iters = total_streamk_tiles * iters_per_tile
         # iterations related to full waves

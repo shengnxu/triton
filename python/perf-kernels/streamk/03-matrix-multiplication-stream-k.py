@@ -87,7 +87,7 @@ class matmul(torch.autograd.Function):
 
         # compute grid (work to do per SM on the first wave)
         grids = total_programs_streamk
-        locks = tl.zeros((total_tiles_streamk,), device = "cuda", dtype = torch.int32)
+        locks = torch.zeros((total_tiles_streamk,), device = "cuda", dtype = torch.int32)
         kk = persistent_streamk_gemm[(grids,)](
             a,
             b,
@@ -141,10 +141,10 @@ A = torch.randn(m, k, device="cuda", dtype=torch.float16)
 B = torch.randn(n, k, device="cuda", dtype=torch.float16).T
 # allocates output
 C = torch.zeros((m, n), device="cuda", dtype=A.dtype)
-BLK_M = 64
-BLK_N = 64
-BLK_K = 64
-gsize_m = 4
+BLK_M = 256
+BLK_N = 256
+BLK_K = 32
+gsize_m = 16
 two_tiles = 'True'
 num_stages = 0
 num_warps = 8

@@ -335,13 +335,6 @@ def _attn_fwd_inner(
             qk = tl.where(causal_mask, qk, float("-inf"))
         # -- compute qk ----
         qk += tl.dot(q, k)
-        if Z == 0 and H == 0:
-            if M == 4 and start_n == 64:
-                tl.device_print("q = ", q)
-                tl.device_print("k = ", k)
-        # if Z == 0 and H == 0:
-        #     if M == 4 and start_n == 0:
-        #         tl.device_print("qk after = ", qk)
         if bias_ptrs is not None:
             bias_offs_n = start_n + tl.arange(0, BLOCK_N) if MASK_STEPS else None
             bias = load_fn(bias_ptrs, OFFS_M, bias_offs_n, actual_seqlen_q, actual_seqlen_k)
@@ -401,7 +394,7 @@ def _attn_fwd_inner(
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=1),
+       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1, num_warps=4),
     #    triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
     #    triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
        # TODO: This config fails with head_size not pow2 with data mismatches. Check why.
@@ -576,7 +569,8 @@ def attn_fwd(
                 bias_ptrs += begin_block * BLOCK_N * stride_bn
             if RETURN_ENCODED_SOFTMAX:
                 encoded_sm_ptrs += begin_block * BLOCK_N
-            block_max = block_min + (BLOCK_M // BLOCK_N + 1) * BLOCK_N
+            CUR_MASKED_BLOCKS: tl.constexpr = BLOCK_M // BLOCK_N + 1
+            block_max = block_min + CUR_MASKED_BLOCKS * BLOCK_N
             offs_n_masked = offs_n + Y
             acc, l_i, m_i = _attn_fwd_inner(
                 acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stride_vk, stride_bn,
@@ -590,14 +584,18 @@ def attn_fwd(
                 PRE_LOAD_V, False, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD, ACTUAL_BLOCK_DMODEL,
                 off_z, off_h_q, start_m
             )
-            k_ptrs += (BLOCK_M // BLOCK_N + 1) * stride_kn
-            v_ptrs += (BLOCK_M // BLOCK_N + 1) * stride_vk
+            k_ptrs += CUR_MASKED_BLOCKS * BLOCK_N * stride_kn
+            v_ptrs += CUR_MASKED_BLOCKS * BLOCK_N * stride_vk
             if USE_BIAS:
-                bias_ptrs += block_max * stride_bn
+                bias_ptrs += CUR_MASKED_BLOCKS * stride_bn
             if RETURN_ENCODED_SOFTMAX:
-                encoded_sm_ptrs += block_max
+                encoded_sm_ptrs += CUR_MASKED_BLOCKS
             block_min = block_max
             block_max += n_full_blocks * BLOCK_N
+            # if off_z == 0 and off_h_q == 0:
+            #     if start_m == 4:
+            #         tl.device_print("max = ", block_max)
+            #         tl.device_print("min = ", block_min)
 
     tl.debug_barrier()
     # Compute for full blocks. Here we set causal to false regardless of its actual
@@ -1404,8 +1402,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
     # compare
     if layout == 'bshd':
         ref_out = ref_out.transpose(1, 2).clone()
-    print(f"tri_out = {tri_out[0][0][576][0]}")
-    print(f"ref_out = {ref_out[0][0][576][0]}")
+    print(f"tri_out = {tri_out[0][0][512][0]}")
+    print(f"ref_out = {ref_out[0][0][512][0]}")
     print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")

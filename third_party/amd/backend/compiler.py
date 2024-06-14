@@ -237,8 +237,20 @@ class HIPBackend(BaseBackend):
 
     @staticmethod
     def make_hsaco(src, metadata, options):
-        hsaco = amd.assemble_amdgcn(src, options.arch, '')
+        # Find kernel names (there should only be one)
+        # We get the name at the last possible step to accomodate `triton.compile`
+        # on user-provided LLVM
+        names = re.findall(r"define amdgpu_kernel void @([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 1
+        metadata["name"] = names[0]
+        # llvm -> hsaco
+        amdgcn = llvm.translate_to_asm(src, amd.TARGET_TRIPLE, options.arch, '', [], options.enable_fp_fusion, True)
+        if os.environ.get("AMDGCN_ENABLE_DUMP", "0") == "1":
+            print("// -----// AMDGCN Dump //----- //")
+            print(amdgcn)
 
+        #hsaco = amd.assemble_amdgcn(src, options.arch, '')
+        hsaco = amdgcn
         rocm_path = HIPBackend.path_to_rocm_lld()
         with tempfile.NamedTemporaryFile() as tmp_out:
             with tempfile.NamedTemporaryFile() as tmp_in:

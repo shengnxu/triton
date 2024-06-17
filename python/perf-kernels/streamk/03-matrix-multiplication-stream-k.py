@@ -57,7 +57,7 @@ class matmul(torch.autograd.Function):
 
         if total_programs_streamk > 0:  # Stream-K
             # last wave may occupy less than total_programs_streamk SMs
-            total_tiles_streamk = total_tiles % total_programs_streamk + total_programs_streamk
+            total_tiles_streamk = total_tiles % total_programs_streamk
             # for two-tile Stream-K + data-parallel from original paper
 #            if two_tiles and total_tiles - total_tiles_streamk > total_programs_streamk:
 #                total_tiles_streamk += total_programs_streamk
@@ -87,11 +87,13 @@ class matmul(torch.autograd.Function):
 
         # compute grid (work to do per SM on the first wave)
         grids = total_programs_streamk
-        locks = torch.zeros((total_tiles_streamk,), device = "cuda", dtype = torch.int32)
+        locks = torch.zeros((total_programs_streamk,), device = "cuda", dtype = torch.int32)
+        P = torch.zeros((total_programs_streamk,  BLK_M*BLK_N), device="cuda", dtype=torch.float32)
         kk = persistent_streamk_gemm[(grids,)](
             a,
             b,
             c,
+            P,
             locks,
             M,
             N,

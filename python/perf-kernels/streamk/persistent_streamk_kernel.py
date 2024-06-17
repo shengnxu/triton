@@ -12,7 +12,7 @@ def get_tiles_config(M, N, K, num_sms,
     total_tiles = total_blocks_M * total_blocks_N
     if num_sms > 0:  # Stream-K
         total_full_tiles_pcu = total_tiles // num_sms
-        total_streamk_tiles = total_tiles % num_sms + num_sms
+        total_streamk_tiles = total_tiles % num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
         total_streamk_iters = total_streamk_tiles * iters_per_tile
         # iterations related to full waves
@@ -31,7 +31,7 @@ def get_tiles_config(M, N, K, num_sms,
 
 @triton.jit()
 def persistent_streamk_gemm(
-        A, B, C, locks,
+        A, B, C, P, locks,
         M, N, K, num_sms,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
@@ -107,19 +107,34 @@ def persistent_streamk_gemm(
             A_BASE += BLOCK_SIZE_K * stride_ak
             B_BASE += BLOCK_SIZE_K * stride_bk
 
-        if end_iter % iters_per_tile == 0:  # last iteration of the tile always happens before its start on another SM
-            C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
-            mask = (rm < M)[:, None] & (rn < N)[None, :]
-            tl.store(C_, acc, mask=mask)
+        # ower iter is starting from middle of the iter
+#        if end_iter % iters_per_tile == 0:  # last iteration of the tile always happens before its start on another SM
+        tile_iter = tile_id * iters_per_tile
+        if start_iter != tile_iter: 
+            rm1 = tl.arange(0, BLOCK_SIZE_M)
+            rn1 = tl.arange(0, BLOCK_SIZE_N)
+            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+            tl.store(P_, acc)
             if start_iter % iters_per_tile != 0:  # only if tile has been partially processed
-                tl.atomic_xchg(locks + tile_id, 1)
+                tl.atomic_xchg(locks + pid, 1)
         else:
-            while tl.atomic_cas(locks + tile_id, 1, 1) != 1:
-                pass
-            C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn  # compute inside the if/else to avoid spilling!
-            mask = (rm < M)[:, None] & (rn < N)[None, :]
-            acc1 = tl.load(C_)
-            acc += acc1
-            tl.store(C_, acc, mask=mask)
+            tile_iter_end = tile_iter + iters_per_tile
+            next_pid = pid + 1
+            while (end_iter < tile_iter_end and next_pid < num_sms):
+                while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
+                    pass
+                rm1 = tl.arange(0, BLOCK_SIZE_M)
+                rn1 = tl.arange(0, BLOCK_SIZE_N)
+                P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+                acc1 = tl.load(P_)
+                acc += acc1
+                end_iter += streamk_iters_pcu
+                next_pid += 1
+
+        rm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        rn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
+        mask = (rm < M)[:, None] & (rn < N)[None, :]
+        tl.store(C_, acc, mask=mask)
 
         start_iter = end_iter

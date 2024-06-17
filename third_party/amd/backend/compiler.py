@@ -29,7 +29,7 @@ def min_dot_size(target: GPUTarget):
 class HIPOptions:
     num_warps: int = 4
     waves_per_eu: int = 1
-    num_stages: int = 0
+    num_stages: int = 2
     num_ctas: int = 1
     extern_libs: dict = None
     cluster_dims: tuple = (1, 1, 1)

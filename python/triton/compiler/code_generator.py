@@ -1190,6 +1190,8 @@ def kernel_suffix(signature, specialization):
 
 
 def ast_to_ttir(fn, signature, specialization, constants, debug, target):
+    print(f'ast_to_ttir')
+    print(f'{fn=}')
     # canonicalize signature
     if isinstance(signature, str):
         signature = {k: v.strip() for k, v in enumerate(signature.split(","))}

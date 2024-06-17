@@ -48,8 +48,14 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
+    tl.static_print('x_ptr.dtype: ', x_ptr.dtype)
+    tl.static_print('x_ptr.shape: ', x_ptr.shape)
+    # tl.device_print('x_ptr: ', x_ptr.numel)
+    # tl.device_print('output_ptr: ', output_ptr)
+    # tl.device_print('output_ptr: ', output_ptr + tl.arange(0, 1))
+    # tl.device_assert(output_ptr)
     # Write x + y back to DRAM.
-    tl.store(output_ptr + offsets, output, mask=mask)
+    # tl.store(output_ptr + offsets, output, mask=mask)
 
 
 # %%
@@ -71,6 +77,13 @@ def add(x: torch.Tensor, y: torch.Tensor):
     #  - `triton.jit`'ed functions can be indexed with a launch grid to obtain a callable GPU kernel.
     #  - Don't forget to pass meta-parameters as keywords arguments.
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+
+    none_output = torch.empty((3,5,7,0), dtype=x.dtype, device=x.device)
+    print(f'{none_output.stride(0)=}')
+    print(f'{none_output.stride(1)=}')
+    print(f'{none_output.stride(2)=}')
+    print(f'{none_output.stride(3)=}')
+    # add_kernel[grid](x, y, none_output, n_elements, BLOCK_SIZE=1024)
     # We return a handle to z but, since `torch.cuda.synchronize()` hasn't been called, the kernel is still
     # running asynchronously at this point.
     return output
@@ -89,6 +102,8 @@ print(output_torch)
 print(output_triton)
 print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(output_torch - output_triton))}')
+
+exit()
 
 # %%
 # Seems like we're good to go!

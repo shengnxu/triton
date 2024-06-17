@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import time
+import os
 from typing import Dict
 
 from ..testing import do_bench
@@ -160,6 +161,16 @@ class Autotuner(KernelInterface):
         else:
             config = self.configs[0]
         self.best_config = config
+        if os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
+            import numpy as np
+            print(f"Triton autotuning for function {self.fn} finished after "
+                  f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
+            for c, t_list in self.configs_timings.items():
+                print(f"\tconfig {c} ", end='')
+                print(f"mean time {np.mean(t_list) * 1000.0:.2f} ms")
+                for t in t_list:
+                    print(f"\t{t * 1000.0:.2f} ms", end=' ')
+                print('')
         full_nargs = {**self.nargs, **kwargs, **self.best_config.kwargs}
         if config.pre_hook is not None:
             config.pre_hook(full_nargs)

@@ -256,6 +256,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<mlir::MLIRContext>(m, "context", py::module_local())
       .def(py::init<>())
+      .def("disable_multithreading",
+           &mlir::MLIRContext::disableMultithreading,
+           py::arg("disable") = true)
       .def("load_triton", [](mlir::MLIRContext &self) {
         self.getOrLoadDialect<mlir::triton::TritonDialect>();
         self.getOrLoadDialect<mlir::index::IndexDialect>();

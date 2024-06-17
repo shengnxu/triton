@@ -105,15 +105,15 @@ def get_thirdparty_packages(triton_cache_path):
         version_file_path = os.path.join(package_dir, "version.txt")
         if p.syspath_var_name not in os.environ and\
            (not os.path.exists(version_file_path) or Path(version_file_path).read_text() != p.url):
-            try:
-                shutil.rmtree(package_root_dir)
-            except Exception:
-                pass
+            # try:
+            #     shutil.rmtree(package_root_dir)
+            # except Exception:
+            #     pass
             os.makedirs(package_root_dir, exist_ok=True)
             print(f'downloading and extracting {p.url} ...')
-            ftpstream = urllib.request.urlopen(p.url)
-            file = tarfile.open(fileobj=ftpstream, mode="r|*")
-            file.extractall(path=package_root_dir)
+            # ftpstream = urllib.request.urlopen(p.url)
+            # file = tarfile.open(fileobj=ftpstream, mode="r|*")
+            # file.extractall(path=package_root_dir)
             # write version url to package_dir
             with open(os.path.join(package_dir, "version.txt"), "w") as f:
                 f.write(p.url)

@@ -449,6 +449,9 @@ def compile(fn, **kwargs):
     if is_hip():
         is_cuda = False
     context = ir.context()
+    single_cpu = kwargs.get('single_cpu', False)
+    if single_cpu:
+        context.disable_multithreading()
     constants = kwargs.get("constants", dict())
     num_warps = kwargs.get("num_warps", get_arch_default_num_warps(device_type))
     assert num_warps > 0 and (num_warps & (num_warps - 1)) == 0, "num_warps must be a power of 2"

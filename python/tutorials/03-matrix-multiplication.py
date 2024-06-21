@@ -380,10 +380,12 @@ for fp8_inputs in [False, True]:
 
 @triton.testing.perf_report(configs)
 def benchmark(M, N, K, provider, fp8_inputs):
-    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
-    b = torch.randn((K, N), device='cuda', dtype=torch.float16)
+    a = torch.randn((2048, 4096), device='cuda', dtype=torch.float16)
+    b = torch.randn((4096, 8192), device='cuda', dtype=torch.float16)
     # b = torch.randn((N, K), device='cuda', dtype=torch.float16)
     # b = b.T
+    print(a.stride())
+    print(b.stride())
     if TORCH_HAS_FP8 and fp8_inputs:
         a = a.to(torch.float8_e5m2)
         b = b.T

@@ -1,4 +1,5 @@
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
+#include "llvm/Support/Debug.h"
 
 using ValueTable = std::map<std::pair<int, int>, Value>;
 using ::mlir::LLVM::delinearize;
@@ -191,6 +192,10 @@ Value loadBFMA(Value B, Value llB, BlockedEncodingAttr dLayout, Value thread,
 
   Value offB0 = isBRow ? mul(threadIdN, nContig) : _0;
   Value offB1 = isBRow ? _0 : mul(threadIdN, nContig);
+  llvm::outs() << "isBRow: " << isBRow;
+  llvm::outs() << "offB0: " << offB0 << "; offB1: " << offB1;
+  llvm::outs() << "strideBN: " << strideBN << "; strideBK: " << strideBK;
+  llvm::outs() << "strideB0: " << strideB0 << "; strideB1: " << strideB1;
   SmallVector<Value> bOff(bNumPtr);
   for (int i = 0; i < bNumPtr; ++i) {
     bOff[i] = add(mul(offB0, strideB0), mul(offB1, strideB1));

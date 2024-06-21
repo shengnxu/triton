@@ -178,20 +178,23 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
           if (!isa<triton::DotOp>(dot))
             continue;
           auto dotOp = cast<triton::DotOp>(dot);
+          LDBG("dotOp: " << dotOp);
           auto opA = dotOp.getOperand(0);
           auto opB = dotOp.getOperand(1);
+          LDBG("opA: " << opA);
+          LDBG("opB: " << opB);
           if (cvtOp->getResult(0) == opA) {
-            LDBG("This is opA");
+            LDBG("This is opA " << cvtOp->getResult(0));
             auto opAEncoding = cast<RankedTensorType>(opA.getType()).getEncoding();
             auto orderA = triton::gpu::getOrder(opAEncoding);
             LDBG("Order A: " << orderA[0] << " " << orderA[1]);
             if (orderA != optimalOrderA) {
-              llvm::outs() << "opB is not transposed\n";
+              llvm::outs() << "opA is not transposed\n";
               return true;
             }
           }
           else if (cvtOp->getResult(0) == opB) {
-            LDBG("This is opB");
+            LDBG("This is opB " << cvtOp->getResult(0));
             auto opBEncoding = cast<RankedTensorType>(opB.getType()).getEncoding();
             auto orderB = triton::gpu::getOrder(opBEncoding);
             LDBG("Order B: " << orderB[0] << " " << orderB[1]);
@@ -230,6 +233,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       if (!isPtrTensor && !isTensorPointer)
         return;
       bool notTransposed = checkTransposition(ptr);
+      // notTransposed = false;
       auto mod = curr->getParentOfType<ModuleOp>();
       int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
       int threadsPerWarp =

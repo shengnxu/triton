@@ -3,7 +3,7 @@ name: AMD Perf Kernel Nightly Tests
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *' # This will run the job every day at midnight UTC
+    - cron: '*/30 * * * *'
   push:
     branches: [main_perf, micmelesse/nightly]
 

@@ -5,7 +5,8 @@ import torch
 
 from .. import cdiv
 from ..runtime import driver
-from ..testing import (get_dram_gbps, get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi)
+from ..testing import (get_dram_gbps, get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi,
+                       get_max_matrixcore_tflops)
 
 
 @functools.lru_cache()
@@ -13,11 +14,31 @@ def get_clock_rate_in_khz():
     try:
         return nvsmi(['clocks.max.sm'])[0] * 1e3
     except FileNotFoundError:
-        import pynvml
+        target = driver.active.get_current_target()
+        if target.backend == 'hip':
+            # if this is run inside ROCm docker, you can install amdsmi like the following
+            # cd /opt/rocm/share/amd_smi/
+            # python -m pip install --user .
+            # otherwise, check out https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/install/install.html
+            from amdsmi import amdsmi_init, amdsmi_get_processor_handles, amdsmi_get_clock_info, AmdSmiClkType
+            amdsmi_init()
+            d = amdsmi_get_processor_handles()[0]  # assume all GPUs are the same
+            return amdsmi_get_clock_info(d, AmdSmiClkType.GFX)['max_clk'] * 1e3
+        else:
+            import pynvml
 
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM) * 1e3
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM) * 1e3
+
+
+def get_matrixcore_tflops(device, num_ctas, num_warps, dtype):
+    ''' return compute throughput in TOPS '''
+    total_warps = num_ctas * min(num_warps, 4)
+    num_subcores = driver.active.utils.get_device_properties(device)["multiprocessor_count"] * 4  # on recent GPUs
+    tflops = min(num_subcores, total_warps) / num_subcores * get_max_matrixcore_tflops(
+        dtype, get_clock_rate_in_khz(), device)
+    return tflops
 
 
 def get_tensorcore_tflops(device, num_ctas, num_warps, dtype):
@@ -38,12 +59,21 @@ def get_simd_tflops(device, num_ctas, num_warps, dtype):
 
 
 def get_tflops(device, num_ctas, num_warps, dtype):
+    target = driver.active.get_current_target()
     capability = torch.cuda.get_device_capability(device)
-    if capability[0] < 8 and dtype == torch.float32:
-        return get_simd_tflops(device, num_ctas, num_warps, dtype)
-    return get_tensorcore_tflops(device, num_ctas, num_warps, dtype)
+    if target.backend == 'hip':
+        return get_matrixcore_tflops(device, num_ctas, num_warps, dtype)
+    else:
+        if capability[0] < 8 and dtype == torch.float32:
+            return get_simd_tflops(device, num_ctas, num_warps, dtype)
+        return get_tensorcore_tflops(device, num_ctas, num_warps, dtype)
 
-
+# memory_metrics = {
+#     "hip": {
+#         "num_ctas_saturate_bw": 150,
+#         "l2_bw_multiplier":
+#     }
+# }
 def estimate_matmul_time(
         # backend, device,
         num_warps, num_stages,  #
@@ -54,6 +84,7 @@ def estimate_matmul_time(
 ):
     ''' return estimated running time in ms
           = max(compute, loading) + store '''
+    backend = driver.active.get_current_target().backend
     device = torch.cuda.current_device()
     dtype = A.dtype
     dtsize = A.element_size()
@@ -74,8 +105,9 @@ def estimate_matmul_time(
     # time to load data
     num_sm = driver.active.utils.get_device_properties(device)["multiprocessor_count"]
     active_cta_ratio = min(1, num_ctas / num_sm)
-    active_cta_ratio_bw1 = min(1, num_ctas / 32)  # 32 active ctas are enough to saturate
-    active_cta_ratio_bw2 = max(min(1, (num_ctas - 32) / (108 - 32)), 0)  # 32-108, remaining 5%
+    num_ctas_saturate_bw = 32 if backend != "hip" else 100  # 32 active ctas are enough to saturate
+    active_cta_ratio_bw1 = min(1, num_ctas / num_ctas_saturate_bw)
+    active_cta_ratio_bw2 = max(min(1, (num_ctas - num_ctas_saturate_bw) / (108 - num_ctas_saturate_bw)), 0)  # 32-108, remaining 5%
     dram_bw = get_dram_gbps(device) * (active_cta_ratio_bw1 * 0.95 + active_cta_ratio_bw2 * 0.05)  # in GB/s
     l2_bw = dram_bw * 4  # rough estimation (should be 4.7 for A100?)
     # assume 80% of (following) loads are in L2 cache
@@ -125,6 +157,68 @@ def early_config_prune(configs, named_args, **kwargs):
 
         max_shared_memory = driver.active.utils.get_device_properties(device)["max_shared_mem"]
         required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
+        if required_shared_memory <= max_shared_memory:
+            pruned_configs.append(config)
+    configs = pruned_configs
+
+    # Some dtypes do not allow atomic_add
+    if dtype not in [torch.float16, torch.float32]:
+        configs = [config for config in configs if config.kwargs['SPLIT_K'] == 1]
+
+    # group configs by (BLOCK_M,_N,_K, SPLIT_K, num_warps)
+    configs_map = {}
+    for config in configs:
+        kw = config.kwargs
+        BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages = \
+            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], kw['SPLIT_K'], config.num_warps, config.num_stages
+
+        key = (BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps)
+        if key in configs_map:
+            configs_map[key].append((config, num_stages))
+        else:
+            configs_map[key] = [(config, num_stages)]
+
+    pruned_configs = []
+    for k, v in configs_map.items():
+        BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps = k
+        if capability[0] >= 8:
+            # compute cycles (only works for ampere GPUs)
+            mmas = BLOCK_M * BLOCK_N * BLOCK_K / (16 * 8 * 16)
+            mma_cycles = mmas / min(4, num_warps) * 8
+
+            ldgsts_latency = 300  # Does this matter?
+            optimal_num_stages = ldgsts_latency / mma_cycles
+
+            # nearest stages, prefer large #stages
+            nearest = heapq.nsmallest(
+                2, v, key=lambda x: 10 + abs(x[1] - optimal_num_stages)
+                if (x[1] - optimal_num_stages) < 0 else x[1] - optimal_num_stages)
+
+            for n in nearest:
+                pruned_configs.append(n[0])
+        else:  # Volta & Turing only supports num_stages <= 2
+            random_config = v[0][0]
+            random_config.num_stages = 2
+            pruned_configs.append(random_config)
+    return pruned_configs
+
+def early_config_prune_hip(configs, named_args, **kwargs):
+    device = torch.cuda.current_device()
+    # this obviously assumes
+    # BLOCK_M, BLOCK_N, BLOCK_K, SPLIT_K, num_warps, num_stages
+    dtsize = named_args['A'].element_size()
+    dtype = named_args['A'].dtype
+
+    # 1. make sure we have enough smem
+    pruned_configs = []
+    for config in configs:
+        kw = config.kwargs
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = \
+            kw['BLOCK_M'], kw['BLOCK_N'], kw['BLOCK_K'], config.num_stages
+
+        max_shared_memory = driver.active.utils.get_device_properties(device)["max_shared_mem"]
+        stages = 2 if num_stages == 0 else num_stages  # stream pipelining is pretty much double buffering
+        required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * stages * dtsize
         if required_shared_memory <= max_shared_memory:
             pruned_configs.append(config)
     configs = pruned_configs

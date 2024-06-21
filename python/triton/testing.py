@@ -406,6 +406,38 @@ def get_max_tensorcore_tflops(dtype, clock_rate, device=None):
     return tflops
 
 
+def get_max_matrixcore_tflops(dtype, clock_rate, device=None):
+    import torch
+
+    from .runtime import driver
+    if not device:
+        device = torch.cuda.current_device()
+
+    # NV GPUs, like A100, has 4 tensor cores per SM.
+    # AMD numbers are per CU so no need to multiply on num_subcores
+    num_subcores = driver.active.utils.get_device_properties(device)["multiprocessor_count"]
+    target = driver.active.get_current_target()
+    # TODO: add wmma here
+    if target == 'gfx90a':  # MI200
+        if dtype in [torch.float32, torch.int32]:
+            ops_per_sub_core = 256
+        elif dtype in [torch.float16, torch.bfloat16, torch.int16]:
+            ops_per_sub_core = 1024
+        else:
+            raise RuntimeError("dtype not supported")
+    else:  # MI300 for now
+        if dtype in [torch.float32, torch.int32]:
+            ops_per_sub_core = 256
+        elif dtype in [torch.float16, torch.bfloat16, torch.int16]:
+            ops_per_sub_core = 2048
+        elif dtype in [torch.int8, tl.float8e4nv, tl.float8e4b15, tl.float8e5]:
+            ops_per_sub_core = 4096
+        else:
+            raise RuntimeError("dtype not supported")
+    tflops = num_subcores * clock_rate * ops_per_sub_core * 1e-9
+    return tflops
+
+
 # create decorator that wraps test function into
 # a cuda-memcheck system call
 

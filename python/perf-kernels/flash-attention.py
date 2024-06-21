@@ -550,7 +550,10 @@ def attn_fwd(
     if ENABLE_MASKING:
         # TODO: This is a bit inefficient. The +1 will not always apply
         # when x and y are multiples of BLOCK_M/N.
-        n_masked_blocks = (BEGIN_MASKED + end_masked) * (BLOCK_M // BLOCK_N + 1)
+        end_masked_blocks = end_masked * (BLOCK_M // BLOCK_N + 1)
+        end_masked_blocks = max(end_masked_blocks, 1 if padded_block_n else 0)
+        begin_masked_blocks = BEGIN_MASKED * (BLOCK_M // BLOCK_N + 1)
+        n_masked_blocks = end_masked_blocks + begin_masked_blocks
     else:
         n_masked_blocks = 1 if padded_block_n else 0
     # if masked, we might end up with an additional block.
@@ -592,10 +595,6 @@ def attn_fwd(
                 encoded_sm_ptrs += CUR_MASKED_BLOCKS
             block_min = block_max
             block_max += n_full_blocks * BLOCK_N
-            # if off_z == 0 and off_h_q == 0:
-            #     if start_m == 4:
-            #         tl.device_print("max = ", block_max)
-            #         tl.device_print("min = ", block_min)
 
     tl.debug_barrier()
     # Compute for full blocks. Here we set causal to false regardless of its actual
@@ -617,12 +616,12 @@ def attn_fwd(
 
     tl.debug_barrier()
     # Remaining blocks, if any, are full / not masked.
-    if end_masked:
+    if end_masked_blocks > 0:
         block_max = n_blocks * BLOCK_N
-        k_ptrs += n_full_blocks * stride_kn
-        v_ptrs += n_full_blocks * stride_vk
+        k_ptrs += n_full_blocks * BLOCK_N * stride_kn
+        v_ptrs += n_full_blocks * BLOCK_N * stride_vk
         if USE_BIAS:
-            bias_ptrs += block_min * stride_bn
+            bias_ptrs += n_full_blocks * BLOCK_N * stride_bn
         if RETURN_ENCODED_SOFTMAX:
             encoded_sm_ptrs += block_min
         # ENABLE_MASKING is for causal and windowed masking. But we can
@@ -1313,7 +1312,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     return q, k, v, input_metadata
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD',
-                         [(4, 48, 48, 1024, 1024, 64),
+                         [(4, 48, 48, 1024, 900, 64),
                         #   (1, 24, 6, 8192, 8192, 64),
                         #   (1, 4, 2, 16384, 16384, 128),
                         #   (2, 16, 4, 1020, 987, 128),
@@ -1333,7 +1332,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 @pytest.mark.parametrize('causal', [False])
 @pytest.mark.parametrize('use_alibi', [False])
 @pytest.mark.parametrize('layout', ['bhsd'])
-@pytest.mark.parametrize('sliding_window', [(512, -1)])
+@pytest.mark.parametrize('sliding_window', [(512, 512)])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, sliding_window, dtype=torch.float16):
     torch.manual_seed(20)
     q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
@@ -1402,8 +1401,8 @@ def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, 
     # compare
     if layout == 'bshd':
         ref_out = ref_out.transpose(1, 2).clone()
-    print(f"tri_out = {tri_out[0][0][512][0]}")
-    print(f"ref_out = {ref_out[0][0][512][0]}")
+    print(f"tri_out = {tri_out[3][47][512][0]}")
+    print(f"ref_out = {ref_out[3][47][512][0]}")
     print(f"err out = {tri_out[0][0][0][0] - ref_out[0][0][0][0]}")
     print(f"err max = {torch.max(torch.abs(ref_out) - torch.abs(tri_out))}")
     print(f"err = {torch.argmax(torch.abs(ref_out) - torch.abs(tri_out))}")

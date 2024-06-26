@@ -1,14 +1,8 @@
 """
-Fused Attention
-===============
-
-This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao (https://tridao.me/publications/flash2/flash2.pdf)
-
-Extra Credits:
-- Original flash attention paper (https://arxiv.org/abs/2205.14135)
-- Rabe and Staats (https://arxiv.org/pdf/2112.05682v2.pdf)
-- Adam P. Goucher for simplified vector math
-
+Usage:
+    python3 ./tune_fa.py -batch 16 -H 16 -n_ctx 1024 -d_head 128
+    python3 ./tune_fa.py --fa_config_file flash_att_configs.yaml --o tuning_fa.yaml
+    python3 ./tune_fa.py --fa_config_file tuning_fa.yaml --benchmark --o bench_results.cdv
 """
 
 import argparse
@@ -62,9 +56,33 @@ def format_output(unformatted):
         formatted = "{:.2f}".format(unformatted)
     return formatted
 
-@triton.jit
-def max_fn(x, y):
-    return tl.math.max(x, y)
+def  get_full_tuning_space():
+    configs = []
+    block_m_range = [32, 64, 128, 256]
+    block_n_range = [64, 128]
+    waves_per_eu_range = [0, 2, 3]
+    num_warps_range = [1, 2, 4, 8]
+    num_stages = [1]
+    pre_load_v_range = [True, False]
+    kpack_range = [1, 2]
+    matrix_instr_nonkdim_range = [16, 32]
+
+    for block_m in block_m_range:
+        for block_n in block_n_range:
+            for pre_load_v in pre_load_v_range:
+                configs.append({'Block_M': block_m, 'Block_N': block_n, 'Pre_load_v': pre_load_v})
+    return configs
+
+def process_item(item):
+    batch = item['Batch']
+    h = item['H']
+    n_ctx = item['N_Ctx']
+    d_head = item['D_Head']
+    del item['Batch']
+    del item['H']
+    del item['N_Ctx']
+    del item['D_Head']
+    return batch, h, n_ctx, d_head, item
 
 def generate_wrapper(tuning_parms):
     dri_str = """
@@ -100,9 +118,9 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal=False, dtype='fp16'):
     """
     dri_str += '\n'
     for tp in tuning_parms:
-        block_m = tp[0]
-        block_n = tp[1]
-        pre_load_v = tp[2]
+        block_m = tp['Block_M']
+        block_n = tp['Block_N']
+        pre_load_v = bool(tp['Pre_load_v'])
         dri_str += f"""
     for i in range(100):
         grid = ( triton.cdiv(q.shape[2], {block_m}), q.shape[0] * q.shape[1], 1)
@@ -137,7 +155,7 @@ if __name__ == '__main__':
     sys.exit(main())
     """
 
-def generate_fa_kernel(Batch, H, N_Ctx, D_Head):
+def generate_fa_kernel(Batch, H, N_Ctx, D_Head, tuning_parms):
     # create the kernel file
     file_name = f"{Batch}_{H}_{N_Ctx}_{D_Head}.py"
     f_kernel = open("./generated_fa_kernel_"+file_name, 'w')
@@ -164,21 +182,18 @@ float8:tl.constexpr = None if not TORCH_HAS_FP8E4 else torch.float8_e4m3fnuz
     f_kernel.write(import_str + '\n')
     
     # generate kernels with tuning parameters
-    tuning_parms = []
-    block_m_range = [16, 32]
-    block_n_range = [16, 32]
-    pre_load_v_range = [True, False]
+
     with open(os.path.dirname(os.path.abspath(__file__))+"/flash_attention_fwd_kernel.py") as file:
         fa_kernel_code = file.read()
 
-    for block_m in block_m_range:
-        for block_n in block_n_range:
-            for pre_load_v in pre_load_v_range:
-                tuning_parms.append((block_m, block_n, pre_load_v))
-                fa_kernel_str = fa_kernel_code.replace("attn_fwd_kernel", f"attn_fwd_BLOCKM_{block_m}_BLOCKN_{block_n}_Preloadv_{pre_load_v}")
-                fa_kernel_str = fa_kernel_str.replace("import triton.language as tl", "")
-                fa_kernel_str = fa_kernel_str.replace("import triton", "")
-                f_kernel.write(fa_kernel_str + "\n")
+    for config in tuning_parms:
+        block_m = config['Block_M']
+        block_n = config['Block_N']
+        pre_load_v = bool(config['Pre_load_v'])
+        fa_kernel_str = fa_kernel_code.replace("attn_fwd_kernel", f"attn_fwd_BLOCKM_{block_m}_BLOCKN_{block_n}_Preloadv_{pre_load_v}")
+        fa_kernel_str = fa_kernel_str.replace("import triton.language as tl", "")
+        fa_kernel_str = fa_kernel_str.replace("import triton", "")
+        f_kernel.write(fa_kernel_str + "\n")
    
     # generate the driver
     dri_str = generate_wrapper(tuning_parms)
@@ -194,9 +209,9 @@ if __name__ == '__main__':
     f_kernel.write(main_str+'\n')
     f_kernel.close()
 
-def tune_fa_config(Batch, H, N_Ctx, D_Head, num_threads, verbose):
+def tune_fa_config(Batch, H, N_Ctx, D_Head, tuning_parms, num_threads, verbose):
     # create the kernel file
-    generate_fa_kernel(Batch, H, N_Ctx, D_Head)
+    generate_fa_kernel(Batch, H, N_Ctx, D_Head, tuning_parms)
     run_bash_command("rm -rf ~/.triton/cache")
     start_time = datetime.now()
 
@@ -214,7 +229,7 @@ def tune_fa_config(Batch, H, N_Ctx, D_Head, num_threads, verbose):
 
     splitted_config = min_row["Name"].split('_')
     best_config = {'Batch':Batch, 'H':H, 'N_Ctx':N_Ctx, 'D_Head':D_Head}
-    best_config.update({'Block_M':splitted_config[4], 'Block_N':splitted_config[6], 'Preloadv':splitted_config[8]})
+    best_config.update({'Block_M':int(splitted_config[4]), 'Block_N':int(splitted_config[6]), 'Pre_load_v':splitted_config[8]})
     return min_row['AverageNs'], best_config
 
 def parse_args():
@@ -229,6 +244,7 @@ def parse_args():
     parser.add_argument("-d_head", type=int, default=128)
     parser.add_argument("--o", type=str, default='tuning_fa.yaml', help='yaml file to store tuning results')
     parser.add_argument("--fa_config_file", type=str, default="", help='yaml file to indicate flash attention configs')
+    parser.add_argument("--benchmark", action='store_true', default=False, help="Benchmark the given config")
     parser.add_argument("--keep", action='store_true', default=False, help='keep generated files')
     parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
     parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
@@ -238,6 +254,8 @@ def parse_args():
     parser.add_argument("--no_warmup", action='store_true', default=False, help="Do not call the warmup kernel")
 
     args = parser.parse_args()
+    if args.benchmark:
+        args.o = 'flash_attention_bechmark.csv'
     return args
 
 def main():
@@ -247,6 +265,7 @@ def main():
     jobs = args.jobs
     iters = args.iters
     skipWarmup = args.no_warmup
+    run_bench = args.benchmark
 
     # Get element type
     dtype = args.datatype
@@ -258,24 +277,30 @@ def main():
         h = args.H
         n_ctx = args.n_ctx
         d_head = args.d_head
-        fa_configs = [(batch, h, n_ctx, d_head)]
+        fa_configs = [(batch, h, n_ctx, d_head, None)]
     else:
         with open(fa_config_file) as file:
             inputs = yaml.safe_load(file)
         for item in inputs:
-            fa_configs.append((item['Batch'], item['H'], item['N_Ctx'], item['D_Head']))
+            batch, h, n_ctx, d_head, item = process_item(item)
+            fa_configs.append((batch, h, n_ctx, d_head, item))
+
+    full_space = get_full_tuning_space()
 
     f_results = open(output, 'w')
-    for config in fa_configs:
-        batch = config[0]
-        h = config[1]
-        n_ctx = config[2]
-        d_head = config[3]
-        minTime, bestConfig = tune_fa_config(batch, h, n_ctx, d_head, args.num_threads, args.verbose)
+    if run_bench:
+        f_results.write("Batch,H,N_Ctx,D_Head,us\n")
+    for (batch, h, n_ctx, d_head, config) in fa_configs:
+        tuning_parms = [config] if run_bench else full_space
+        minTime, bestConfig = tune_fa_config(batch, h, n_ctx, d_head, tuning_parms, args.num_threads, args.verbose)
         minTime = format_output(minTime)
-        print('best_config: ',str(bestConfig))
-        f_results.write('- ' + str(bestConfig) + ' ')
-        f_results.write(f'# time(us): {minTime}\n')
+        if run_bench:
+            print(f'{batch},{h},{n_ctx},{d_head},{minTime}\n')
+            f_results.write(f'{batch},{h},{n_ctx},{d_head},{minTime}\n')
+        else:
+            print('best_config: ',str(bestConfig))
+            f_results.write('- ' + str(bestConfig) + ' ')
+            f_results.write(f'# time(us): {minTime}\n')
     f_results.close()
 
 if __name__ == '__main__':

@@ -3,10 +3,14 @@
 
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Support/LLVM.h"
+#include "triton/Analysis/AxisInfo.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
 #include "llvm/ADT/ArrayRef.h"
 #include <list>
 #include <vector>
+
+namespace ttg = mlir::triton::gpu;
 
 namespace mlir {
 namespace triton {
@@ -101,6 +105,70 @@ public:
   createFinalSchedule(scf::ForOp forOp);
   void dump();
 };
+
+class LoopSchedule {
+protected:
+  struct LoadInfo {
+    // Layout of the data in the shared memory.
+    ttg::SharedEncodingAttr sharedEncoding = nullptr;
+    // Blocked encoding is used for loads not used by the dot.
+    ttg::BlockedEncodingAttr blockedEncoding = nullptr;
+    bool loadIsMMAV3 = false;
+    int distToUse = 0;
+    bool usedByDot = false;
+  };
+
+  struct AsyncLoad {
+    AsyncLoad(Operation *loadOp, Value alloc) : loadOp(loadOp), alloc(alloc) {}
+    Operation *loadOp;
+    Value alloc;
+    Value barrier;
+    Operation *waitOp = nullptr;
+    bool isTMALoad = false;
+  };
+
+public:
+  scf::ForOp forOp;
+  int numStages;
+  CoarseSchedule schedule;
+  DenseSet<Operation *> rootUsers;
+  SmallVector<Value> allocs;
+  llvm::MapVector<Operation *, LoadInfo> loadToInfo;
+
+  LoopSchedule(int numStages) : numStages(numStages), schedule(numStages) {}
+
+  bool compute();
+
+  std::vector<std::pair<Operation *, unsigned>> getSchedule() {
+    return schedule.createFinalSchedule(forOp);
+  }
+
+protected:
+  virtual bool isLoadType(Operation *op);
+
+  virtual void createAsyncCopy(LoadOp loadOp, Value alloc,
+                               Value insertIdx, Value extractIdx,
+                               CoarseSchedule::Cluster prefetchCluster) = 0;
+  virtual void createTMAAsyncCopy(ExperimentalDescriptorLoadOp loadOp,
+                                  Value alloc, Value insertIdx, Value extractIdx,
+                                  Value barrier, Operation *waitOp, Value phase) = 0;
+  virtual void createTMABarrierAndWait(SmallVector<AsyncLoad> &asyncLoads,
+                                       Value insertIdx, Value extractIdx,
+                                       Value phase, int numBuffers) = 0;
+private:
+  void createAsyncOps();
+  void assignMemoryLayouts(
+     llvm::SmallVector<std::tuple<Operation *, int, Operation *>> &loadOpToIndLevelAndUse,
+     ModuleAxisInfoAnalysis &axisInfoAnalysis);
+  llvm::SmallVector<std::tuple<Operation *, int, Operation *>> loadOpsToIndirectionLevelAndUse();
+  void scheduleLoads();
+  CoarseSchedule::Cluster schedulePrologueAndEpilogue();
+  void scheduleDependencies();
+  void scheduleDistanceOneDependencies();
+  void scheduleRemainingToLastStage(CoarseSchedule::Cluster afterPrologue);
+  
+};
+
 
 } // namespace triton
 } // namespace mlir

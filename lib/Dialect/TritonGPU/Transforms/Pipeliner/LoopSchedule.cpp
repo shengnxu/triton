@@ -9,10 +9,10 @@
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Attributes.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/LoopSchedule.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
 #include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
-#include "triton/Dialect/TritonGPU/Transforms/Schedule.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "llvm/ADT/MapVector.h"
@@ -34,7 +34,88 @@ namespace ttng = mlir::triton::nvidia_gpu;
 // TODO: We can extra some helpers into common utilities once we add more
 // schedules.
 
-bool tt::LoopSchedule::isLoadType(Operation *op) {
+
+void tt::CoarseSchedule::insertDepsOfOp(Operation *op, int stage,
+                                        tt::CoarseSchedule::Cluster cluster,
+                                        bool includeArg) {
+  for (Value operand : op->getOperands()) {
+    Value v = operand;
+    llvm::SmallDenseSet<Value> seen;
+    while (auto arg = dyn_cast<BlockArgument>(v)) {
+      if (!includeArg)
+        break;
+      if (!seen.insert(v).second)
+        break;
+      if (arg.getArgNumber() > 0 && arg.getOwner() == op->getBlock()) {
+        auto yieldOp = op->getBlock()->getTerminator();
+        v = yieldOp->getOperand(arg.getArgNumber() - 1);
+        continue;
+      }
+      break;
+    }
+    Operation *defOp = v.getDefiningOp();
+    if (defOp && defOp->getBlock() == op->getBlock()) {
+      if (insertIfAbsent(defOp, stage, cluster)) {
+        insertDepsOfOp(defOp, stage, cluster, includeArg);
+      }
+    }
+  }
+}
+
+SmallVector<std::tuple<Operation *, int, tt::CoarseSchedule::Cluster>>
+tt::CoarseSchedule::getOpsInOrder(scf::ForOp forOp) {
+  SmallVector<SmallVector<std::tuple<Operation *, int, Cluster>>, 8>
+      orderClusters(clusters.size());
+  for (auto &op : forOp.getBody()->without_terminator()) {
+    if (opToStageAndCluster.count(&op) == 0) {
+      continue;
+    }
+    assert(opToStageAndCluster[&op].first < numStages &&
+           "Op with invalid stage!");
+    int clusterId = *opToStageAndCluster[&op].second;
+    assert(clusterId == std::distance(clusters.begin(),
+                                      opToStageAndCluster[&op].second) &&
+           "Cluster ID mismatch!");
+    orderClusters[clusterId].push_back(make_tuple(
+        &op, opToStageAndCluster[&op].first, opToStageAndCluster[&op].second));
+  }
+  SmallVector<std::tuple<Operation *, int, Cluster>> opsInOrder;
+  for (int i = 0; i < orderClusters.size(); i++) {
+    for (auto [op, stage, cluster] : orderClusters[i]) {
+      opsInOrder.push_back({op, stage, cluster});
+    }
+  }
+
+  return opsInOrder;
+}
+
+std::vector<std::pair<Operation *, unsigned>>
+tt::CoarseSchedule::createFinalSchedule(scf::ForOp forOp) {
+  SmallVector<std::tuple<Operation *, int, tt::CoarseSchedule::Cluster>>
+      opsInOrder = getOpsInOrder(forOp);
+  std::vector<std::pair<Operation *, unsigned>> schedule;
+  for (auto [op, stage, cluster] : opsInOrder)
+    schedule.push_back({op, stage});
+  return schedule;
+}
+
+void tt::CoarseSchedule::dump() {
+  for (int i = 0; i < numStages; i++) {
+    llvm::dbgs() << "\n---- Ops in stage " << i << "\n";
+    for (auto &[op, stageAndCluster] : opToStageAndCluster) {
+      if (i == stageAndCluster.first) {
+        llvm::dbgs() << "        cluster: " << *stageAndCluster.second
+                     << ":\n\t" << *op << "\n";
+      }
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//  LoopSchedule management class
+////////////////////////////////////////////////////////////////////////////////
+
+bool tt::LoopSchedule::isLoadOp(Operation *op) {
   return isa<tt::LoadOp, tt::ExperimentalDescriptorLoadOp>(op);
 }
 
@@ -178,7 +259,7 @@ tt::LoopSchedule::loadOpsToIndirectionLevelAndUse() {
       [&](Operation *op, int distance, Operation *use) {
         if (!seen.insert(op).second)
           return;
-        if (isLoadType(op)) {
+        if (isLoadOp(op)) {
           // TODO: What if there are multiple uses at different distances?
           loadOpToIndLevelAndUse.push_back(std::make_tuple(op, distance, use));
           use = op;
@@ -204,7 +285,7 @@ tt::LoopSchedule::loadOpsToIndirectionLevelAndUse() {
   // that are not directly used by dot ops.
   if (forOp->hasAttr(tt::kNumStagesAttrName)) {
     for (Operation &op : forOp.getBody()->without_terminator()) {
-      if (!isLoadType(&op))
+      if (!isLoadOp(&op))
         dfs(&op, 0, &op);
     }
   }
@@ -237,8 +318,6 @@ static bool loadIsMMAv3(Operation *loadOp) {
 void tt::LoopSchedule::assignMemoryLayouts(
      llvm::SmallVector<std::tuple<Operation *, int, Operation *>> &loadOpToIndLevelAndUse,
                     tt::ModuleAxisInfoAnalysis &axisInfoAnalysis) {
-  llvm::MapVector<Operation *, LoadInfo> loadToInfo;
-
   for (auto &[op, dist, use] : loadOpToIndLevelAndUse) {
     if (loadToInfo.count(op))
       // TODO pawel: err, we'd need to verify that the distance is the same
@@ -334,16 +413,19 @@ void tt::LoopSchedule::assignMemoryLayouts(
     // If we still don't have a shared encoding, try a "generic" shared
     // encoding.
     if (!loadInfo.sharedEncoding && !isa<ttng::WarpGroupDotOp>(use)) {
-      loadInfo.sharedEncoding =
-          getSharedEncoding(op, /*isMMAV3=*/loadInfo.loadIsMMAV3)
-              .value_or(nullptr);
+      if (!canRegisterBuffer) {
+        loadInfo.sharedEncoding =
+            getSharedEncoding(op, /*isMMAV3=*/loadInfo.loadIsMMAV3)
+                .value_or(nullptr);
+      }
       if (auto loadOp = dyn_cast<tt::LoadOp>(op)) {
         loadInfo.blockedEncoding = getBlockedEncoding(loadOp, axisInfoAnalysis);
       }
     }
 
-    // If that still didn't work, bail on pipelining this load.
-    if (!loadInfo.sharedEncoding) {
+    // If that still didn't work, bail on pipelining this load unless register
+    // buffering is desired.
+    if (!loadInfo.sharedEncoding && !canRegisterBuffer) {
       continue;
     }
     loadToInfo[op] = loadInfo;

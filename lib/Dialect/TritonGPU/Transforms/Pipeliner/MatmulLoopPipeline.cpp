@@ -10,6 +10,7 @@
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Attributes.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/LoopSchedule.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
 #include "triton/Dialect/TritonGPU/Transforms/PipeliningUtility.h"
@@ -369,7 +370,7 @@ bool mlir::triton::preProcessLoopAndGetSchedule(
   // Schedule the loads and root ops (dot ops) in the loop. This will give us
   // a scaffold for the final schedule.
 
-  MatmulSchedule sched(numStages);
+  MatmulSchedule sched(forOp, numStages);
 
   // return true if something to do..
   if (!sched.compute())
@@ -378,6 +379,8 @@ bool mlir::triton::preProcessLoopAndGetSchedule(
   // Create the final schedule for the kernel loop. This will dictate the
   // stages and order of operations to the pipeline expander.
   auto schedule = sched.getSchedule();
+
+  forOp = sched.getNewForLoop();
 
   // Fill out the pipeline options.
   options.getScheduleFn =
@@ -398,7 +401,7 @@ bool mlir::triton::preProcessLoopAndGetSchedule(
   // Invalidate any mbarrier create
   invalidateBarriers(builder, sched.barriers);
   // Explicitly deallocate allocated tensors after the wait op
-  for (auto alloc : sched.allocs)
+  for (auto alloc : sched.getAllocs())
     builder.create<ttg::LocalDeallocOp>(forOp.getLoc(), alloc);
   return true;
 }

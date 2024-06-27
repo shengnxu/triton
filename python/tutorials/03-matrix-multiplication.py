@@ -163,7 +163,7 @@ import triton.language as tl
 #       provided configs
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'kpack': 2}, num_stages=1,
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'kpack': 1}, num_stages=1,
                       num_warps=8),
         # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
         #               num_warps=4),
@@ -368,8 +368,8 @@ for fp8_inputs in [False, True]:
             line_arg="provider",  # Argument name whose value corresponds to a different line in the plot
             # Possible values for `line_arg`
             # Don't compare to cublas for fp8 cases as torch.matmul doesn't support fp8 at the moment.
-            line_vals=["triton"] if fp8_inputs else ["cublas", "triton"],  # Label name for the lines
-            line_names=["Triton"] if fp8_inputs else ["cuBLAS", "Triton"],  # Line styles
+            line_vals=["triton"], #if fp8_inputs else ["cublas", "triton"],  # Label name for the lines
+            line_names=["Triton"], #if fp8_inputs else ["cuBLAS", "Triton"],  # Line styles
             styles=[("green", "-"), ("blue", "-")],
             ylabel="TFLOPS",  # Label name for the y-axis
             plot_name="matmul-performance-" +
@@ -384,8 +384,8 @@ def benchmark(M, N, K, provider, fp8_inputs):
     b = torch.randn((4096, 8192), device='cuda', dtype=torch.float16)
     # b = torch.randn((N, K), device='cuda', dtype=torch.float16)
     # b = b.T
-    print(a.stride())
-    print(b.stride())
+    print("A stride:", a.stride())
+    print("B stride:", b.stride())
     if TORCH_HAS_FP8 and fp8_inputs:
         a = a.to(torch.float8_e5m2)
         b = b.T

@@ -95,9 +95,9 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     }
     SmallVector<unsigned> sizePerThread(refTensorType.getRank(), 1);
     sizePerThread[order[0]] = perThread;
-    llvm::outs() << "Encoding Order: " << sizePerThread[0] << " " << sizePerThread[1] << "\n";
     if (notTransposed)
       sizePerThread[order[1]] = 4;
+    llvm::outs() << "sizePerThread: " << sizePerThread[0] << " " << sizePerThread[1] << "\n";
 
     auto CTALayout = triton::gpu::getCTALayout(refTensorType.getEncoding());
     layoutMap[op] = triton::gpu::BlockedEncodingAttr::get(

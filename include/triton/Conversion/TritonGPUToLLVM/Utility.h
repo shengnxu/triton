@@ -1381,11 +1381,16 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
     assert((!mmaLayout.isVolta()) &&
            "ConvertLayout MMAv1->Shared is not supported yet");
   }
+  auto sizePerThread = srcDistributedLayout.cast<BlockedEncodingAttr>().getSizePerThread();
+  LDBG("sizePerThread: " << sizePerThread[0] << " " << sizePerThread[1]);
+
   auto dstSharedLayout =
       dstTy.getEncoding().cast<triton::gpu::SharedEncodingAttr>();
   auto dstElemTy = dstTy.getElementType();
   auto inOrd = triton::gpu::getOrder(srcDistributedLayout);
   auto outOrd = dstSharedLayout.getOrder();
+  LDBG("inOrd: " << inOrd[0] << " " << inOrd[1]);
+  LDBG("outOrd: " << outOrd[0] << " " << outOrd[1]);
   unsigned inVec = inOrd == outOrd
                        ? triton::gpu::getUniqueContigPerThread(
                              srcDistributedLayout, srcShape)[inOrd[0]]
@@ -1396,6 +1401,7 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
   unsigned outVec = dstSharedLayout.getMaxPhase() == 1
                         ? dstTy.getShape()[inOrd[0]]
                         : dstSharedLayout.getVec();
+  LDBG("inVec: " << inVec << "; outVec: " << outVec);
   unsigned minVec = std::min(outVec, inVec);
   unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
   auto wordTy = vec_ty(elemTy, minVec);
@@ -1408,17 +1414,38 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
   DenseMap<unsigned, Value> sharedPtrs =
       getSwizzledSharedPtrs(loc, target, inVec, srcTy, dstSharedLayout, elemTy,
                             smemObj, rewriter, offsetVals, srcStrides);
+  LDBG("sharedPtrs size: " << sharedPtrs.size());
   LDBG("storeDistributedToShared: numElems = " << numElems << " minVec = "
                                                << minVec << " " << wordTy);
-  for (unsigned i = 0; i < numElems; ++i) {
-    if (i % minVec == 0)
-      word = undef(wordTy);
-    word = insert_element(wordTy, word, inVals[i], i32_val(i % minVec));
-    if (i % minVec == minVec - 1) {
-      Value smemAddr = sharedPtrs[i / minVec * minVec];
-      smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
-      store(word, smemAddr)
-          .setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
+  if (sizePerThread[0] == 1) {
+    for (unsigned i = 0; i < numElems; ++i) {
+      if (i % minVec == 0)
+        word = undef(wordTy);
+      word = insert_element(wordTy, word, inVals[i], i32_val(i % minVec));
+      if (i % minVec == minVec - 1) {
+        Value smemAddr = sharedPtrs[i / minVec * minVec];
+        smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+        store(word, smemAddr)
+            .setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
+      }
+    }
+  } else {
+    auto numGroups = numElems / sizePerThread[0];
+    // outer loop iterates over each element in the global_load (0, 7)
+    for (unsigned i = 0; i < numGroups; ++i) {
+      // inner loop iterates over # of global_load
+      for (unsigned j = 0; j < sizePerThread[0]; ++j) {
+        if (j % minVec == 0)
+          word = undef(wordTy);
+        // need to access the (4, 8) col-wise
+        word = insert_element(wordTy, word, inVals[j*numGroups + i], i32_val(j % minVec));
+        if (j % minVec == minVec - 1) {
+          Value smemAddr = sharedPtrs[(j*numGroups + i) / minVec * minVec];
+          smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+          store(word, smemAddr)
+              .setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
+        }
+      }
     }
   }
 }

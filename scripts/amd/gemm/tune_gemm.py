@@ -78,6 +78,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         BLOCK_SIZE_N = config.get("BLOCK_SIZE_N")
         BLOCK_SIZE_K = config.get("BLOCK_SIZE_K")
         num_warps = config.get("num_warps")
+        num_stages = config.get("num_stages")
         matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
         kpack = config.get("kpack")
         if matrix_instr_nonkdim > mfma:
@@ -116,6 +117,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         # out of shared memory resource
         # TODO (zhanglx): This does not consider the LDS usage in the epilogue
         LDS = BLOCK_SIZE_K * BLOCK_SIZE_M * elemBytes_a + BLOCK_SIZE_K * BLOCK_SIZE_N * elemBytes_b
+        LDS = LDS if not num_stages else LDS * num_stages
         if LDS > 65536:
             continue
         # Skip small block sizes and num_warps for large gemm

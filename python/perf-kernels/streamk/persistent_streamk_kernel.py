@@ -29,13 +29,16 @@ def get_tiles_config(M, N, K, num_sms,
 
     return iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters
 
+@triton.heuristics({
+    'EVEN_K': lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0,
+})
 @triton.jit()
 def persistent_streamk_gemm(
-        A, B, C,
+        A, B, C, P, locks,
         M, N, K, num_sms,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
-        GROUP_SIZE_M: tl.constexpr,
+        GROUP_SIZE_M: tl.constexpr, EVEN_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -44,6 +47,7 @@ def persistent_streamk_gemm(
     iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters = get_tiles_config(M, N, K, num_sms, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
+    acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
 
     for tile_id in range(pid, total_full_tiles, num_sms):
         if GROUP_SIZE_M == 1:
@@ -62,10 +66,14 @@ def persistent_streamk_gemm(
         rk = tl.arange(0, BLOCK_SIZE_K)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn
-        acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+        acc = acc * 0.0
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-            a = tl.load(A_BASE)
-            b = tl.load(B_BASE)
+            if EVEN_K:
+                a = tl.load(A_BASE)
+                b = tl.load(B_BASE)
+            else:
+                a = tl.load(A_BASE, mask=rk[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+                b = tl.load(B_BASE, mask=rk[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             acc += tl.dot(a, b)
             A_BASE += BLOCK_SIZE_K * stride_ak
             B_BASE += BLOCK_SIZE_K * stride_bk
@@ -94,21 +102,55 @@ def persistent_streamk_gemm(
             pid_m = first_pid_m + (tile_id % group_size_m)
             pid_n = (tile_id % num_pid_in_group) // group_size_m
 
-        rm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-        rn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
+        rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
         rk = tl.arange(0, BLOCK_SIZE_K)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak + BLOCK_SIZE_K * stride_ak * remainder
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn + BLOCK_SIZE_K * stride_bk * remainder
-        acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+        acc = acc * 0.0
         for current_iter in range(start_iter, end_iter):
-            a = tl.load(A_BASE)
-            b = tl.load(B_BASE)
+            if EVEN_K:
+                a = tl.load(A_BASE)
+                b = tl.load(B_BASE)
+            else:
+                global_k_offset = (current_iter % iters_per_tile) * BLOCK_SIZE_K
+                k_mask = global_k_offset + rk < K
+                a = tl.load(A_BASE, mask=k_mask[None, :], other=0.0)
+                b = tl.load(B_BASE, mask=k_mask[:, None], other=0.0)
             acc += tl.dot(a, b)
             A_BASE += BLOCK_SIZE_K * stride_ak
             B_BASE += BLOCK_SIZE_K * stride_bk
 
-        C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
-        mask = (rm < M)[:, None] & (rn < N)[None, :]
-        tl.atomic_add(C_, acc, mask=mask)
+        tile_iter = tile_id * iters_per_tile
+        if start_iter == tile_iter:
+            tile_iter_end = tile_iter + iters_per_tile
+            next_pid = pid + 1
+            end = end_iter
+            while (end < tile_iter_end and next_pid < num_sms):
+                while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
+                    pass
+                rm1 = tl.arange(0, BLOCK_SIZE_M)
+                rn1 = tl.arange(0, BLOCK_SIZE_N)
+                P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+                acc1 = tl.load(P_)
+                acc += acc1
+                if next_pid < streamk_remainder_iters:
+                    end += streamk_iters_pcu + 1
+                else:
+                    end += streamk_iters_pcu 
+
+                next_pid += 1
+
+            rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
+            rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+            C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
+            mask = (rm < M)[:, None] & (rn < N)[None, :]
+            tl.store(C_, acc, mask=mask)
+        else:
+            rm1 = tl.arange(0, BLOCK_SIZE_M)
+            rn1 = tl.arange(0, BLOCK_SIZE_N)
+            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+            tl.store(P_, acc)
+            tl.atomic_xchg(locks + pid, 1)
 
         start_iter = end_iter

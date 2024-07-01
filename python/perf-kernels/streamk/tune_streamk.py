@@ -140,17 +140,23 @@ def read_config(config):
     return block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfma_instr_size, kpack
 
 
-def gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c):
+def gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock):
     block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(config)
     torch_dtype_a = 'fp16'
     torch_dtype_b = 'fp16'
     torch_dtype_c = 'fp16'
+    torch_dtype_p = 'fp32'
+    torch_dtype_lock = 'int32'
     if dtype_a:
         torch_dtype_a = tl_to_torch_types[name_to_tl_types[dtype_a]]
     if dtype_b:
         torch_dtype_b = tl_to_torch_types[name_to_tl_types[dtype_b]]
     if dtype_c:
         torch_dtype_c = tl_to_torch_types[name_to_tl_types[dtype_c]]
+    if dtype_p:
+        torch_dtype_p = tl_to_torch_types[name_to_tl_types[dtype_p]]
+    if dtype_lock:
+        torch_dtype_lock = tl_to_torch_types[name_to_tl_types[dtype_lock]]
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
 
     matmul_def_str = f"""
@@ -159,7 +165,7 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
     #print(f'config: streamk_gemm_{configStr}', flush=True)
     if warmup:
         streamk_gemm_{configStr}.warmup(
-            {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c},
+            {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c}, {torch_dtype_p}, {torch_dtype_lock},
             M, N, K, num_sms,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},
@@ -175,8 +181,10 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
         )
         return None
     else:
+        locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
+        P = torch.zeros((num_sms,  {block_m}*{block_n}), device="cuda", dtype=torch.float32)
         streamk_gemm_{configStr}[grid,](
-            a, b, c,
+            a, b, c, P, locks,
             M, N, K, num_sms,
             am, ak, bk, bn, cm, cn,
             BLOCK_SIZE_M = {block_m},
@@ -215,7 +223,7 @@ def generated_kernel_name(M, N, K, gpu_id):
 # 4. test_gemm to invoke
 # 4.1 run try_config in parallel
 # 4.2 matmul in a loop of 10 iterations
-def generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs, jobs, iters, run_bench):
+def generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, jobs, iters, run_bench):
     filenames = []
     for i in range(jobs):
         filenames.append(generated_kernel_name(M, N, K, i))
@@ -240,7 +248,7 @@ from tune_streamk import gen_input
     idx = 0
     for config in configs:
         file_idx = idx % jobs
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c)
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock)
         # Copy the streamk_gemm with name replaced
         streamk_gemm_config = streamk_gemm_code.replace("streamk_gemm", f"streamk_gemm_{configStr}")
         streamk_gemm_config = streamk_gemm_config.replace("import triton.language as tl", "")
@@ -271,7 +279,7 @@ from tune_streamk import gen_input
     # warm up call of all matmul functions in parallel
     idx = 0
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
         task_str = f"        results += [thread_pool.apply_async(try_config_{configStr}, args=task_args)]\n" + \
                    f"        config_names += ['{configStr}']\n"
         f_kernel[idx % jobs].write(task_str)
@@ -302,7 +310,7 @@ from tune_streamk import gen_input
     idx = 0
     runs = iters if run_bench else 200
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
         matmul_call_str = f"""
         if '{configStr}' not in failed_configs:
             for i in range({runs}):
@@ -311,7 +319,7 @@ from tune_streamk import gen_input
         idx += 1
     # post string
     for fi in range(jobs):
-        f_kernel[fi].write("        return d\n")
+        f_kernel[fi].write("            return d\n")
 
     # def main and call test_gemm
     def_main_str = """
@@ -334,7 +342,7 @@ def main():
 
 
 def extract_kernel_time(M, N, K, num_sms, config, df):
-    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None)
+    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
     df = df[df['KernelName'].str.contains(configStr)]
     meanTime = df['DurationNs'].tail(100).mean()
     return config, meanTime
@@ -354,9 +362,9 @@ def profile_batch_kernels(M, N, K, num_sms, gpuid, gpus, jobs, verbose):
         jobId += ngpus
 
 
-def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs, run_bench, jobs, iters, skipWarmup, verbose=0, num_threads=16, gpus=[0]):
+def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, run_bench, jobs, iters, skipWarmup, verbose=0, num_threads=16, gpus=[0]):
     # Generate kernel out of all configs
-    generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs, jobs, iters, run_bench)
+    generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, jobs, iters, run_bench)
 
     # remove any compiled kernel in the cache
     run_bash_command("rm -rf ~/.triton/cache")
@@ -470,9 +478,11 @@ def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_
     # 1D launch kernel where each block gets its own program.
 
     grid = num_sms 
+    locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
+    P = torch.zeros((num_sms,  block_m*lock_n), device="cuda", dtype=torch.float32)
 
     streamk_gemm[grid,](
-        a, b, c,
+        a, b, c, P, locks,
         M, N, K, num_sms,
         a.stride(0), a.stride(1),
         b.stride(0), b.stride(1),
@@ -650,6 +660,8 @@ def main():
     dtype_a = args.dtype_a
     dtype_b = args.dtype_b
     dtype_c = args.dtype_c
+    dtype_p = 'fp32'
+    dtype_lock = 'int32'
     if not dtype_a in name_to_tl_types or not dtype_b in name_to_tl_types or not dtype_c in name_to_tl_types:
         print(f"Unsupported dtype_a {args.dtype_a} or dtype_b {args.dtype_b} or dtype_c {args.dtype_c}")
         print("Supported types: ", list(name_to_tl_types.keys()))
@@ -711,7 +723,7 @@ def main():
             verbose_level = 2
         minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(
                 M, N, K, num_sms, col_a, col_b, dtype_a,
-                dtype_b, dtype_c, init_type, pruned_configs,
+                dtype_b, dtype_c, dtype_p, dtype_lock, init_type, pruned_configs,
                 run_bench, jobs, iters, skipWarmup, num_threads=args.num_threads, gpus=gpus,
                 verbose=verbose_level)
 
@@ -723,7 +735,7 @@ def main():
         if not run_bench:
             print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ", flush=True)
 
-        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, bestConfig, None, None, None)
+        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, bestConfig, None, None, None, None, None)
         if not run_bench:
             print(f'best_config: {bestConfig_compact_str}', end=" ", flush=True)
 

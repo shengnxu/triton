@@ -140,7 +140,7 @@ def read_config(config):
     return block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfma_instr_size, kpack
 
 
-def gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock):
+def gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock):
     block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(config)
     torch_dtype_a = 'fp16'
     torch_dtype_b = 'fp16'
@@ -177,6 +177,7 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
             waves_per_eu = {waves_per_eu},
             matrix_instr_nonkdim = {mfmaInstrSize},
             kpack = {kpack},
+            EVEN_K = {EVEN_K},
             grid=(1,)
         )
         return None
@@ -195,7 +196,8 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
             num_stages = {num_stages},
             waves_per_eu = {waves_per_eu},
             matrix_instr_nonkdim = {mfmaInstrSize},
-            kpack = {kpack}
+            kpack = {kpack},
+            EVEN_K = {EVEN_K}
         )
         return c
 
@@ -248,7 +250,8 @@ from tune_streamk import gen_input
     idx = 0
     for config in configs:
         file_idx = idx % jobs
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock)
+        EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock)
         # Copy the streamk_gemm with name replaced
         streamk_gemm_config = streamk_gemm_code.replace("streamk_gemm", f"streamk_gemm_{configStr}")
         streamk_gemm_config = streamk_gemm_config.replace("import triton.language as tl", "")
@@ -279,7 +282,8 @@ from tune_streamk import gen_input
     # warm up call of all matmul functions in parallel
     idx = 0
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
+        EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
         task_str = f"        results += [thread_pool.apply_async(try_config_{configStr}, args=task_args)]\n" + \
                    f"        config_names += ['{configStr}']\n"
         f_kernel[idx % jobs].write(task_str)
@@ -310,7 +314,8 @@ from tune_streamk import gen_input
     idx = 0
     runs = iters if run_bench else 200
     for config in configs:
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
+        EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
         matmul_call_str = f"""
         if '{configStr}' not in failed_configs:
             for i in range({runs}):
@@ -341,8 +346,8 @@ def main():
         f_kernel[fi].close()
 
 
-def extract_kernel_time(M, N, K, num_sms, config, df):
-    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, config, None, None, None, None, None)
+def extract_kernel_time(M, N, K, num_sms, EVEN_K, config, df):
+    configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
     df = df[df['KernelName'].str.contains(configStr)]
     meanTime = df['DurationNs'].tail(100).mean()
     return config, meanTime
@@ -399,8 +404,9 @@ def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     idx = 0
     df_prof = [pd.read_csv(f"results-{i}.csv") for i in range(jobs)]
     for config in configs:
+        EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
         file_idx = idx % jobs
-        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, num_sms, config, df_prof[file_idx]))]
+        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, num_sms, EVEN_K, config, df_prof[file_idx]))]
         idx += 1
     thread_pool.close()
     thread_pool.join()
@@ -468,7 +474,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
 
     return input, input_f16
 
-def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack):
+def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     #assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -495,7 +501,8 @@ def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_
         num_stages=num_stages,
         waves_per_eu=waves_per_eu,
         matrix_instr_nonkdim = mfmaInstrSize,
-        kpack = kpack
+        kpack = kpack,
+        EVEN_K = EVEN_K
     )
     return c
 
@@ -508,8 +515,9 @@ def test_correctness(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     a, a_fp16 = gen_input(M, K, dtype_a, col_a, 1, init_type, device='cuda')
     b, b_fp16 = gen_input(K, N, dtype_b, col_b, 2, init_type, device='cuda')
     # Allocates output.
+    EVEN_K = K % block_k == 0
     c = torch.zeros((M, N), device=a.device, dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
-    triton_output = matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack)
+    triton_output = matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K)
     torch_output = torch.matmul(a_fp16, b_fp16)
     # print(f"triton_output={triton_output}")
     # print(f"torch_output={torch_output}")
@@ -727,6 +735,7 @@ def main():
                 run_bench, jobs, iters, skipWarmup, num_threads=args.num_threads, gpus=gpus,
                 verbose=verbose_level)
 
+        EVEN_K = True if K % bestConfig.get('BLOCK_SIZE_K') == 0 else False
         # post processing the numbers
         perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us * 1e-6)
         tri_tflops = perf_tflops(minTime)
@@ -735,7 +744,7 @@ def main():
         if not run_bench:
             print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ", flush=True)
 
-        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, bestConfig, None, None, None, None, None)
+        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, bestConfig, None, None, None, None, None)
         if not run_bench:
             print(f'best_config: {bestConfig_compact_str}', end=" ", flush=True)
 

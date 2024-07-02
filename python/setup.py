@@ -222,8 +222,8 @@ def get_thirdparty_packages(packages: list):
         version_file_path = os.path.join(package_dir, "version.txt")
         if p.syspath_var_name not in os.environ and\
            (not os.path.exists(version_file_path) or Path(version_file_path).read_text() != p.url):
-            with contextlib.suppress(Exception):
-                shutil.rmtree(package_root_dir)
+            # with contextlib.suppress(Exception):
+            #     shutil.rmtree(package_root_dir)
             os.makedirs(package_root_dir, exist_ok=True)
             print(f'downloading and extracting {p.url} ...')
             with open_url(p.url) as response:

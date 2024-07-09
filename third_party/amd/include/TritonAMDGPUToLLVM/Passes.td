@@ -43,4 +43,16 @@ def ConvertBuiltinFuncToLLVM : Pass<"convert-builtin-func-to-llvm", "mlir::Modul
 
 }
 
+def ScheduleOps : Pass<"schedule-amd-ops", "mlir::ModuleOp"> {
+    let summary = "Inserts scheduling intrinsic functions into MLIR::LLVM code";
+    let constructor = "mlir::triton::createSchedulingOpsPass(/*mode=*/0)";
+
+    let options = [
+        Option<"mode", "mode", "int", /*default*/"0",
+               "iglp mode">,
+    ];
+
+    let dependentDialects = ["mlir::LLVM::LLVMDialect"];
+}
+
 #endif

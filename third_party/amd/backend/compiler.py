@@ -9,6 +9,7 @@ import re
 import subprocess
 import functools
 from pathlib import Path
+import os
 
 
 @dataclass(frozen=True)
@@ -184,6 +185,18 @@ class HIPBackend(BaseBackend):
         # involves using MUBUF instructions that have built-in out-of-bounds checks, which would eliminate the need
         # for conditional branching around memory accesses.
         amd.passes.ttgpuir.add_builtin_func_to_llvmir(pm)
+
+        if "AMD_ADD_IGLP_OP" in os.environ.keys():
+            try:
+                mode = int(os.environ['AMD_ADD_IGLP_OP'])
+            except ValueError:
+                raise RuntimeError('`AMD_ADD_IGLP_OP` variable must be an integer value')
+            if mode == 0 or mode == 1:
+                # this pass applies `iglp ops` in each basic block which contains MFMA instructions
+                amd.passes.ttgpuir.add_scheduling_ops_pass(pm, mode)
+            else:
+                raise RuntimeError('`AMD_ADD_IGLP_OP` must be equal to `0` or `1`')
+
         pm.run(mod)
 
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)

@@ -96,7 +96,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     SmallVector<unsigned> sizePerThread(refTensorType.getRank(), 1);
     sizePerThread[order[0]] = perThread;
     if (notTransposed)
-      sizePerThread[order[1]] = 4;
+      sizePerThread[order[1]] = 2;
     llvm::outs() << "sizePerThread: " << sizePerThread[0] << " " << sizePerThread[1] << "\n";
 
     auto CTALayout = triton::gpu::getCTALayout(refTensorType.getEncoding());

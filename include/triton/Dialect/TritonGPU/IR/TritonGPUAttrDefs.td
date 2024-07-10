@@ -307,7 +307,9 @@ compared to 1*64 when the hasLeadingOffset is false.
           } else {
             // Do not swizzle in case k dimension is not innermost.
             // In this case accesses will go in different banks even without swizzling.
-            return get(context, 4, 1, 8, order, CTALayout);
+            SmallVector<unsigned int> newOrder(order);
+            std::swap(newOrder[0], newOrder[1]);
+            return get(context, 2, 1, 16, newOrder, CTALayout);
           }
         }
 

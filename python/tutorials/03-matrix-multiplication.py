@@ -155,6 +155,8 @@ import torch
 import triton
 import triton.language as tl
 
+torch.set_printoptions(sci_mode=False, linewidth=5000, threshold=20000)
+size = 128
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
 #   - A list of `triton.Config` objects that define different configurations of
@@ -163,8 +165,8 @@ import triton.language as tl
 #       provided configs
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8, 'kpack': 1}, num_stages=1,
-                      num_warps=8),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 4, 'kpack': 1}, num_stages=1,
+                      num_warps=4),
         # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
         #               num_warps=4),
         # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
@@ -316,18 +318,30 @@ def matmul(a, b, activation=""):
 #
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
 
-# torch.manual_seed(0)
+torch.manual_seed(0)
 # a = torch.randn((4096, 4096), device='cuda', dtype=torch.float16)
 # b = torch.randn((4096, 4096), device='cuda', dtype=torch.float16)
-# # b = b.T
-# triton_output = matmul(a, b)
-# torch_output = torch.matmul(a, b)
+# a = torch.ones((128, 64), device='cuda', dtype=torch.float16)
+a = torch.eye(size, device='cuda', dtype=torch.float16)
+b = torch.arange(size*size, device='cuda').reshape((size, size)).to(torch.float16)
+print("A stride:", a.stride())
+print("B stride:", b.stride())
+# b = b.T
+triton_output = matmul(a, b)
+torch_output = torch.matmul(a, b)
 # print(f"triton_output_with_fp16_inputs={triton_output}")
 # print(f"torch_output_with_fp16_inputs={torch_output}")
-# if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0):
-#     print("✅ Triton and Torch match")
-# else:
-#     print("❌ Triton and Torch differ")
+if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0):
+    print("✅ Triton and Torch match")
+else:
+    print("❌ Triton and Torch differ")
+    print("triton_output")
+    print(triton_output)
+    print("torch_output")
+    print(torch_output)
+    print("diff")
+    print(triton_output - torch_output)
+torch.testing.assert_close(triton_output, torch_output, atol=0.125, rtol=0)
 
 TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2") and False
 if TORCH_HAS_FP8:
@@ -399,4 +413,4 @@ def benchmark(M, N, K, provider, fp8_inputs):
     return perf(ms), perf(max_ms), perf(min_ms)
 
 
-benchmark.run(show_plots=False, print_data=True)
+# benchmark.run(show_plots=False, print_data=True)

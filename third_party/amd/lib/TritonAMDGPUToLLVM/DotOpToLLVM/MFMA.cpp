@@ -38,20 +38,25 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 using ValueTable = std::map<std::array<int, 3>, Value>;
 
+enum class SchedulingOptionsEnum { IGLP_OPT_0 = 0, IGLP_OPT_1 = 1, NONE_SCHED };
+
 struct DotOpMFMAConversionHelper {
   AMDMfmaEncodingAttr mfmaLayout;
 
   ConversionPatternRewriter &rewriter;
   const LLVMTypeConverter *typeConverter;
+  SchedulingOptionsEnum schedMode;
   Location loc;
   MLIRContext *ctx{};
 
   explicit DotOpMFMAConversionHelper(AMDMfmaEncodingAttr mfmaLayout,
                                      ConversionPatternRewriter &rewriter,
                                      const LLVMTypeConverter *typeConverter,
+                                     SchedulingOptionsEnum schedMode,
                                      Location loc)
       : mfmaLayout(mfmaLayout), rewriter(rewriter),
-        typeConverter(typeConverter), loc(loc), ctx(mfmaLayout.getContext()) {}
+        typeConverter(typeConverter), schedMode(schedMode), loc(loc),
+        ctx(mfmaLayout.getContext()) {}
 
   Value getThreadId() const {
     auto llvmIndexTy = typeConverter->getIndexType();
@@ -68,6 +73,19 @@ struct DotOpMFMAConversionHelper {
     loweredOp.addTypes(resType);
     loweredOp.addOperands({valA, valB, valC, zeroFlag, zeroFlag, zeroFlag});
     return rewriter.create(loweredOp)->getResult(0);
+  }
+
+  void generatedIglpIntrinsic() const {
+    if (schedMode == SchedulingOptionsEnum::NONE_SCHED)
+      return;
+    auto intrinsicName = StringAttr::get(ctx, "llvm.amdgcn.iglp.opt");
+    LLVM::FastmathFlagsAttr defaultFlags{};
+    Type i32 = rewriter.getI32Type();
+
+    auto option = rewriter.create<LLVM::ConstantOp>(
+        loc, rewriter.getIntegerAttr(i32, static_cast<int>(schedMode)));
+    rewriter.create<LLVM::CallIntrinsicOp>(loc, TypeRange{}, intrinsicName,
+                                           ValueRange{option}, defaultFlags);
   }
 
   int getNumSubmatrices(Type elementType, int mDim, int nDim) const {
@@ -170,6 +188,8 @@ struct DotOpMFMAConversionHelper {
     auto mfmaVersion = mfmaLayout.getVersionMajor();
     assert((mDim == nDim && (mDim == 32 || mDim == 16 || mDim == 4)) ||
            (mDim == 64 && nDim == 4) || (mDim == 4 && nDim == 64));
+
+    generatedIglpIntrinsic();
 
     Value a = op.getA();
     Value b = op.getB();
@@ -351,13 +371,13 @@ struct DotOpMFMAConversionHelper {
     return dotOpVals;
   }
 };
-
 } // namespace
 
 namespace mlir::triton::AMD {
 LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
                           const LLVMTypeConverter *typeConverter,
-                          ConversionPatternRewriter &rewriter) {
+                          ConversionPatternRewriter &rewriter,
+                          StringRef schedMode) {
   auto rankedTType = [](Value tensor) {
     return cast<RankedTensorType>(tensor.getType());
   };
@@ -375,11 +395,19 @@ LogicalResult convertMFMA(triton::DotOp op, triton::DotOp::Adaptor adaptor,
          cTensorTy.getShape()[1] == dTensorTy.getShape()[1] &&
          "DotOp's $c operand should pass the same number of values as $d");
 
+  static const DenseMap<StringRef, SchedulingOptionsEnum> schedModesToEnum = {
+      {"iglp-opt-0", SchedulingOptionsEnum::IGLP_OPT_0},
+      {"iglp-opt-1", SchedulingOptionsEnum::IGLP_OPT_1},
+      {"", SchedulingOptionsEnum::NONE_SCHED}};
+  assert(schedModesToEnum.contains(schedMode) &&
+         "sched mode must be in the allowed set");
+
   auto loc = op.getLoc();
   auto mfmaLayout = cast<AMDMfmaEncodingAttr>(
       cast<RankedTensorType>(op.getResult().getType()).getEncoding());
 
-  DotOpMFMAConversionHelper helper(mfmaLayout, rewriter, typeConverter, loc);
+  DotOpMFMAConversionHelper helper(mfmaLayout, rewriter, typeConverter,
+                                   schedModesToEnum.at(schedMode), loc);
 
   return helper.convertDot(op, adaptor);
 }

@@ -1263,8 +1263,9 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
         unsigned cst =
             _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
         unsigned key = cst % (outVec * maxPhase);
-        cacheCol.insert({key, idxCol});
+        auto cacheRet = cacheCol.insert({key, idxCol});
         idxCol = cacheCol[key];
+        LDBG("cst for idxCol: " << cst << " key:" << key << " first time? " << cacheRet.second);
         immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
       }
     }
@@ -1274,8 +1275,9 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
         unsigned cst =
             _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
         unsigned key = cst % (perPhase * maxPhase);
-        cacheRow.insert({key, idxRow});
+        auto cacheRet = cacheRow.insert({key, idxRow});
         idxRow = cacheRow[key];
+        LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
         immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
       }
     }
@@ -1329,6 +1331,8 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
   LDBG("srcShape " << srcShape[0] << " " << srcShape[1]);
   LDBG("srcShapePerCTA " << srcShapePerCTA[0] << " " << srcShapePerCTA[1]);
   unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
+  auto numElemsPerThread = triton::gpu::getElemsPerThread(srcTy);
+  LDBG("numElemsPerThread: " << numElemsPerThread[0] << " " << numElemsPerThread[1]);
   LDBG("numElems " << numElems);
   // swizzling params as described in TritonGPUAttrDefs.td
   // inVec is (2, 8) and 2, outVec is 2
@@ -1346,7 +1350,29 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
   // Tensor indices held by the current thread, as LLVM values
   auto srcIndices =
       emitIndices(loc, rewriter, target, srcEncoding, srcTy, false);
+  // Swizzling with leading offsets (e.g. Hopper GMMA)
+  unsigned swizzlingByteWidth = 0;
+  if (resSharedLayout.getHasLeadingOffset()) {
+    if (perPhase == 4 && maxPhase == 2)
+      swizzlingByteWidth = 32;
+    else if (perPhase == 2 && maxPhase == 4)
+      swizzlingByteWidth = 64;
+    else if (perPhase == 1 && maxPhase == 8)
+      swizzlingByteWidth = 128;
+    else
+      llvm::report_fatal_error("Unsupported shared layout.");
+  }
+  unsigned numElemsPerSwizzlingRow =
+      swizzlingByteWidth * 8 / resElemTy.getIntOrFloatBitWidth();
+  Value numElemsPerSwizzlingRowVal = i32_val(numElemsPerSwizzlingRow);
+  unsigned leadingDimOffset;
+  if (outOrder.size() >= 2) {
+    leadingDimOffset = numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+  } else {
+    leadingDimOffset = numElemsPerSwizzlingRow;
+  }
 
+  Value leadingDimOffsetVal = i32_val(leadingDimOffset);
   // Return values
   DenseMap<unsigned, Value> ret;
   // cache for non-immediate offsets
@@ -1356,7 +1382,7 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
   // input order is
   Value strideRow = outOrder.size() >= 2 ? srcStrides[outOrder[1]] : i32_val(0);
   Value strideCol = srcStrides[outOrder[0]];
-  LDBG("getSwizzledSharedPtrs23: perPhase = "
+  LDBG("getSwizzledSharedPtrs2: perPhase = "
        << perPhase << " maxPhase = " << maxPhase << " minVec = " << minVec
        << " inVec = " << inVec << " outVec = " << outVec << " strideRow "
        << strideRow << " strideCol " << strideCol);
@@ -1364,14 +1390,21 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
   // they will correspond to the 1st col in the LDS after transpose. The 2nd
   // row will become the 2nd part in the outVec
   auto vecSize = sizePerThread[0];  // 2, cuz sizePerThread is (2, 8)
-  auto numGroups = numElems / vecSize;
-  for (unsigned elemIdx = 0; elemIdx < numGroups; ++elemIdx) {
-    auto srcIdx = elemIdx%sizePerThread[1] + elemIdx/sizePerThread[1]*numGroups;
-    LDBG("srcIdx: " << srcIdx);
+  auto numElemPerThreadPerIter = product(sizePerThread);
+  for (unsigned elemIdx = 0; elemIdx < numElems/vecSize; ++elemIdx) {
+    auto srcIdx = elemIdx%sizePerThread[1] + elemIdx/sizePerThread[1]*numElemPerThreadPerIter;
+    // LDBG("elemIdx, srcIdx: " << elemIdx << " " << srcIdx);
     Value offset = i32_val(0);
     // Extract multi dimensional index for current element
     auto idx = srcIndices[srcIdx];
     // swapped idxCol, idxRow from the original
+    // Value idxCol = idx[outOrder[0]]; // contiguous dimension
+    // Value idxRow;
+    // if (outOrder.size() >= 2) {
+    //   idxRow = idx[outOrder[1]]; // discontiguous dimension
+    // } else {
+    //   idxRow = i32_val(0);
+    // }
     Value idxRow = idx[inOrder[0]]; // contiguous dimension
     Value idxCol;
     if (inOrder.size() >= 2) {
@@ -1384,15 +1417,23 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
     // extract dynamic/static offset for immediate offsetting
     unsigned immedateOffCol = 0;
     unsigned immedateOffRow = 0;
+    if (leadingDimOffset) {
+      // hopper
+      offset =
+          mul(udiv(idxCol, numElemsPerSwizzlingRowVal), leadingDimOffsetVal);
+      // Shrink by swizzling blocks
+      idxCol = urem(idxCol, numElemsPerSwizzlingRowVal);
+      strideRow = numElemsPerSwizzlingRowVal;
+    }
     if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
       if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
               add.getRhs().getDefiningOp())) {
         unsigned cst =
             _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
         unsigned key = cst % (outVec * maxPhase);
-        cacheCol.insert({key, idxRow});
-        idxRow = cacheCol[key];
-        // LDBG("cst for immedateOffCol: " << cst);
+        auto cacheRet = cacheRow.insert({key, idxRow});
+        LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
+        idxRow = cacheRow[key];
         immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
       }
     }
@@ -1402,13 +1443,12 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
         unsigned cst =
             _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
         unsigned key = cst % (perPhase * maxPhase);
-        cacheRow.insert({key, idxCol});
-        idxCol = cacheRow[key];
-        // LDBG("cst for immedateOffRow: " << cst);
+        auto cacheRet = cacheCol.insert({key, idxCol});
+        LDBG("cst for idxCol: " << cst << " key:" << key  << " first time? " << cacheRet.second);
+        idxCol = cacheCol[key];
         immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
       }
     }
-    LDBG("immedateOffRow " << immedateOffRow << " immedateOffCol " << immedateOffCol);
     // row offset is simply row index
     Value rowOff = mul(idxRow, strideRow);
     // because swizzling happens at a granularity of outVec, we need to
@@ -1430,10 +1470,11 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
     Value immediateOff;
     if (inOrder.size() >= 2) {
       immediateOff =
-          add(mul(i32_val(immedateOffRow), strideRow), i32_val(immedateOffCol));
+          add(mul(i32_val(immedateOffCol), strideRow), i32_val(immedateOffRow));
     } else {
-      immediateOff = i32_val(immedateOffCol);
+      immediateOff = i32_val(immedateOffRow);
     }
+    LDBG("immedateOffRow " << immedateOffRow << " immedateOffCol " << immedateOffCol << " immediateOff " << immedateOffCol*64+immedateOffRow);
 
     ret[elemIdx] = gep(dstPtrTy, resElemTy, currPtr, immediateOff);
   }
@@ -1514,6 +1555,8 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
   auto sizePerThread = srcDistributedLayout.cast<BlockedEncodingAttr>().getSizePerThread();
   LDBG("");
   LDBG("sizePerThread: " << sizePerThread[0] << " " << sizePerThread[1]);
+  auto shapesPerCTATile = triton::gpu::getShapePerCTATile(srcDistributedLayout);
+  LDBG("shapesPerCTATile: " << shapesPerCTATile[0] << " " << shapesPerCTATile[1]);
 
   auto dstSharedLayout =
       dstTy.getEncoding().cast<triton::gpu::SharedEncodingAttr>();
@@ -1556,9 +1599,9 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
     DenseMap<unsigned, Value> sharedPtrs =
         getSwizzledSharedPtrs(loc, target, inVec, srcTy, dstSharedLayout, elemTy,
                               smemObj, rewriter, offsetVals, srcStrides);
-    LDBG("sharedPtrs size: " << sharedPtrs.size());
-    LDBG("storeDistributedToShared: numElems = " << numElems << " minVec = "
-                                                << minVec << " " << wordTy);
+    // LDBG("sharedPtrs size: " << sharedPtrs.size());
+    // LDBG("storeDistributedToShared: numElems = " << numElems << " minVec = "
+    //                                             << minVec << " " << wordTy);
     for (unsigned i = 0; i < numElems; ++i) {
       if (i % minVec == 0)
         word = undef(wordTy);
@@ -1589,12 +1632,14 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
     // TODO: there's a conflict btw vecSize & minVec
     auto vecSize = sizePerThread[0];  // 2, cuz sizePerThread is (2, 8)
     auto numGroups = numElems / vecSize;
+    auto numElemPerThreadPerIter = product(sizePerThread);
+    LDBG("numGroups: " << numGroups << "; vecSize: " << vecSize);
     // outer loop iterates over each element in the global_load (0, 7)
     for (unsigned i = 0; i < numGroups; ++i) {
       // inner loop iterates over # of global_load
       for (unsigned j = 0; j < vecSize; ++j) {
         //         increment by 8;      increment by 1;      increment by 16
-        auto idx = j*sizePerThread[1] + i%sizePerThread[1] + i/sizePerThread[1]*numGroups;
+        auto idx = j*sizePerThread[1] + i%sizePerThread[1] + i/sizePerThread[1]*numElemPerThreadPerIter;
         // idx = 0,  8,  1,  9,  2,  10, ..., 7,  15,
         //       16, 24, 17, 25, 18, 26, ..., 23, 31
         // LDBG("i,j,idx: " << i << " " << j << " " << idx);

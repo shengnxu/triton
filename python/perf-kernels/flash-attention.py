@@ -335,8 +335,8 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
              BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr, PRE_LOAD_V: tl.constexpr, USE_BIAS: tl.constexpr,
              ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr, USE_ALIBI: tl.constexpr):
     start_m = tl.program_id(0)
-    off_h_q = tl.program_id(1)
-    off_z = tl.program_id(2)
+    off_h_q = tl.program_id(1) # <-- number of heads
+    off_z = tl.program_id(2) # <-- batch dim
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, BLOCK_DMODEL)
@@ -883,11 +883,20 @@ class _attention(torch.autograd.Function):
         batch, nheads_q, nheads_k, head_size = get_shape_from_layout(q, k, metadata)
         q_strides, k_strides, v_strides, o_strides = get_strides_from_layout(q, k, v, o, metadata)
 
+
+        print("")
+        print("")
+
+        print(f"{batch=}, {nheads_q=}, {nheads_k=}, {head_size=}")
+
         # Get closest power of 2 over or equal to 32.
         padded_d_model = 1 << (head_size - 1).bit_length()
+
+        print(f"{padded_d_model=}, {metadata.max_seqlens_q=}")
         # Smallest head_dim supported is 16. If smaller, the tile in the
         # kernel is padded - there is no padding in memory for any dims.
         padded_d_model = max(padded_d_model, 16)
+
 
         grid = lambda META: (triton.cdiv(metadata.max_seqlens_q, META['BLOCK_M']), nheads_q, batch)
 
@@ -1044,25 +1053,39 @@ def input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout):
 def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlens=False):
     torch.manual_seed(20)
 
+    print(f"varlen_input_helper !!! {equal_seqlens=} {Z=}")
+
     # Random sequence lengths. Using N_CTX as kind of max of sum of individual seqs
     if not equal_seqlens:
         max_seqlens_q = N_CTX_Q // Z
         max_seqlens_k = N_CTX_K // Z
+        print(f"randomly generating seqlen q and k: {max_seqlens_q=}, {max_seqlens_k=}")
         seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z, ), dtype=torch.int32)
         seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z, ), dtype=torch.int32)
     else:
         seqlens_q = torch.full((Z, ), N_CTX_Q // Z)
         seqlens_k = torch.full((Z, ), N_CTX_K // Z)
 
+    print(f"{seqlens_q=}")
+    print(f"{seqlens_k=}")
+
     # Calculate cumulative sequence lengths
     cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_q.cumsum(dim=0, dtype=torch.int32)])
     cu_seqlens_k = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_k.cumsum(dim=0, dtype=torch.int32)])
+
+
+    print(f"{cu_seqlens_q=}")
+    print(f"{cu_seqlens_k=}")
+
     cu_seqlens_q = cu_seqlens_q.to(device="cuda")
     cu_seqlens_k = cu_seqlens_k.to(device="cuda")
 
     # Initialize q, k, v with variable lengths
     total_q = cu_seqlens_q[-1].item()
     total_k = cu_seqlens_k[-1].item()
+
+    print(f"{total_q=}")
+    print(f"{total_k=}")
     q = torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     k = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
     v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_()
@@ -1381,21 +1404,23 @@ def nonvarlen_benchmark_configs():
 def varlen_benchmark_configs():
     configs = [
         (2, 16, 4, 1024, 1024),
-        (8, 16, 2, 2048, 2048),
-        (4, 16, 8, 4096, 4096),
-        (2, 16, 4, 8192, 8192),
-        (2, 16, 8, 16384, 16384),
-        (2, 48, 12, 1024, 1024),
-        (2, 48, 24, 2048, 2048),
-        (2, 48, 8, 4096, 4096),
-        (2, 48, 4, 8192, 8192),
-        (2, 48, 2, 16384, 16384),
-        (2, 64, 32, 1024, 1024),
-        (4, 64, 16, 2048, 2048),
-        (4, 64, 8, 4096, 4096),
-        (4, 64, 32, 8192, 8192),
-        (4, 128, 16, 16384, 16384),
+        #(8, 16, 2, 2048, 2048),
+        #(4, 16, 8, 4096, 4096),
+        #(2, 16, 4, 8192, 8192),
+        #(2, 16, 8, 16384, 16384),
+        #(2, 48, 12, 1024, 1024),
+        #(2, 48, 24, 2048, 2048),
+        #(2, 48, 8, 4096, 4096),
+        #(2, 48, 4, 8192, 8192),
+        #(2, 48, 2, 16384, 16384),
+        #(2, 64, 32, 1024, 1024),
+        #(4, 64, 16, 2048, 2048),
+        #(4, 64, 8, 4096, 4096),
+        #(4, 64, 32, 8192, 8192),
+        #(4, 128, 16, 16384, 16384),
     ]
+
+    print(f"generated varlen_benchmark_configs: {configs=}")
     return configs
 
 
@@ -1462,6 +1487,11 @@ def run_benchmark(custom, args):
             o, _ = fn()
             do = torch.randn_like(o)
             fn = lambda: o.backward(do, retain_graph=True)
+
+        fn()
+
+        exit(0)
+
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
         total_flops = 2 * flops_per_matmul
         # TODO: This needs to be fixed for unequal Q/K seqlens
@@ -1515,6 +1545,9 @@ def main():
     custom_config = False
     assert args.layout == 'thd' or not args.equal_seqlens, \
            "Equal sequence lengths arg must be used with the thd layout."
+
+    print(f"{args.layout=}, {args.equal_seqlens=}")
+
     if args.b or args.hq or args.hk or args.sq or args.sk or args.d:
         custom_config = True
         assert args.b and args.hq and args.sq and args.d, \

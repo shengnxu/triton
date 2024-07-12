@@ -155,8 +155,8 @@ import torch
 import triton
 import triton.language as tl
 
-torch.set_printoptions(sci_mode=False, linewidth=5000, threshold=20000)
-size = 128
+torch.set_printoptions(sci_mode=False, linewidth=5000, threshold=5000, profile='short')
+size = 64
 
 # `triton.jit`'ed functions can be auto-tuned by using the `triton.autotune` decorator, which consumes:
 #   - A list of `triton.Config` objects that define different configurations of
@@ -165,8 +165,8 @@ size = 128
 #       provided configs
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 4, 'kpack': 1}, num_stages=1,
-                      num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': size, 'BLOCK_SIZE_N': size, 'BLOCK_SIZE_K': size, 'GROUP_SIZE_M': 4, 'kpack': 1}, num_stages=1,
+                      num_warps=1),
         # triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
         #               num_warps=4),
         # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
@@ -321,9 +321,11 @@ def matmul(a, b, activation=""):
 torch.manual_seed(0)
 # a = torch.randn((4096, 4096), device='cuda', dtype=torch.float16)
 # b = torch.randn((4096, 4096), device='cuda', dtype=torch.float16)
-# a = torch.ones((128, 64), device='cuda', dtype=torch.float16)
 a = torch.eye(size, device='cuda', dtype=torch.float16)
 b = torch.arange(size*size, device='cuda').reshape((size, size)).to(torch.float16)
+aux = torch.complex(torch.arange(size)[:, None]*torch.ones((size, size)), torch.arange(size)[None, :]*torch.ones((size, size))).to(device='cuda')
+# a = torch.concat((torch.eye(size, device='cuda', dtype=torch.float16), torch.eye(size, device='cuda', dtype=torch.float16)), dim=1)
+# b = torch.arange(size*2*size, device='cuda').reshape((size*2, size)).to(torch.float16)
 print("A stride:", a.stride())
 print("B stride:", b.stride())
 # b = b.T
@@ -335,12 +337,12 @@ if torch.allclose(triton_output, torch_output, atol=1e-2, rtol=0):
     print("✅ Triton and Torch match")
 else:
     print("❌ Triton and Torch differ")
-    print("triton_output")
-    print(triton_output)
-    print("torch_output")
-    print(torch_output)
-    print("diff")
-    print(triton_output - torch_output)
+    # print("triton_output")
+    # print(triton_output)
+    # # print("torch_output")
+    # # print(torch_output)
+    # print("diff")
+    # print(torch.where(triton_output==torch_output, 0, aux))
 torch.testing.assert_close(triton_output, torch_output, atol=0.125, rtol=0)
 
 TORCH_HAS_FP8 = hasattr(torch, "float8_e5m2") and False

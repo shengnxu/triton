@@ -1405,59 +1405,59 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
     // } else {
     //   idxRow = i32_val(0);
     // }
-    Value idxRow = idx[inOrder[0]]; // contiguous dimension
-    Value idxCol;
+    Value idxCol = idx[inOrder[0]]; // contiguous dimension
+    Value idxRow;
     if (inOrder.size() >= 2) {
-      idxCol = idx[inOrder[1]]; // discontiguous dimension
+      idxRow = idx[inOrder[1]]; // discontiguous dimension
     } else {
-      idxCol = i32_val(0);
+      idxRow = i32_val(0);
     }
     // compute phase = (row // perPhase) % maxPhase
-    Value phase = urem(udiv(idxRow, i32_val(perPhase)), i32_val(maxPhase));
+    Value phase = urem(udiv(idxCol, i32_val(perPhase)), i32_val(maxPhase));
     // extract dynamic/static offset for immediate offsetting
     unsigned immedateOffCol = 0;
     unsigned immedateOffRow = 0;
     if (leadingDimOffset) {
       // hopper
       offset =
-          mul(udiv(idxCol, numElemsPerSwizzlingRowVal), leadingDimOffsetVal);
+          mul(udiv(idxRow, numElemsPerSwizzlingRowVal), leadingDimOffsetVal);
       // Shrink by swizzling blocks
-      idxCol = urem(idxCol, numElemsPerSwizzlingRowVal);
+      idxRow = urem(idxRow, numElemsPerSwizzlingRowVal);
       strideRow = numElemsPerSwizzlingRowVal;
-    }
-    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
-      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
-              add.getRhs().getDefiningOp())) {
-        unsigned cst =
-            _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
-        unsigned key = cst % (outVec * maxPhase);
-        auto cacheRet = cacheRow.insert({key, idxRow});
-        LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
-        idxRow = cacheRow[key];
-        immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
-      }
     }
     if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxCol.getDefiningOp())) {
       if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
               add.getRhs().getDefiningOp())) {
         unsigned cst =
             _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
-        unsigned key = cst % (perPhase * maxPhase);
-        auto cacheRet = cacheCol.insert({key, idxCol});
+        unsigned key = cst % (outVec * maxPhase);
+        auto cacheRet = cacheRow.insert({key, idxCol});
         LDBG("cst for idxCol: " << cst << " key:" << key  << " first time? " << cacheRet.second);
-        idxCol = cacheCol[key];
+        idxCol = cacheRow[key];
+        immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
+      }
+    }
+    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
+      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
+              add.getRhs().getDefiningOp())) {
+        unsigned cst =
+            _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
+        unsigned key = cst % (perPhase * maxPhase);
+        auto cacheRet = cacheCol.insert({key, idxRow});
+        LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
+        idxRow = cacheCol[key];
         immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
       }
     }
     // row offset is simply row index
-    Value rowOff = mul(idxRow, strideRow);
+    Value rowOff = mul(idxCol, strideRow);
     // because swizzling happens at a granularity of outVec, we need to
     // decompose the offset into a swizzled factor and a non-swizzled
     // (ordered) factor: colOffSwizzled = ((col // outVec) ^ phase) * outVec
     // colOffOrdered = (col % outVec) // minVec * minVec
-    Value colOffSwizzled = xor_(udiv(idxCol, i32_val(outVec)), phase);
+    Value colOffSwizzled = xor_(udiv(idxRow, i32_val(outVec)), phase);
     colOffSwizzled = mul(colOffSwizzled, i32_val(outVec));
-    Value colOffOrdered = urem(idxCol, i32_val(outVec));
+    Value colOffOrdered = urem(idxRow, i32_val(outVec));
     colOffOrdered = udiv(colOffOrdered, i32_val(minVec));
     colOffOrdered = mul(colOffOrdered, i32_val(minVec));
     Value colOff = add(colOffSwizzled, colOffOrdered);

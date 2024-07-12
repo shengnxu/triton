@@ -1425,30 +1425,30 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
       idxRow = urem(idxRow, numElemsPerSwizzlingRowVal);
       strideRow = numElemsPerSwizzlingRowVal;
     }
-    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxCol.getDefiningOp())) {
-      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
-              add.getRhs().getDefiningOp())) {
-        unsigned cst =
-            _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
-        unsigned key = cst % (outVec * maxPhase);
-        auto cacheRet = cacheRow.insert({key, idxCol});
-        LDBG("cst for idxCol: " << cst << " key:" << key  << " first time? " << cacheRet.second);
-        idxCol = cacheRow[key];
-        immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
-      }
-    }
-    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
-      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
-              add.getRhs().getDefiningOp())) {
-        unsigned cst =
-            _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
-        unsigned key = cst % (perPhase * maxPhase);
-        auto cacheRet = cacheCol.insert({key, idxRow});
-        LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
-        idxRow = cacheCol[key];
-        immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
-      }
-    }
+    // if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxCol.getDefiningOp())) {
+    //   if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
+    //           add.getRhs().getDefiningOp())) {
+    //     unsigned cst =
+    //         _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
+    //     unsigned key = cst % (outVec * maxPhase);
+    //     auto cacheRet = cacheRow.insert({key, idxCol});
+    //     LDBG("cst for idxCol: " << cst << " key:" << key  << " first time? " << cacheRet.second);
+    //     idxCol = cacheRow[key];
+    //     immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
+    //   }
+    // }
+    // if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
+    //   if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
+    //           add.getRhs().getDefiningOp())) {
+    //     unsigned cst =
+    //         _cst.getValue().cast<IntegerAttr>().getValue().getSExtValue();
+    //     unsigned key = cst % (perPhase * maxPhase);
+    //     auto cacheRet = cacheCol.insert({key, idxRow});
+    //     LDBG("cst for idxRow: " << cst << " key:" << key  << " first time? " << cacheRet.second);
+    //     idxRow = cacheCol[key];
+    //     immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
+    //   }
+    // }
     // row offset is simply row index
     Value rowOff = mul(idxCol, strideRow);
     // because swizzling happens at a granularity of outVec, we need to
@@ -1465,18 +1465,19 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs2(
     if (inOrder.size() == 3)
       offset = add(offset, mul(idx[inOrder[2]], srcStrides[inOrder[2]]));
     offset = add(offset, add(rowOff, mul(colOff, strideCol)));
-    Value currPtr = gep(dstPtrTy, resElemTy, dstPtrBase, offset);
-    // compute immediate offset
-    Value immediateOff;
-    if (inOrder.size() >= 2) {
-      immediateOff =
-          add(mul(i32_val(immedateOffCol), strideRow), i32_val(immedateOffRow));
-    } else {
-      immediateOff = i32_val(immedateOffRow);
-    }
-    LDBG("immedateOffRow " << immedateOffRow << " immedateOffCol " << immedateOffCol << " immediateOff " << immedateOffCol*64+immedateOffRow);
+    // Value currPtr = gep(dstPtrTy, resElemTy, dstPtrBase, offset);
+    // // compute immediate offset
+    // Value immediateOff;
+    // if (inOrder.size() >= 2) {
+    //   immediateOff =
+    //       add(mul(i32_val(immedateOffCol), strideRow), i32_val(immedateOffRow));
+    // } else {
+    //   immediateOff = i32_val(immedateOffRow);
+    // }
+    // LDBG("immedateOffRow " << immedateOffRow << " immedateOffCol " << immedateOffCol << " immediateOff " << immedateOffCol*64+immedateOffRow);
 
-    ret[elemIdx] = gep(dstPtrTy, resElemTy, currPtr, immediateOff);
+    // ret[elemIdx] = gep(dstPtrTy, resElemTy, currPtr, immediateOff);
+    ret[elemIdx] = gep(dstPtrTy, resElemTy, dstPtrBase, offset);
   }
   return ret;
 }

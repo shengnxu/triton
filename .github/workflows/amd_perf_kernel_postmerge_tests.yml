@@ -1,4 +1,4 @@
-name: AMD Perf Kernel Post Merge Tests
+name: AMD Perf Kernel Post-Merge Tests
 
 on:
   workflow_dispatch:
@@ -58,7 +58,7 @@ jobs:
       - name: Rebase onto upstream/main
         run: |
           git config --global user.email "ci@amd.com"
-          git config --global user.name "Github Actions Post Merge CI Script"
+          git config --global user.name "Github Actions Post-Merge CI Script"
           git rebase upstream/main || { echo "Rebase failed"; exit 1; }
       - name: Show Git Log
         run: |

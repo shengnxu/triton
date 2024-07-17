@@ -393,7 +393,8 @@ def main():
 
 def extract_kernel_time(M, N, K, config, df, bias_size):
     # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
-    # once the bug is fixed, we should not need below two lines
+    # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should 
+    # not need below two lines
     cols = ['Index','KernelName','gpu-id','queue-id','queue-index','pid','tid','grd','wgr','lds','scr','arch_vgpr','accum_vgpr','sgpr','wave_size','DispatchNs','BeginNs','EndNs','CompleteNs']
     df.columns = cols
     configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None, bias_size)

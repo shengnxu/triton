@@ -1406,7 +1406,7 @@ def run_benchmark(custom, args):
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
     head_size = 128 if not args.d else args.d
-    mode = 'fwd'
+    mode = args.mode
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = args.causal
     varlen = args.layout == 'thd'
@@ -1502,6 +1502,7 @@ def parse_args():
                             ' has same seqlen as sq and sk')
     parser.add_argument("-d", type=int, default=0)
     parser.add_argument("-causal", action='store_true', default=False)
+    parser.add_argument("-mode", default='fwd', choices=['fwd', 'bwd'])
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-return_time", action='store_true', default=False)
     parser.add_argument("-layout", type=str, default='bhsd', help=supported_layouts())

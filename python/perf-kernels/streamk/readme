@@ -1,9 +1,14 @@
-instruction to reproduce
-
+# install triton upstream
 git clone  git@github.com:xiaohuguo2023/triton.git
-
+cd triton
 git checkout remotes/xguo/reduce_lds_usage_mainsync -b reduce_lds_usage_mainsync
+# install triton
+pip install ninja cmake wheel
+pip install -e python
 
-cd triton/python/perf_kernels/streamk
+# checkout tune_streamk branch from triton-mlir branch
+git clone git@github.com:ROCm/triton.git triton-mlir
+cd triton-mlir /python/perf_kernels/streamk
 
+# step to reproduce the perf number
 python tune_streamk.py --gemm_size_file memory_bound_shapes_best_config.yaml  --benchmark

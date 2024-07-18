@@ -48,7 +48,6 @@ def persistent_streamk_gemm(
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
     acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
-#    EVEN_K = K % BLOCK_SIZE_K == 0
 
     for tile_id in range(pid, total_full_tiles, num_sms):
         if GROUP_SIZE_M == 1:
@@ -129,18 +128,18 @@ def persistent_streamk_gemm(
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
                 while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
-             #   while tl.load(locks + next_pid) == 0:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)
                 rn1 = tl.arange(0, BLOCK_SIZE_N)
                 P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
                 acc1 = tl.load(P_)
                 acc += acc1
-          #      if next_pid < streamk_remainder_iters:
-          #          end += streamk_iters_pcu + 1
-          #      else:
-          #          end += streamk_iters_pcu 
                 end += streamk_iters_pcu + (next_pid < streamk_remainder_iters)
+
+                if next_pid < streamk_remainder_iters:
+                    end += streamk_iters_pcu + 1
+                else:
+                    end += streamk_iters_pcu 
 
                 next_pid += 1
 

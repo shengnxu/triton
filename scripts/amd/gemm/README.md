@@ -138,14 +138,14 @@ This script supports two methods to specify configuration parameters.
 Variant 1: Separate command line attributes.
 
 ```bash
-python one_config.py -m 256 -n 256 -k 256 --block_m 64 --block_n 64 --block_k 64 --group_m 1 --split_k 2 --num_warps 2 --num_stages 0 --waves_per_eu 0
+python one_config.py -m 256 -n 256 -k 256 --block_m 64 --block_n 64 --block_k 64 --group_m 1 --split_k 2 --num_warps 2 --num_stages 0 --waves_per_eu 0 --matrix_instr_nonkdim 16 --kpack 2
 ```
 
 Variant 2: one-line config description.
 This is how configs are printed by `tune_gemm.py` script
 
 ```bash
-python one_config.py --config_str M16_N8_K128_BM64_BN64_BK64_GM1_SK2_nW2_nS0_EU0
+python one_config.py --config_str M16_N8_K128_BM64_BN64_BK64_GM1_SK2_nW2_nS0_EU0_kP2_mfma16
 ```
 
 # GEMM Tuning Script v3.2

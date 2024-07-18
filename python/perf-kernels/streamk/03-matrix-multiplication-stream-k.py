@@ -90,6 +90,7 @@ class matmul(torch.autograd.Function):
         grids = total_programs_streamk
         P=P*0.0
         locks=locks*0
+
         kk = persistent_streamk_gemm[(grids,)](
             a,
             b,
@@ -173,7 +174,7 @@ assert torch.allclose(C, expected, atol=1), f"max: {(C - expected).abs().max().i
 print("pass validation test")
 
 # for debugging, uncomment the following line
-#exit(0)
+# exit(0)
 
 triton_ms = triton.testing.do_bench(lambda: torch.matmul(A, B))
 print(f"PyTorch: {triton_ms:.3f} ms  {perf(triton_ms):.3f} tflops")

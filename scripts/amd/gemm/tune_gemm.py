@@ -78,6 +78,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         BLOCK_SIZE_N = config.get("BLOCK_SIZE_N")
         BLOCK_SIZE_K = config.get("BLOCK_SIZE_K")
         num_warps = config.get("num_warps")
+        num_stages = config.get("num_stages")
         matrix_instr_nonkdim = config.get("matrix_instr_nonkdim")
         kpack = config.get("kpack")
         if matrix_instr_nonkdim > mfma:
@@ -116,6 +117,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         # out of shared memory resource
         # TODO (zhanglx): This does not consider the LDS usage in the epilogue
         LDS = BLOCK_SIZE_K * BLOCK_SIZE_M * elemBytes_a + BLOCK_SIZE_K * BLOCK_SIZE_N * elemBytes_b
+        LDS = LDS if not num_stages else LDS * num_stages
         if LDS > 65536:
             continue
         # Skip small block sizes and num_warps for large gemm
@@ -390,9 +392,15 @@ def main():
 
 
 def extract_kernel_time(M, N, K, config, df, bias_size):
+    # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
+    # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should 
+    # not need below two lines
+    cols = ['Index','KernelName','gpu-id','queue-id','queue-index','pid','tid','grd','wgr','lds','scr','arch_vgpr','accum_vgpr','sgpr','wave_size','DispatchNs','BeginNs','EndNs','CompleteNs']
+    df.columns = cols
     configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, config, None, None, None, bias_size)
-    df = df[df['KernelName'].str.contains(configStr)]
-    meanTime = df['DurationNs'].tail(100).mean()
+    filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
+    filtered_df['DurationNs'] = filtered_df['EndNs'] - filtered_df['BeginNs']
+    meanTime = filtered_df['DurationNs'].tail(100).mean()
     return config, meanTime
 
 
@@ -407,7 +415,7 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
         kernel_name = generated_kernel_name(M, N, K, jobId)
         if verbose:
             print(f"profiling {kernel_name} on GPU {gpuid}")
-        run_bash_command_wrapper(f"rocprof --stats -o results-{jobId}.csv python {kernel_name}", capture=(verbose < 2))
+        run_bash_command_wrapper(f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
         jobId += ngpus
 
 
@@ -449,7 +457,7 @@ def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [pd.read_csv(f"results-{i}.csv") for i in range(jobs)]
+    df_prof = [pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\') for i in range(jobs)]
     for config in configs:
         file_idx = idx % jobs
         tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx], bias_size))]
@@ -897,7 +905,7 @@ def main():
                 os.remove(generated_script)
                 if not skipWarmup:
                     os.remove(generated_script + ".failed_configs")
-                for f in glob.glob(f"results-{i}.*"):
+                for f in glob.glob(f"results_{i}.*"):
                     os.remove(f)
 
         # Check correctness if asked to

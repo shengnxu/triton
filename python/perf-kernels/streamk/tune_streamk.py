@@ -15,7 +15,9 @@ from streamk_kernel import streamk_gemm
 from datetime import datetime
 import multiprocessing
 import pandas as pd
+import csv
 
+device_oi = 650./3.0
 
 def get_full_tuning_space():
     configs = []
@@ -29,7 +31,7 @@ def get_full_tuning_space():
     # other values in the future
     num_stage_range = [0]
     waves_per_eu_range = [0]
-    matrix_instr_nonkdim_range = [16, 32]
+    matrix_instr_nonkdim_range = [16]
     kpack_range = [1, 2]
 
     for block_m in block_mn_range:
@@ -45,7 +47,13 @@ def get_full_tuning_space():
 
     return configs
 
-
+def get_gemm_oi(M, N, K):
+    FLOPs = 2 * M * N * K
+    # 4 for fp32
+    # to do check dtype for bytesmoved 
+    bytesmoved = (M * K + K * N + 2 * M * N) * 4
+    return FLOPs / bytesmoved
+     
 def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
     pruned_configs = []
 
@@ -160,7 +168,7 @@ def gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype
     configStr = f"M{M}_N{N}_K{K}_BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
 
     matmul_def_str = f"""
-def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup=False):
+def matmul_{configStr}(a, b, c, P, locks, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup=False):
     grid = num_sms
     #print(f'config: streamk_gemm_{configStr}', flush=True)
     if warmup:
@@ -182,8 +190,6 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
         )
         return None
     else:
-        locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
-        P = torch.zeros((num_sms,  {block_m}*{block_n}), device="cuda", dtype=torch.float32)
         streamk_gemm_{configStr}[grid,](
             a, b, c, P, locks,
             M, N, K, num_sms,
@@ -203,7 +209,7 @@ def matmul_{configStr}(a, b, c, M, N, K, num_sms, am, ak, bk, bn, cm, cn, warmup
 
 def try_config_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn):
     try:
-        matmul_{configStr}(None, None, None, M, N, K, num_sms, am, ak, bk, bn, cm, cn, True)
+        matmul_{configStr}(None, None, None, None, None, M, N, K, num_sms, am, ak, bk, bn, cm, cn, True)
         return True
     except Exception as e:
         print(f'invalid config(compilation): {configStr}: ', e, flush=True)
@@ -262,6 +268,8 @@ from tune_streamk import gen_input
 
     # write test_gemm
     # pre string
+    block_m = config.get('BLOCK_SIZE_M')
+    block_n = config.get('BLOCK_SIZE_N')
     test_gemm_pre_str = f"""def test_gemm(M, N, K, num_sms, num_threads):
     thread_pool = multiprocessing.Pool(processes=num_threads)
     a, a_fp16 = gen_input(M, K, '{dtype_a}', {col_a}, 1, '{init_type}', device='cuda')
@@ -316,10 +324,15 @@ from tune_streamk import gen_input
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
         configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
+        block_m = config.get('BLOCK_SIZE_M')
+        block_n = config.get('BLOCK_SIZE_N')
         matmul_call_str = f"""
         if '{configStr}' not in failed_configs:
+            print(f"{configStr}")
             for i in range({runs}):
-                d = matmul_{configStr}(a, b, c, M, N, K, num_sms, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
+                locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
+                P = torch.zeros((num_sms,  {block_m}*{block_n}), device="cuda", dtype=torch.float32)
+                d = matmul_{configStr}(a, b, c, P, locks, M, N, K, num_sms, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1))"""
         f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
@@ -347,9 +360,16 @@ def main():
 
 
 def extract_kernel_time(M, N, K, num_sms, EVEN_K, config, df):
+    # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
+    # once the bug is fixed, we should not need below two lines
+    cols = ['Index','KernelName','gpu-id','queue-id','queue-index','pid','tid','grd','wgr','lds','scr','arch_vgpr','accum_vgpr','sgpr','wave_size','DispatchNs','BeginNs','EndNs','CompleteNs']
+    df.columns = cols
+
     configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
-    df = df[df['KernelName'].str.contains(configStr)]
-    meanTime = df['DurationNs'].tail(100).mean()
+
+    filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
+    filtered_df['DurationNs'] = filtered_df['EndNs'] - filtered_df['BeginNs']
+    meanTime = filtered_df['DurationNs'].tail(100).mean()
     return config, meanTime
 
 
@@ -363,7 +383,7 @@ def profile_batch_kernels(M, N, K, num_sms, gpuid, gpus, jobs, verbose):
     while jobId < jobs:
         if verbose:
             print(f"profiling {generated_kernel_name(M, N, K, jobId)} on GPU {gpuid}")
-        run_bash_command_wrapper(f"rocprof --stats -o results-{jobId}.csv python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
+        run_bash_command_wrapper(f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
         jobId += ngpus
 
 
@@ -402,7 +422,7 @@ def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [pd.read_csv(f"results-{i}.csv") for i in range(jobs)]
+    df_prof = [pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\') for i in range(jobs)]
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
         file_idx = idx % jobs
@@ -474,7 +494,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
 
     return input, input_f16
 
-def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K):
+def matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     #assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -484,8 +504,6 @@ def matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_
     # 1D launch kernel where each block gets its own program.
 
     grid = num_sms 
-    locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
-    P = torch.zeros((num_sms,  block_m*lock_n), device="cuda", dtype=torch.float32)
 
     streamk_gemm[grid,](
         a, b, c, P, locks,
@@ -515,9 +533,12 @@ def test_correctness(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     a, a_fp16 = gen_input(M, K, dtype_a, col_a, 1, init_type, device='cuda')
     b, b_fp16 = gen_input(K, N, dtype_b, col_b, 2, init_type, device='cuda')
     # Allocates output.
+    print(f"{block_k}")
     EVEN_K = K % block_k == 0
     c = torch.zeros((M, N), device=a.device, dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
-    triton_output = matmul(a, b, c, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K)
+    locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
+    P = torch.zeros((num_sms,  block_m*block_n), device="cuda", dtype=torch.float32)
+    triton_output = matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K)
     torch_output = torch.matmul(a_fp16, b_fp16)
     # print(f"triton_output={triton_output}")
     # print(f"torch_output={torch_output}")
@@ -765,7 +786,7 @@ def main():
                 os.remove(generated_script)
                 if not skipWarmup:
                     os.remove(generated_script + ".failed_configs")
-                for f in glob.glob(f"results-{i}.*"):
+                for f in glob.glob(f"results_{i}.*"):
                     os.remove(f)
 
         # Check correctness if asked to

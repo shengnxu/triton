@@ -10,7 +10,7 @@ def get_tiles_config(M, N, K, num_sms,
     iters_per_tile = tl.cdiv(K, BLOCK_SIZE_K)
 
     total_tiles = total_blocks_M * total_blocks_N
-    if num_sms > 0:  # Stream-K
+    if num_sms > 0 and total_tiles > num_sms:  # Stream-K
         total_full_tiles_pcu = total_tiles // num_sms
         total_streamk_tiles = total_tiles % num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
@@ -35,18 +35,16 @@ def streamk_gemm(
         M, N, K, num_sms,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
-        GROUP_SIZE_M: tl.constexpr,
+        GROUP_SIZE_M: tl.constexpr, EVEN_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    EVEN_K = K % BLOCK_SIZE_K == 0
 
     iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters = get_tiles_config(M, N, K, num_sms, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
-    acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
-#    EVEN_K = K % BLOCK_SIZE_K == 0
+    rk = tl.arange(0, BLOCK_SIZE_K)
 
     for tile_id in range(pid, total_full_tiles, num_sms):
         if GROUP_SIZE_M == 1:
@@ -62,10 +60,11 @@ def streamk_gemm(
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
-        rk = tl.arange(0, BLOCK_SIZE_K)
+        rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
+        rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn
-        acc = acc * 0.0
+        acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
             if EVEN_K:
                 a = tl.load(A_BASE)
@@ -103,10 +102,12 @@ def streamk_gemm(
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
-        rk = tl.arange(0, BLOCK_SIZE_K)
+        rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
+        rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
+    #    rk = tl.arange(0, BLOCK_SIZE_K)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak + BLOCK_SIZE_K * stride_ak * remainder
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn + BLOCK_SIZE_K * stride_bk * remainder
-        acc = acc * 0.0
+        acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
         for current_iter in range(start_iter, end_iter):
             if EVEN_K:
                 a = tl.load(A_BASE)
@@ -127,29 +128,29 @@ def streamk_gemm(
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
                 while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
-             #   while tl.load(locks + next_pid) == 0:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)
                 rn1 = tl.arange(0, BLOCK_SIZE_N)
+                rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
+                rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
                 P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
-                acc1 = tl.load(P_)
-                acc += acc1
-          #      if next_pid < streamk_remainder_iters:
-          #          end += streamk_iters_pcu + 1
-          #      else:
-          #          end += streamk_iters_pcu 
+                acc += tl.load(P_)
                 end += streamk_iters_pcu + (next_pid < streamk_remainder_iters)
 
                 next_pid += 1
 
             rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
             rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+            rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
+            rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
             C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
             mask = (rm < M)[:, None] & (rn < N)[None, :]
             tl.store(C_, acc, mask=mask)
         else:
             rm1 = tl.arange(0, BLOCK_SIZE_M)
             rn1 = tl.arange(0, BLOCK_SIZE_N)
+            rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
+            rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
             P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
             tl.store(P_, acc)
             tl.atomic_xchg(locks + pid, 1)

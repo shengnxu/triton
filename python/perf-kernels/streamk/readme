@@ -1,0 +1,9 @@
+instruction to reproduce
+
+git clone  git@github.com:xiaohuguo2023/triton.git
+
+git checkout remotes/xguo/reduce_lds_usage_mainsync -b reduce_lds_usage_mainsync
+
+cd triton/python/perf_kernels/streamk
+
+python tune_streamk.py --gemm_size_file memory_bound_shapes_best_config.yaml  --benchmark

@@ -19,6 +19,7 @@ import pandas as pd
 from utils.file_generator import *
 from utils.name_utils import *
 
+
 def is_hip_available():
     try:
         __import__("hip")
@@ -54,7 +55,28 @@ def get_full_tuning_space():
                                 for waves_per_eu in waves_per_eu_range:
                                     for matrix_instr_nonkdim in matrix_instr_nonkdim_range:
                                         for kpack in kpack_range:
-                                            configs.append({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'SPLIT_K': split_k, 'num_warps': num_warps, 'num_stages': num_stages, 'waves_per_eu': waves_per_eu, 'matrix_instr_nonkdim': matrix_instr_nonkdim, 'kpack': kpack})
+                                            configs.append({
+                                                'BLOCK_SIZE_M':
+                                                block_m,
+                                                'BLOCK_SIZE_N':
+                                                block_n,
+                                                'BLOCK_SIZE_K':
+                                                block_k,
+                                                'GROUP_SIZE_M':
+                                                group_m,
+                                                'SPLIT_K':
+                                                split_k,
+                                                'num_warps':
+                                                num_warps,
+                                                'num_stages':
+                                                num_stages,
+                                                'waves_per_eu':
+                                                waves_per_eu,
+                                                'matrix_instr_nonkdim':
+                                                matrix_instr_nonkdim,
+                                                'kpack':
+                                                kpack
+                                            })
 
     return configs
 
@@ -62,6 +84,7 @@ def get_full_tuning_space():
 def get_default_config():
     full_configs = get_full_tuning_space()
     return full_configs[0]
+
 
 def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
     pruned_configs = []
@@ -73,7 +96,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 
     # TODO (zhanglx): figure out the boundary between large and small gemms
     large_gemm = False
-    if M >= 2048 and N >=2048:
+    if M >= 2048 and N >= 2048:
         large_gemm = True
 
     for config in configs:
@@ -144,6 +167,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
+
 def run_bash_command_wrapper(commandstring, capture=True):
     try:
         run_bash_command(commandstring, capture)
@@ -152,11 +176,19 @@ def run_bash_command_wrapper(commandstring, capture=True):
             print(f"running {commandstring} one more time")
         run_bash_command(commandstring, capture)
 
+
 def run_bash_command(commandstring, capture=True):
     if capture:
-        proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout=subprocess.PIPE)
+        proc = subprocess.run(commandstring,
+                              shell=True,
+                              check=True,
+                              executable='/bin/bash',
+                              stdout=subprocess.PIPE)
         return proc.stdout.splitlines()
-    proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash')
+    proc = subprocess.run(commandstring,
+                          shell=True,
+                          check=True,
+                          executable='/bin/bash')
     return None
 
 
@@ -164,7 +196,11 @@ def extract_kernel_time(M, N, K, config, df, bias_size):
     # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
     # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should
     # not need below two lines
-    cols = ['Index','KernelName','gpu-id','queue-id','queue-index','pid','tid','grd','wgr','lds','scr','arch_vgpr','accum_vgpr','sgpr','wave_size','DispatchNs','BeginNs','EndNs','CompleteNs']
+    cols = [
+        'Index', 'KernelName', 'gpu-id', 'queue-id', 'queue-index', 'pid',
+        'tid', 'grd', 'wgr', 'lds', 'scr', 'arch_vgpr', 'accum_vgpr', 'sgpr',
+        'wave_size', 'DispatchNs', 'BeginNs', 'EndNs', 'CompleteNs'
+    ]
     df.columns = cols
     configStr = gen_configStr(config)
     filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
@@ -184,34 +220,61 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
         kernel_name = get_filename_profile_driver(M, N, K, jobId)
         if verbose:
             print(f"profiling {kernel_name} on GPU {gpuid}")
-        run_bash_command_wrapper(f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {get_filename_profile_driver(M, N, K, jobId)}", capture=(verbose < 2))
+        run_bash_command_wrapper(
+            f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {get_filename_profile_driver(M, N, K, jobId)}",
+            capture=(verbose < 2))
         jobId += ngpus
 
 
-def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs,
-                     run_bench, jobs, iters, skipWarmup, verbose=0, num_threads=32,
-                     gpus=[0], rotating_buffer_size=256, bias_size = 0, icache_flush = False):
+def tune_gemm_config(M,
+                     N,
+                     K,
+                     col_a,
+                     col_b,
+                     dtype_a,
+                     dtype_b,
+                     dtype_c,
+                     init_type,
+                     configs,
+                     run_bench,
+                     jobs,
+                     iters,
+                     skipWarmup,
+                     verbose=0,
+                     num_threads=32,
+                     gpus=[0],
+                     rotating_buffer_size=256,
+                     bias_size=0,
+                     icache_flush=False):
 
     # precompile the kernels in parallel
     start_time = datetime.now()
     if not skipWarmup:
         # Generate kernel out of all configs
-        fname = generate_compile_driver(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs, rotating_buffer_size, bias_size)
+        fname = generate_compile_driver(M, N, K, col_a, col_b, dtype_a,
+                                        dtype_b, dtype_c, init_type, configs,
+                                        rotating_buffer_size, bias_size)
         # remove any compiled kernel in the cache
         run_bash_command("rm -rf ~/.triton/cache")
 
-        run_bash_command(f"python {fname} -n {num_threads}", capture=(verbose < 2))
+        run_bash_command(f"python {fname} -n {num_threads}",
+                         capture=(verbose < 2))
     compile_end = datetime.now()
     compile_time = compile_end - start_time
     if verbose:
         print(f"compile time: {compile_time}", flush=True)
 
-
     # Generate kernels out of all configs
-    generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, configs, jobs, iters, run_bench, rotating_buffer_size, bias_size, icache_flush)
+    generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
+                           init_type, configs, jobs, iters, run_bench,
+                           rotating_buffer_size, bias_size, icache_flush)
 
     # profile generated kernels
-    running = [multiprocessing.Process(target=profile_batch_kernels, args=(M, N, K, gpu_id, gpus, jobs, verbose)) for gpu_id in gpus]
+    running = [
+        multiprocessing.Process(target=profile_batch_kernels,
+                                args=(M, N, K, gpu_id, gpus, jobs, verbose))
+        for gpu_id in gpus
+    ]
     for p in running:
         p.start()
     for p in running:
@@ -228,10 +291,21 @@ def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\') for i in range(jobs)]
+    df_prof = [
+        pd.read_csv(f"results_{i}.csv",
+                    skiprows=1,
+                    header=None,
+                    delimiter=',',
+                    quotechar='"',
+                    escapechar='\\') for i in range(jobs)
+    ]
     for config in configs:
         file_idx = idx % jobs
-        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx], bias_size))]
+        tasks += [
+            thread_pool.apply_async(extract_kernel_time,
+                                    args=(M, N, K, config, df_prof[file_idx],
+                                          bias_size))
+        ]
         idx += 1
     thread_pool.close()
     thread_pool.join()
@@ -245,12 +319,15 @@ def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
                 bestConfig = config
         else:
             min_us = -1
-            print(f"invalid config(post processing): SIZE {M} {N} {K}: {config}", flush=True)
+            print(
+                f"invalid config(post processing): SIZE {M} {N} {K}: {config}",
+                flush=True)
     post_end = datetime.now()
     post_time = post_end - profile_end
     if verbose:
         print(f"post procesing time: {post_time}", flush=True)
     return minTime, bestConfig, compile_time, profile_time, post_time
+
 
 def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
     d_type = name_to_tl_types[ty_name]
@@ -258,7 +335,8 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
     torch.cuda.manual_seed(seed)
 
     @triton.jit
-    def copy_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    def copy_kernel(input_ptr, output_ptr, n_elements,
+                    BLOCK_SIZE: tl.constexpr):
         offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n_elements
         input = tl.load(input_ptr + offsets, mask=mask)
@@ -267,11 +345,13 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
 
     def init_by_size_and_type(size, dtype, init_type):
         if init_type == 'hpl':
-            return torch.empty(size, device='cuda', dtype=dtype).uniform_(-0.5, 0.5)
+            return torch.empty(size, device='cuda',
+                               dtype=dtype).uniform_(-0.5, 0.5)
         # This init type has element[i] in row[j] equal to sin(i+j*N)
         elif init_type == 'trig_float':
             M, N = size
-            return torch.reshape(torch.arange(0, M*N), (M, N)).sin().to(dtype=dtype, device='cuda')
+            return torch.reshape(torch.arange(0, M * N),
+                                 (M, N)).sin().to(dtype=dtype, device='cuda')
         elif init_type == 'zeros':
             return torch.zeros(size, dtype=dtype, device='cuda')
         elif init_type == "randn":
@@ -280,7 +360,8 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         else:
             raise ValueError("Bad matrix initialization type.")
 
-    raw_data = init_by_size_and_type((N,M) if needTrans else (M,N), torch.float32, init_type)
+    raw_data = init_by_size_and_type((N, M) if needTrans else (M, N),
+                                     torch.float32, init_type)
     if needTrans:
         raw_data = raw_data.T
     if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
@@ -293,7 +374,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         f8_tensor = f8_tensor & 0b00111111
         input = triton.reinterpret(f8_tensor, d_type)
         input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
-        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
         n_elements = raw_data.numel()
         copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
 
@@ -301,12 +382,19 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
 
 
 # generate inputs/outputs according to rotating tensor size
-def gen_rotating_tensors(M, N, K,
-                        dtype_a, need_Trans_a, 
-                        dtype_b, need_Trans_b,
-                        dtype_c, seed, init_type, 
-                        rotating_buffer_size, 
-                        bias_size, device='cuda'):
+def gen_rotating_tensors(M,
+                         N,
+                         K,
+                         dtype_a,
+                         need_Trans_a,
+                         dtype_b,
+                         need_Trans_b,
+                         dtype_c,
+                         seed,
+                         init_type,
+                         rotating_buffer_size,
+                         bias_size,
+                         device='cuda'):
     a_size = M * K * type_name_to_bytes(dtype_a)
     b_size = K * N * type_name_to_bytes(dtype_b)
     c_size = M * N * type_name_to_bytes(dtype_c)
@@ -322,26 +410,50 @@ def gen_rotating_tensors(M, N, K,
     c = []
     bias = []
     for i in range(block_count):
-        in_a, in_a_fp16 = gen_input(M, K, dtype_a, need_Trans_a, 1, init_type, device='cuda')
+        in_a, in_a_fp16 = gen_input(M,
+                                    K,
+                                    dtype_a,
+                                    need_Trans_a,
+                                    1,
+                                    init_type,
+                                    device='cuda')
         a.append(in_a)
-        in_b, in_b_fp16 = gen_input(K, N, dtype_b, need_Trans_b, 2, init_type, device='cuda')
+        in_b, in_b_fp16 = gen_input(K,
+                                    N,
+                                    dtype_b,
+                                    need_Trans_b,
+                                    2,
+                                    init_type,
+                                    device='cuda')
         b.append(in_b)
-        out_c = torch.zeros((M, N), dtype=tl_to_torch_types[name_to_tl_types[dtype_c]], device='cuda')
+        out_c = torch.zeros((M, N),
+                            dtype=tl_to_torch_types[name_to_tl_types[dtype_c]],
+                            device='cuda')
         c.append(out_c)
         if bias_size > 0:
-            bs, bs_fp16 = gen_input(M, 1, dtype_b, need_Trans_b, 2, init_type, device='cuda')
+            bs, bs_fp16 = gen_input(M,
+                                    1,
+                                    dtype_b,
+                                    need_Trans_b,
+                                    2,
+                                    init_type,
+                                    device='cuda')
             bias.append(bs.squeeze())
 
-    in_outs = {"rotating_num": block_count,
-           "input_a": a,
-           "input_b": b,
-           "output_c": c,
-           "bias": bias}
+    in_outs = {
+        "rotating_num": block_count,
+        "input_a": a,
+        "input_b": b,
+        "output_c": c,
+        "bias": bias
+    }
 
     return in_outs
 
 
-def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, use_bias):
+def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k,
+           num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack,
+           use_bias):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     #assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -353,31 +465,39 @@ def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k, num_warps
     grid = triton.cdiv(M, block_m) * triton.cdiv(N, block_n), split_k
     stride_bias = bias.stride(0) if use_bias else 0
     EVEN_K = K % block_k == 0
-    matmul_kernel[grid](
-        a, b, c, bias,
-        M, N, K,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        stride_bias=stride_bias,
-        BLOCK_SIZE_M=block_m,
-        BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_K=block_k,
-        GROUP_SIZE_M=group_m,
-        SPLIT_K=split_k,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        waves_per_eu=waves_per_eu,
-        matrix_instr_nonkdim=mfmaInstrSize,
-        kpack=kpack,
-        BIAS=use_bias,
-        EVEN_K=EVEN_K
-    )
+    matmul_kernel[grid](a,
+                        b,
+                        c,
+                        bias,
+                        M,
+                        N,
+                        K,
+                        a.stride(0),
+                        a.stride(1),
+                        b.stride(0),
+                        b.stride(1),
+                        c.stride(0),
+                        c.stride(1),
+                        stride_bias=stride_bias,
+                        BLOCK_SIZE_M=block_m,
+                        BLOCK_SIZE_N=block_n,
+                        BLOCK_SIZE_K=block_k,
+                        GROUP_SIZE_M=group_m,
+                        SPLIT_K=split_k,
+                        num_warps=num_warps,
+                        num_stages=num_stages,
+                        waves_per_eu=waves_per_eu,
+                        matrix_instr_nonkdim=mfmaInstrSize,
+                        kpack=kpack,
+                        BIAS=use_bias,
+                        EVEN_K=EVEN_K)
     return c
 
 
-def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, config, bias_vector, verbose):
-    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(config)
+def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
+                     init_type, config, bias_vector, verbose):
+    block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
+        config)
     use_bias = bias_vector
     torch.manual_seed(0)
     #a = torch.randn((M, K), device='cuda', dtype=datatype)
@@ -386,12 +506,22 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     b, b_fp16 = gen_input(K, N, dtype_b, col_b, 2, init_type, device='cuda')
     bias = None
     if use_bias:
-        bias, bias_fp16 = gen_input(M, 1, dtype_b, col_b, 2, init_type, device='cuda')
+        bias, bias_fp16 = gen_input(M,
+                                    1,
+                                    dtype_b,
+                                    col_b,
+                                    2,
+                                    init_type,
+                                    device='cuda')
         bias = bias.squeeze()
         bias_fp16 = bias.squeeze()
     # Allocates output.
-    c = torch.zeros((M, N), device=a.device, dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
-    triton_output = matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, use_bias)
+    c = torch.zeros((M, N),
+                    device=a.device,
+                    dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
+    triton_output = matmul(a, b, c, bias, block_m, block_n, block_k, group_m,
+                           split_k, num_warps, num_stages, waves_per_eu,
+                           mfmaInstrSize, kpack, use_bias)
     torch_output = torch.matmul(a_fp16, b_fp16)
     if use_bias:
         torch_output += bias_fp16[:, None]
@@ -402,7 +532,10 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     size_str = ''
     if verbose:
         size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {row_a_str}{row_b_str}'
-    if torch.allclose(triton_output.to(torch.float16), torch_output, atol=atol, rtol=rtol):
+    if torch.allclose(triton_output.to(torch.float16),
+                      torch_output,
+                      atol=atol,
+                      rtol=rtol):
         print(f'{size_str} Correct✅')
     else:
         print(f"triton_output={triton_output}")
@@ -419,29 +552,108 @@ def parse_args():
     parser.add_argument("-m", type=int, default=0)
     parser.add_argument("-n", type=int, default=0)
     parser.add_argument("-k", type=int, default=0)
-    parser.add_argument("-col_a", action='store_true', default=False, help='whether matrix a is column major')
-    parser.add_argument("-col_b", action='store_true', default=False, help='whether matrix b is column major')
-    parser.add_argument("-dtype_a", type=str, default='fp16', help="matrix a element data type")
-    parser.add_argument("-dtype_b", type=str, default='fp16', help="matrix b element data type")
-    parser.add_argument("-dtype_c", type=str, default='fp16', help="output element data type")
-    parser.add_argument("--ngpus", type=int, default=0, help='number of GPUs used in the profiling step')
-    parser.add_argument("--gpu_ids", type=lambda s: [int(id) for id in s.split(',')], default=[], help='list of gpu ids to use for tuning')
-    parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
-    parser.add_argument("--o", type=str, default='', help='yaml file to store tuning results')
-    parser.add_argument("--keep", action='store_true', default=False, help='keep generated files')
-    parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
-    parser.add_argument("--compare_wo_tuning", action='store_true', default=False, help="Whether check result correctness")
-    parser.add_argument("--benchmark", action='store_true', default=False, help="Benchmark the given config")
-    parser.add_argument("--time_breakdown", action='store_true', default=False, help="Show detailed time breakdown of each step during the tuning")
-    parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
-    parser.add_argument("--num_threads", type=int, default=32, help="number of threads to use for kernel compilation and post processing")
-    parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
-    parser.add_argument("--iters", type=int, default=1000, help="number of generated files")
-    parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
-    parser.add_argument("--rotating_tensor", type=int, default=0, help="total size (MB) of all tensors (default 0 MB (no rotating tensor), need to be larger than the L1, L2, MALL size)")
-    parser.add_argument("--bias_vector", action='store_true', default=False, help="apply bias vector")
-    parser.add_argument("--icache_flush", action='store_true', default=False, help="apply icache flush in tuning performance")
-    parser.add_argument("--no_warmup", action='store_true', default=False, help="Do not call the warmup kernel")
+    parser.add_argument("-col_a",
+                        action='store_true',
+                        default=False,
+                        help='whether matrix a is column major')
+    parser.add_argument("-col_b",
+                        action='store_true',
+                        default=False,
+                        help='whether matrix b is column major')
+    parser.add_argument("-dtype_a",
+                        type=str,
+                        default='fp16',
+                        help="matrix a element data type")
+    parser.add_argument("-dtype_b",
+                        type=str,
+                        default='fp16',
+                        help="matrix b element data type")
+    parser.add_argument("-dtype_c",
+                        type=str,
+                        default='fp16',
+                        help="output element data type")
+    parser.add_argument("--ngpus",
+                        type=int,
+                        default=0,
+                        help='number of GPUs used in the profiling step')
+    parser.add_argument("--gpu_ids",
+                        type=lambda s: [int(id) for id in s.split(',')],
+                        default=[],
+                        help='list of gpu ids to use for tuning')
+    parser.add_argument("--gemm_size_file",
+                        type=str,
+                        default="",
+                        help='yaml file to indicate matrix size')
+    parser.add_argument("--o",
+                        type=str,
+                        default='',
+                        help='yaml file to store tuning results')
+    parser.add_argument("--keep",
+                        action='store_true',
+                        default=False,
+                        help='keep generated files')
+    parser.add_argument("--compare",
+                        action='store_true',
+                        default=False,
+                        help="Whether check result correctness")
+    parser.add_argument("--compare_wo_tuning",
+                        action='store_true',
+                        default=False,
+                        help="Whether check result correctness")
+    parser.add_argument("--benchmark",
+                        action='store_true',
+                        default=False,
+                        help="Benchmark the given config")
+    parser.add_argument(
+        "--time_breakdown",
+        action='store_true',
+        default=False,
+        help="Show detailed time breakdown of each step during the tuning")
+    parser.add_argument(
+        "--verbose",
+        action='store_true',
+        default=False,
+        help="enables time_breakdown and additional logging messages")
+    parser.add_argument(
+        "--num_threads",
+        type=int,
+        default=32,
+        help=
+        "number of threads to use for kernel compilation and post processing")
+    parser.add_argument("--jobs",
+                        type=int,
+                        default=1,
+                        help="number of generated files")
+    parser.add_argument("--iters",
+                        type=int,
+                        default=1000,
+                        help="number of generated files")
+    parser.add_argument(
+        "--init_type",
+        type=str,
+        default='randn',
+        help=
+        "Initialization type for input matrices (default uniform rand [0, 1.0)])"
+    )
+    parser.add_argument(
+        "--rotating_tensor",
+        type=int,
+        default=0,
+        help=
+        "total size (MB) of all tensors (default 0 MB (no rotating tensor), need to be larger than the L1, L2, MALL size)"
+    )
+    parser.add_argument("--bias_vector",
+                        action='store_true',
+                        default=False,
+                        help="apply bias vector")
+    parser.add_argument("--icache_flush",
+                        action='store_true',
+                        default=False,
+                        help="apply icache flush in tuning performance")
+    parser.add_argument("--no_warmup",
+                        action='store_true',
+                        default=False,
+                        help="Do not call the warmup kernel")
     args = parser.parse_args()
     if not args.o:
         if args.benchmark:
@@ -450,8 +662,6 @@ def parse_args():
             args.o = get_default_tuning_result_filename()
 
     return args
-
-
 
 
 def process_item(item):
@@ -531,7 +741,9 @@ def main():
     dtype_b = args.dtype_b
     dtype_c = args.dtype_c
     if not dtype_a in name_to_tl_types or not dtype_b in name_to_tl_types or not dtype_c in name_to_tl_types:
-        print(f"Unsupported dtype_a {args.dtype_a} or dtype_b {args.dtype_b} or dtype_c {args.dtype_c}")
+        print(
+            f"Unsupported dtype_a {args.dtype_a} or dtype_b {args.dtype_b} or dtype_c {args.dtype_c}"
+        )
         print("Supported types: ", list(name_to_tl_types.keys()))
         sys.exit(1)
     rotating_buffer_size = args.rotating_tensor
@@ -568,15 +780,16 @@ def main():
     if args.compare_wo_tuning:
         for (M, N, K, col_a, col_b, myConfig) in mnks:
             if myConfig is None:
-                raise Exception("kernel config is None, need to provide a tuning config")
-            test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, myConfig, bias_vector, True)
+                raise Exception(
+                    "kernel config is None, need to provide a tuning config")
+            test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
+                             init_type, myConfig, bias_vector, True)
         return
 
     configs_full = get_full_tuning_space()
     ## Generate a file named myKernels.py that contains all the kernels
     ## in the un-pruned space
     generate_matmul_kernels(configs_full)
-
 
     start_time = datetime.now()
     # Append to the output file so that we can save all results into one file
@@ -586,7 +799,8 @@ def main():
         print("trans     M      N      K    TFLOPS   us")
         f_results.write("trans,M,N,K,TFLOPS,us\n")
     else:
-        print(f"Tuning {len(mnks)} gemm sizes starts at: {start_time}", flush=True)
+        print(f"Tuning {len(mnks)} gemm sizes starts at: {start_time}",
+              flush=True)
 
     ## Big for loop of tuning
     ## Each iteration performs tuning for one gemm size
@@ -594,15 +808,20 @@ def main():
         start_local_time = datetime.now()
         # Obtain a pruned tuning space according to gemm size
         # If running benchmark, use the provided config
-        pruned_configs = [myConfig] if run_bench else prune_configs(M, N, K, configs_full, type_name_to_bytes(dtype_a), type_name_to_bytes(dtype_b))
+        pruned_configs = [myConfig] if run_bench else prune_configs(
+            M, N, K, configs_full, type_name_to_bytes(dtype_a),
+            type_name_to_bytes(dtype_b))
 
         row_a_str = 'N' if col_a else 'T'
         row_b_str = 'N' if col_b else 'T'
         size_str = f'SIZE: {M} {N} {K} {row_a_str}{row_b_str}'
         if not run_bench:
-            print(f"{size_str} nConfigs: {len(pruned_configs)}", end=" ", flush=True)
+            print(f"{size_str} nConfigs: {len(pruned_configs)}",
+                  end=" ",
+                  flush=True)
         else:
-            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    ", end="")
+            print(f"{row_a_str}{row_b_str}    {M:5d}  {N:5d}  {K:5d}    ",
+                  end="")
             f_results.write(f"{row_a_str}{row_b_str},{M},{N},{K},")
 
         # The main tuning funtion for one gemm size
@@ -614,10 +833,26 @@ def main():
         # we consider bias size as M for now.
         bias_size = M if bias_vector else 0
         minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(
-                M, N, K, col_a, col_b, dtype_a,
-                dtype_b, dtype_c, init_type, pruned_configs,
-                run_bench, jobs, iters, skipWarmup, num_threads=args.num_threads, gpus=gpus,
-                verbose=verbose_level, rotating_buffer_size=rotating_buffer_size, bias_size=bias_size, icache_flush=icache_flush)
+            M,
+            N,
+            K,
+            col_a,
+            col_b,
+            dtype_a,
+            dtype_b,
+            dtype_c,
+            init_type,
+            pruned_configs,
+            run_bench,
+            jobs,
+            iters,
+            skipWarmup,
+            num_threads=args.num_threads,
+            gpus=gpus,
+            verbose=verbose_level,
+            rotating_buffer_size=rotating_buffer_size,
+            bias_size=bias_size,
+            icache_flush=icache_flush)
 
         # post processing the numbers
         perf_tflops = lambda us: 2 * M * N * K * 1e-12 / (us * 1e-6)
@@ -625,29 +860,41 @@ def main():
         formatted_tflops = format_output(tri_tflops)
         minTime = format_output(minTime)
         if not run_bench:
-            print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ", flush=True)
+            print(f'TFLOPS: {formatted_tflops} time(us): {minTime}',
+                  end=" ",
+                  flush=True)
 
         bestConfig_compact_str = gen_configStr(bestConfig)
         if not run_bench:
-            print(f'best_config: {bestConfig_compact_str}', end=" ", flush=True)
+            print(f'best_config: {bestConfig_compact_str}',
+                  end=" ",
+                  flush=True)
 
         # write best config to tuning_results.yaml
         if run_bench:
             print(f"{formatted_tflops}     {minTime}")
             f_results.write(f"{formatted_tflops},{minTime}\n")
 
-        sizeDict = {'M': M, 'N': N, 'K': K, 'rowMajorA': row_a_str, 'rowMajorB': row_b_str}
+        sizeDict = {
+            'M': M,
+            'N': N,
+            'K': K,
+            'rowMajorA': row_a_str,
+            'rowMajorB': row_b_str
+        }
         sizeDict.update(bestConfig)
         if not run_bench:
             f_results.write("- " + str(sizeDict) + " ")
-            f_results.write(f'# TFLOPS: {formatted_tflops} time(us): {minTime}\n')
+            f_results.write(
+                f'# TFLOPS: {formatted_tflops} time(us): {minTime}\n')
 
         # remove generated files if asked to
         if not keepTmp:
             if not skipWarmup:
                 os.remove(get_filename_compile_driver())
                 try:
-                    os.remove(get_filename_compile_driver() + ".failed_configs")
+                    os.remove(get_filename_compile_driver() +
+                              ".failed_configs")
                 except OSError:
                     pass
             for i in range(jobs):
@@ -659,13 +906,16 @@ def main():
         # Check correctness if asked to
         if args.compare:
             print("correctness: ", end=" ", flush=True)
-            test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type, bestConfig, bias_vector, False)
+            test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
+                             init_type, bestConfig, bias_vector, False)
         elif not run_bench:
             print("", flush=True)
 
         end_local_time = datetime.now()
         if not run_bench:
-            print(f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)", flush=True)
+            print(
+                f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)",
+                flush=True)
 
     f_results.close()
 

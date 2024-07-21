@@ -168,12 +168,16 @@ no API changes
 
 ### Implementation changes
 
-- Before the start of the for loop of tuning, we generated a file named myKernels.py
-(this is obtained from `get_filename_myKernels()`) which contains all the matmul_kernel
-with configs in the full, un-pruned tuning space. This file will be used by this tuning
-session shared by all gemm sizes.
+- We use a dedicated file (named `get_filename_myKernels()`) to keep all the kernels
+in the tuning space.
 - Inside the for loop of tuning, each iteration tunes one gemm size
-  1. Compilation stage:
+  1. Update kernel stage: Different gemm size may need different configs. We keep track
+  of the current tuning space. And if the current gemm size needs some configs that is
+  not included in the current tuning space, we expand the tuning space with the newly
+  added configs.
+    - This means if two gemm sizes share some configs, these configs will be compiled
+    once. This will greatly reduce batch tuning time.
+  2. Compilation stage:
     - We generate a single compilation driver file, named compile_driver.py (this is
     obtained from `get_filename_compile_driver`) which contains the wrapper functions
     of all the configs in the **pruned** tuning space for this gemm size.
@@ -182,7 +186,7 @@ session shared by all gemm sizes.
     files. This can greatly reduce the compile time of the tuning process.
     - Note that we no longer generate matmul_kernel in this file. Kernels are imported
     from myKernels.py.
-  2. Profile stage
+  3. Profile stage
      - We generate one task file per job, named `profile_driver_MxNxK_{job_id}.py`
      (this is obtained from `get_filename_profile_driver`). The only difference is
      that we no longer generate matmul_kernel in this file. Kernels are imported
@@ -194,4 +198,6 @@ expect to compare the same kernel w/ and w/o bias. Therefore, we treat bias in t
 way as gemm sizes.
 - Add support for `EVEN_K` in the matmul kernel. Now the kernel support `BLOCK_SIZE_K`
 that cannot divide `K`.
+- Tuning result file is open and closed inside the tuning loop, enabling timely flush
+of the tuning results.
 - Now we use `rocprofv2` to measure kernel time.

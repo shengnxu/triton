@@ -4,7 +4,6 @@ import sys
 import yaml
 import os
 import glob
-import subprocess
 
 import torch
 import triton
@@ -17,7 +16,7 @@ import multiprocessing
 import pandas as pd
 
 from utils.file_generator import *
-from utils.name_utils import *
+from utils.utils import *
 
 
 def is_hip_available():
@@ -168,30 +167,6 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def run_bash_command_wrapper(commandstring, capture=True):
-    try:
-        run_bash_command(commandstring, capture)
-    except subprocess.CalledProcessError as e:
-        if not capture:
-            print(f"running {commandstring} one more time")
-        run_bash_command(commandstring, capture)
-
-
-def run_bash_command(commandstring, capture=True):
-    if capture:
-        proc = subprocess.run(commandstring,
-                              shell=True,
-                              check=True,
-                              executable='/bin/bash',
-                              stdout=subprocess.PIPE)
-        return proc.stdout.splitlines()
-    proc = subprocess.run(commandstring,
-                          shell=True,
-                          check=True,
-                          executable='/bin/bash')
-    return None
-
-
 def extract_kernel_time(M, N, K, config, df, bias_size):
     # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
     # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should
@@ -254,8 +229,6 @@ def tune_gemm_config(M,
         fname = generate_compile_driver(M, N, K, col_a, col_b, dtype_a,
                                         dtype_b, dtype_c, init_type, configs,
                                         rotating_buffer_size, bias_size)
-        # remove any compiled kernel in the cache
-        run_bash_command("rm -rf ~/.triton/cache")
 
         run_bash_command(f"python {fname} -n {num_threads}",
                          capture=(verbose < 2))
@@ -787,9 +760,6 @@ def main():
         return
 
     configs_full = get_full_tuning_space()
-    ## Generate a file named myKernels.py that contains all the kernels
-    ## in the un-pruned space
-    generate_matmul_kernels(configs_full)
 
     start_time = datetime.now()
     # Append to the output file so that we can save all results into one file
@@ -802,15 +772,35 @@ def main():
         print(f"Tuning {len(mnks)} gemm sizes starts at: {start_time}",
               flush=True)
 
+    f_results.close()
+
+    ## Before tuning starts, clear cache and previously generated kernel files
+    run_bash_command("rm -rf ~/.triton/cache")
+    run_bash_command(f"rm -rf {get_filename_myKernels()}")
+
+    configs = []
+
     ## Big for loop of tuning
     ## Each iteration performs tuning for one gemm size
     for (M, N, K, col_a, col_b, myConfig) in mnks:
+
+        f_results = open(output_file, 'a')
+
         start_local_time = datetime.now()
         # Obtain a pruned tuning space according to gemm size
         # If running benchmark, use the provided config
         pruned_configs = [myConfig] if run_bench else prune_configs(
             M, N, K, configs_full, type_name_to_bytes(dtype_a),
             type_name_to_bytes(dtype_b))
+
+        ## Only append new configs from the current gemm size
+        delta_configs = [
+            config for config in pruned_configs if config not in configs
+        ]
+        configs += delta_configs
+
+        ## Append new configs into the tuning space
+        generate_matmul_kernels(delta_configs)
 
         row_a_str = 'N' if col_a else 'T'
         row_b_str = 'N' if col_b else 'T'
@@ -917,7 +907,8 @@ def main():
                 f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)",
                 flush=True)
 
-    f_results.close()
+        f_results.close()
+        ## End big loop for tuning
 
     end_time = datetime.now()
     tuning_time = end_time - start_time

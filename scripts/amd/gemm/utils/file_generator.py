@@ -1,5 +1,5 @@
 import os
-from .name_utils import *
+from .utils import *
 
 
 def read_config(config):
@@ -28,13 +28,16 @@ def gen_configStr(config):
 
 def generate_matmul_kernels(configs):
     """
-    Generate all the kernels in the tuning space based on ++configs++
+    Generate kernels based on configs and append them to get_filename_myKernels()
 
     Use the matmul_kernel template (../matmul_kernel.py) and append config to the
     kernel name. E.g. matmul_kernel_BM256_BN256_BK64_GM1_SK1_nW1_nS0_EU0_kP2_mfma16()
     """
 
-    f_kernel = open(get_filename_myKernels(), 'w')
+    if len(configs) == 0:
+        return
+
+    f_kernel = open(get_filename_myKernels(), 'a')
 
     # write imports
     import_str = """import triton

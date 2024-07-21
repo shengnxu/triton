@@ -3,6 +3,8 @@ import triton
 import triton.language as tl
 
 import os
+import subprocess
+from datetime import datetime
 
 TORCH_HAS_FP8E5B16 = hasattr(torch, 'float8_e5m2fnuz')
 TORCH_HAS_FP8E4B8 = hasattr(torch, 'float8_e4m3fnuz')
@@ -27,6 +29,30 @@ name_to_tl_types = {
     'fp8': tl.float8e4b8,
     'bf8': tl.float8e5b16,
 }
+
+
+def run_bash_command_wrapper(commandstring, capture=True):
+    try:
+        run_bash_command(commandstring, capture)
+    except subprocess.CalledProcessError as e:
+        if not capture:
+            print(f"running {commandstring} one more time")
+        run_bash_command(commandstring, capture)
+
+
+def run_bash_command(commandstring, capture=True):
+    if capture:
+        proc = subprocess.run(commandstring,
+                              shell=True,
+                              check=True,
+                              executable='/bin/bash',
+                              stdout=subprocess.PIPE)
+        return proc.stdout.splitlines()
+    proc = subprocess.run(commandstring,
+                          shell=True,
+                          check=True,
+                          executable='/bin/bash')
+    return None
 
 
 def get_filename_myKernels():

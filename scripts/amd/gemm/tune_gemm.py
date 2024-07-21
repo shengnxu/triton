@@ -572,7 +572,7 @@ def parse_args():
     parser.add_argument("--compare_wo_tuning",
                         action='store_true',
                         default=False,
-                        help="Whether check result correctness")
+                        help="Whether check result correctness without tuning.")
     parser.add_argument("--benchmark",
                         action='store_true',
                         default=False,
@@ -596,11 +596,11 @@ def parse_args():
     parser.add_argument("--jobs",
                         type=int,
                         default=1,
-                        help="number of generated files")
+                        help="number of tasks during the profiling process")
     parser.add_argument("--iters",
                         type=int,
                         default=1000,
-                        help="number of generated files")
+                        help="number of iterations used in --benchmark mode")
     parser.add_argument(
         "--init_type",
         type=str,
@@ -626,7 +626,7 @@ def parse_args():
     parser.add_argument("--no_warmup",
                         action='store_true',
                         default=False,
-                        help="Do not call the warmup kernel")
+                        help="Whether we want to skip the compilation stage")
     args = parser.parse_args()
     if not args.o:
         if args.benchmark:

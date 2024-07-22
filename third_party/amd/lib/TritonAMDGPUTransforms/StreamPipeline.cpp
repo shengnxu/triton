@@ -752,7 +752,7 @@ preProcessLoopAndGetSchedule2(scf::ForOp &forOp, int numStages,
                  std::vector<std::pair<Operation *, unsigned>> &s) {
         s = std::move(schedule);
       };
-  options.peelEpilogue = false;
+  options.peelEpilogue = true;
   options.predicateFn = tt::predicateOp;
   options.supportDynamicLoops = true;
   options.annotateFn = [](Operation *op,

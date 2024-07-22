@@ -174,21 +174,22 @@ from {get_filename_without_extension(get_filename_myKernels())} import *
 
     # write compile_kernels
     # pre string
+    stride_a_str = "1, M" if col_a else "M, 1"
+    stride_b_str = "1, N" if col_b else "N, 1"
+    stride_c_str = "N, 1"
     compile_kernels_pre_str = f"""def compile_kernels(M, N, K, rotating_buffer_size, bias_size, num_threads):
     thread_pool = multiprocessing.Pool(processes=num_threads)
-    tensors = gen_rotating_tensors(M, N, K, '{dtype_a}', {col_a}, '{dtype_b}', {col_b}, '{dtype_c}',
-                                   1, '{init_type}', rotating_buffer_size, bias_size, device='cuda')
 
-    a = tensors['input_a'][0]
-    b = tensors['input_b'][0]
-    c = tensors['output_c'][0]
     assert bias_size == M or bias_size == 0
 
-    stride_bias = tensors['bias'][0].stride(0) if bias_size > 0 else 0
+    stride_bias = 1 if bias_size > 0 else 0
+    stride_am, stride_ak = {stride_a_str}
+    stride_bk, stride_bn = {stride_b_str}
+    stride_cm, stride_cn = {stride_c_str}
     task_args = (M, N, K,
-                 a.stride(0), a.stride(1),
-                 b.stride(0), b.stride(1),
-                 c.stride(0), c.stride(1), stride_bias)
+                 stride_am, stride_ak,
+                 stride_bk, stride_bn,
+                 stride_cm, stride_cn, stride_bias)
 
     results = []
     config_names = []

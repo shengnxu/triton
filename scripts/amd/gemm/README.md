@@ -3,17 +3,17 @@
 ## matmul kernel
 
 The matmul kernel implementation can be found as [matmul_kernel.py](https://github.com/ROCm/triton/blob/triton-mlir/scripts/amd/gemm/matmul_kernel.py), which includes the following features:
-- grouping order of workgroup id, which is controled by `GROUP_SIZE_M`, that
+- grouping order of workgroup id, which is controlled by `GROUP_SIZE_M`, that
 implements L2 cache optimization introduced in the [tutorial](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html#l2-cache-optimizations).
-- split-k algorithm, which is controled by `SPLIT_K`.
-- Bias along M dim, which is controled by `BIAS` and `bias_ptr`.
-- Masked load along K dim inside the loop, which is controled by `EVEN_K`.
+- split-k algorithm, which is controlled by `SPLIT_K`.
+- Bias along M dim, which is controlled by `BIAS` and `bias_ptr`.
+- Masked load along K dim inside the loop, which is controlled by `EVEN_K`.
 This means `BLOCK_SIZE_K` does not need to divide K dim.
 
 ### Differences between the tutorial
 
 Unlike the [matmul tutorial](https://github.com/triton-lang/triton/blob/main/python/tutorials/03-matrix-multiplication.py) (referred as the tutorial), 
-the matmul kernel used in the tuning script (referred as the kerel) does not 
+the matmul kernel used in the tuning script (referred as the kernel) does not
 guard load along M and N dim 
 ([this](https://github.com/triton-lang/triton/blob/main/python/tutorials/03-matrix-multiplication.py#L282-L283) shows how this is done in the tutorial).
 When `BLOCK_SIZE_M` or `BLOCK_SIZE_N` does not divide M or N, the kernel will 
@@ -52,7 +52,7 @@ The following `options` are supported in the tuning mode
   required for some old torch version, in which some function used in the warmup
   kernel launch is not supported.
 - Parallel profiling of kernels: The tuning space is first divided into a number
-of tasks, which is controled by `--jobs n`. And all the tasks can be profiled in
+of tasks, which is controlled by `--jobs n`. And all the tasks can be profiled in
 parallel on a number of GPUs in the system. There are two ways to specify which 
 GPU(s) we want to use for profiling. Note that these flags cannot be use together.
 By default, only one task is generated and profiled on GPU0.
@@ -65,7 +65,7 @@ By default, only one task is generated and profiled on GPU0.
     the `sin` function.
     - zeros: initialize all data as 0, i.e. `torch.zeros`
     - randn (default): normal distribution, i.e. `torch.randn`
-  - `--rotating_tensor SIZE`: provide the size of memory used for rotatin tensor.
+  - `--rotating_tensor SIZE`: provide the size of memory used for rotating tensor.
   The default is 0, meaning rotating tensor is not used.
   - `--icahe_flush`: If true, the script will generate a kernel to flush i-cache.
   The default is False.
@@ -126,6 +126,8 @@ The supported `options` are as followings
 - `-dtype_a dtype`, `-dtype_b dtype`, and `-dtype_c dtype`: same as tuning mode.
 - `--iters n` controls the number of iterations to run the kernel.
 The default value is 1000.
+- `--icahe`: same as tuning mode
+- `--rotating_tensor SIZE`: same as tuning mode
   
 
 ## Tuning script implementation overview

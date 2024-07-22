@@ -230,7 +230,7 @@ def main():
     numThreads = args.n
     rotating_buffer_size = args.rotating_tensor
     """
-    compile_kernels_call_str = f'compile_kernels({M}, {N}, {K}, rotating_buffer_size, {M}, numThreads)'
+    compile_kernels_call_str = f'compile_kernels({M}, {N}, {K}, rotating_buffer_size, {bias_size}, numThreads)'
 
     f_kernel.write(def_main_str)
     f_kernel.write(compile_kernels_call_str + "\n\n")
@@ -320,12 +320,13 @@ from icache_flush import icache_flush
             a = tensors['input_a'][i % rotating_num]
             b = tensors['input_b'][i % rotating_num]
             c = tensors['output_c'][i % rotating_num]
-            bias = tensors['bias'][i % rotating_num] if bias_size > 0 else None"""
+            bias = tensors['bias'][i % rotating_num] if bias_size > 0 else None
+            bias_stride = bias.stride(0) if bias_size > 0 else 0"""
         if icache_flush:
             matmul_call_str += f"""
             icache_flush()"""
         matmul_call_str += f"""
-            d = matmul_{configStr}(a, b, c, bias, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), bias.stride(0))"""
+            d = matmul_{configStr}(a, b, c, bias, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), bias_stride)"""
         f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
@@ -344,7 +345,7 @@ def main():
     numThreads = args.n
     rotating_buffer_size = args.rotating_tensor
     """
-    test_gemm_call_str = f'test_gemm({M}, {N}, {K}, rotating_buffer_size, {M})'
+    test_gemm_call_str = f'test_gemm({M}, {N}, {K}, rotating_buffer_size, {bias_size})'
     for fi in range(jobs):
         f_kernel[fi].write(def_main_str)
         f_kernel[fi].write(test_gemm_call_str + "\n\n")

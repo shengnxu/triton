@@ -627,6 +627,10 @@ def parse_args():
                         action='store_true',
                         default=False,
                         help="Whether we want to skip the compilation stage")
+    parser.add_argument("--hack_triton_compiler",
+                        action='store_true',
+                        default=False,
+                        help="Modify the triton source to avoid backend query")
     args = parser.parse_args()
     if not args.o:
         if args.benchmark:
@@ -691,6 +695,7 @@ def main():
     jobs = args.jobs
     iters = args.iters
     skipWarmup = args.no_warmup
+    hack_triton = args.hack_triton_compiler
 
     # Get GPU ids
     ngpus = args.ngpus
@@ -777,6 +782,12 @@ def main():
     ## Before tuning starts, clear cache and previously generated kernel files
     run_bash_command("rm -rf ~/.triton/cache")
     run_bash_command(f"rm -rf {get_filename_myKernels()}")
+
+    ## Modify triton compiler
+    ## Hacky !!!
+    if hack_triton:
+        patch_triton_compiler()
+
 
     configs = []
 

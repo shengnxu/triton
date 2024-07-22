@@ -89,3 +89,27 @@ def get_default_tuning_result_filename():
     path = os.path.dirname(os.path.abspath(__file__))
     defaultName = f"{path}/../tuning_results_{git_branch_name}@{git_commit_hash}_{dt_string}.yaml"
     return defaultName
+
+
+def patch_triton_compiler():
+    device = triton.runtime.driver.active.get_current_device()
+    stream = triton.runtime.driver.active.get_current_stream(device)
+    target = triton.runtime.driver.active.get_current_target()
+
+    triton_location_str = run_bash_command("pip show triton | grep Editable")
+    if not triton_location_str:
+        print("triton source not found from pip show triton")
+
+    triton_dir = triton_location_str[0].split()[-1].decode('utf-8')
+
+    jit_filename = os.path.join(triton_dir, "triton/runtime", "jit.py")
+
+    run_bash_command(f"sed -i 's/driver.active.get_current_device()/{device}/g' {jit_filename}")
+    run_bash_command(f"sed -i 's/driver.active.get_current_stream(device)/{stream}/g' {jit_filename}")
+
+    hip_driver_filename = os.path.join(triton_dir, "../third_party/amd/backend/", "driver.py")
+    cuda_driver_filename = os.path.join(triton_dir, "../third_party/nvidia/backend/", "driver.py")
+
+    run_bash_command(f"sed -i 's/import torch/return True/g' {hip_driver_filename}")
+    run_bash_command(f"sed -i 's/device = self.get_current_device()/return GPUTarget(\"hip\", \"{target.arch}\", 64)/g' {hip_driver_filename}")
+    run_bash_command(f"sed -i 's/import torch/return False/g' {cuda_driver_filename}")

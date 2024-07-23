@@ -37,7 +37,7 @@ The input gemm sizes are prepared in a yaml file. Here is an example yaml file:
 
 The tuning script works as follows
 ```python
-./tune_gemm --gemm_size_file input.yaml [options]
+./tune_gemm.py --gemm_size_file input.yaml [options]
 ```
 The following `options` are supported in the tuning mode
 
@@ -87,30 +87,40 @@ By default, only one task is generated and profiled on GPU0.
   result. The default filename is `tuning_results_branchName@gitCommit_timeStamp.yaml`.
   Therefore, each time the user runs the tuning script, a different output file
   will be generated.
+- Hacks
+  - `--hack_triton_compiler`: If set, the triton source code will be modified
+  to provide a static backend target so that the compiler will not query
+  GPU information. This makes sure that during the compilation stage, no
+  hip runtime kernels are launched.
+  Note that this is a very hacky option, because
+    - It modifies the triton compiler directly, which is located from
+    `pip show triton`.
+    - It does string match and replace to modify the code.
+    - It does not restore the code when the tuning session terminates.
 
 Here are some example usages of running the script for tuning:
 
 Tune some gemm sizes with f16 input
 ```python
-./tune_gemm --gemm_size_file input.yaml --ngpus 8 --jobs 32 --o output.yaml
+./tune_gemm.py --gemm_size_file input.yaml --ngpus 8 --jobs 32 --o output.yaml
 ```
 It's recommended to use as many GPUs as possible and set `--jobs` to
 a value that is 4 to 6 times the number of GPUs.
 
 If you are only allowed to use a subset of the GPUs, you can
 ```python
-./tune_gemm --gemm_size_file input.yaml --gpu_ids 0,1,3,4 --jobs 32 --o output.yaml
+./tune_gemm.py --gemm_size_file input.yaml --gpu_ids 0,1,3,4 --jobs 32 --o output.yaml
 ```
 This runs the profiling on GPU 0,1,3,4.
 
 For bf8 input
 ```python
-./tune_gemm --gemm_size_file input.yaml --ngpus 8 --jobs 32 -dtype_a bf8 -dtype_b bf8
+./tune_gemm.py --gemm_size_file input.yaml --ngpus 8 --jobs 32 -dtype_a bf8 -dtype_b bf8
 ```
 
 Check correctness of the tuned configs
 ```python
-./tune_gemm --gemm_size_file output.yaml --compare_wo_tuning
+./tune_gemm.py --gemm_size_file output.yaml --compare_wo_tuning
 ```
 
 
@@ -120,7 +130,7 @@ In benchmark mode, the script will run a single given config multiple times to
 collect performance data. The benchmark mode works as
 The tuning script works as follows
 ```python
-./tune_gemm --gemm_size_file input.yaml [options] --benchmark
+./tune_gemm.py --gemm_size_file input.yaml [options] --benchmark
 ```
 The supported `options` are as followings
 - `-dtype_a dtype`, `-dtype_b dtype`, and `-dtype_c dtype`: same as tuning mode.
@@ -273,6 +283,14 @@ that cannot divide `K`.
 - Tuning result file is open and closed inside the tuning loop, enabling timely flush
 of the tuning results.
 - Now we use `rocprofv2` to measure kernel time.
+- We can use `--hack_triton_compile` to avoid all GPU activities during the compilation 
+stage. This is achieved by modifying the triton frontend compiler in the following
+places:
+  - Return True from the `is_active()` function in the hip hackend [driver](https://github.com/triton-lang/triton/blob/fd691c67ac20958a67693358186d877790f5f48f/third_party/amd/backend/driver.py#L433)
+  - Return statically constructed GPUTarget from the `get_current_target()` 
+  function in the hip backend [driver](https://github.com/triton-lang/triton/blob/fd691c67ac20958a67693358186d877790f5f48f/third_party/amd/backend/driver.py#L437)
+  - Return False from the `is_active()` function in the cuda hackend [driver](https://github.com/triton-lang/triton/blob/fd691c67ac20958a67693358186d877790f5f48f/third_party/nvidia/backend/driver.py#L383)
+  - Statically set `device` and `stream` in the [jit.py](https://github.com/triton-lang/triton/blob/fd691c67ac20958a67693358186d877790f5f48f/python/triton/runtime/jit.py#L588-L589)
 
 
 # One config running script

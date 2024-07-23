@@ -1,4 +1,5 @@
-# fp8
+#!/usr/bin/env python3
+
 import argparse
 import sys
 import yaml
@@ -569,10 +570,11 @@ def parse_args():
                         action='store_true',
                         default=False,
                         help="Whether check result correctness")
-    parser.add_argument("--compare_wo_tuning",
-                        action='store_true',
-                        default=False,
-                        help="Whether check result correctness without tuning.")
+    parser.add_argument(
+        "--compare_wo_tuning",
+        action='store_true',
+        default=False,
+        help="Whether check result correctness without tuning.")
     parser.add_argument("--benchmark",
                         action='store_true',
                         default=False,
@@ -605,16 +607,15 @@ def parse_args():
         "--init_type",
         type=str,
         default='randn',
-        help=
-        "Initialization type for input matrices (default uniform rand [0, 1.0)])"
-    )
+        choices=['randn', 'hpl', 'trig_float', 'zeros'],
+        help="Input tensor initialization (default normal distribution)")
     parser.add_argument(
         "--rotating_tensor",
         type=int,
         default=0,
-        help=
-        "total size (MB) of all tensors (default 0 MB (no rotating tensor), need to be larger than the L1, L2, MALL size)"
-    )
+        help="total size (MB) of all tensors (a, b, c, bias)."
+        " The default value is 0 (no rotating tensor)."
+        " When set, it needs to be larger than the L1, L2, MALL size)")
     parser.add_argument("--bias_vector",
                         action='store_true',
                         default=False,
@@ -788,7 +789,6 @@ def main():
     if hack_triton:
         patch_triton_compiler()
 
-
     configs = []
 
     ## Big for loop of tuning
@@ -926,6 +926,11 @@ def main():
     if not run_bench:
         print(f"Tuning ends at: {end_time}")
         print(f"Total tuning time (h:m:s): {tuning_time}")
+
+    if hack_triton:
+        print(
+            "Triton compiler is hacked, don't forget to git restore the changes :)"
+        )
 
 
 if __name__ == '__main__':

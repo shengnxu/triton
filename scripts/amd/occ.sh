@@ -67,3 +67,5 @@ echo "$perf"
 sed -i '/local_/! {/\.loc/d}' output.mlir
 sed -i '/\.Ltmp.*:/d' output.mlir
 sed -i '/AMD clang version/d' output.mlir
+
+sed -n '/AMDGCN/, $p' output.mlir > output.amdgcn

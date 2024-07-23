@@ -668,16 +668,6 @@ def type_name_to_bytes(ty_name):
         sys.exit(1)
 
 
-def format_output(unformatted):
-    if unformatted < 0.0001:
-        formatted = "{:.3e}".format(unformatted)
-    elif unformatted > 1000:
-        formatted = "{:.1f}".format(unformatted)
-    else:
-        formatted = "{:.2f}".format(unformatted)
-    return formatted
-
-
 def get_rocm_version():
     torch_hip_version = torch.version.hip
     vers = torch_hip_version.split('.')
@@ -885,9 +875,7 @@ def main():
         }
         sizeDict.update(bestConfig)
         if not run_bench:
-            f_results.write("- " + str(sizeDict) + " ")
-            f_results.write(
-                f'# TFLOPS: {formatted_tflops} time(us): {minTime}\n')
+            f_results.write("- " + str(sizeDict) + "\n")
 
         # remove generated files if asked to
         if not keepTmp:

@@ -14,26 +14,31 @@ def matmul_kernel(
     SPLIT_K: tl.constexpr, GROUP_SIZE_M: tl.constexpr, BIAS: tl.constexpr,
     EVEN_K: tl.constexpr
 ):
-    pid = tl.program_id(axis=0)
+    bid = tl.program_id(axis=0)
+    xcd_id = bid % 8
+    id_on_xcd = bid // 8
+    tid = xcd_id * 38 + id_on_xcd
+
+    #tid = bid
     pid_z = tl.program_id(1)
-    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_tid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_tid_n = tl.cdiv(N, BLOCK_SIZE_N)
     if GROUP_SIZE_M == 1:
-        pid_m = pid // num_pid_n
-        pid_n = pid % num_pid_n
+        tid_m = tid // num_tid_n
+        tid_n = tid % num_tid_n
     else:
-        num_pid_in_group = GROUP_SIZE_M * num_pid_n
-        group_id = pid // num_pid_in_group
-        first_pid_m = group_id * GROUP_SIZE_M
-        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-        pid_m = first_pid_m + (pid % group_size_m)
-        pid_n = (pid % num_pid_in_group) // group_size_m
+        num_tid_in_group = GROUP_SIZE_M * num_tid_n
+        group_id = tid // num_tid_in_group
+        first_tid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_tid_m - first_tid_m, GROUP_SIZE_M)
+        tid_m = first_tid_m + (tid % group_size_m)
+        tid_n = (tid % num_tid_in_group) // group_size_m
     if SPLIT_K == 1:
         offs_k = tl.arange(0, BLOCK_SIZE_K)
     else:
         offs_k = pid_z * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
-    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
-    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
+    offs_am = (tid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
+    offs_bn = (tid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
     a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
     if BIAS:
@@ -54,8 +59,8 @@ def matmul_kernel(
     c = accumulator.to(c_ptr.type.element_ty)
     if BIAS:
         c += bias[:, None]
-    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    offs_cm = tid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_cn = tid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     if SPLIT_K == 1:

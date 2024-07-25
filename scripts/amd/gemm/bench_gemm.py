@@ -85,7 +85,7 @@ def run_hipblaslt_bench(hipblaslt_bench, M, N, K, transA, transB, dtype):
 def run_triton_tuning(input, output, dtype_a):
     print(f"Tuning gemm sizes from {input} with Triton", flush=True)
     run_bash_command(
-        f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --ngpus 8 --jobs 32 --o {output}",
+        f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --ngpus 8 --jobs 32 --o {output} --rotating_tensor 512",
         False)
 
 
@@ -95,7 +95,7 @@ def run_triton_bench(input, dtype_a):
         sys.exit(1)
     print(f"Benchmarking gemms from {input} with Triton", flush=True)
     triton_output = run_bash_command(
-        f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --benchmark"
+        f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --benchmark --rotating_tensor 512"
     )
 
     data = []

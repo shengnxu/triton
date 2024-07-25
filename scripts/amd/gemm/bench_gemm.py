@@ -163,7 +163,7 @@ def main():
             transB = item['rowMajorB']
             mnks.append((M, N, K, transA, transB))
 
-        hipblaslt_ROOT_DIR = os.environ.get['HIPBLASLT_ROOT']
+        hipblaslt_ROOT_DIR = os.environ.get('HIPBLASLT_ROOT')
         if not hipblaslt_ROOT_DIR:
             print("Need to provide hipblaslt root dir: HIPBLASLT_ROOT")
             sys.exit(1)

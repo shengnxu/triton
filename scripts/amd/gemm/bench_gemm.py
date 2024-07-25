@@ -62,7 +62,7 @@ def run_hipblaslt_bench(hipblaslt_bench, M, N, K, transA, transB, dtype):
     hipBLASLt_bench_args += f" -i {ITER} -j {WARMUP} --print_kernel_info"
     SED_WINNER = "sed -n '/Winner:/, $p'"
 
-    print(f"Tuning hipblaslt with {hipBLASLt_bench_args}")
+    print(f"Tuning hipblaslt with {hipBLASLt_bench_args}", flush=True)
 
     winner = run_bash_command(
         f"HIP_FORCE_DEV_KERNARG=1 {hipblaslt_bench} {hipBLASLt_bench_args} | {SED_WINNER}"
@@ -83,7 +83,7 @@ def run_hipblaslt_bench(hipblaslt_bench, M, N, K, transA, transB, dtype):
 
 
 def run_triton_tuning(input, output, dtype_a):
-    print(f"Tuning gemm sizes from {input} with Triton")
+    print(f"Tuning gemm sizes from {input} with Triton", flush=True)
     run_bash_command(
         f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --ngpus 8 --jobs 32 --o {output}",
         False)
@@ -93,7 +93,7 @@ def run_triton_bench(input, dtype_a):
     if not os.path.exists(input):
         print(f"{input} does not exist, please run tuning first")
         sys.exit(1)
-    print(f"Benchmarking gemms from {input} with Triton")
+    print(f"Benchmarking gemms from {input} with Triton", flush=True)
     triton_output = run_bash_command(
         f"./tune_gemm.py --gemm_size_file {input} -dtype_a {dtype_a} -dtype_b {dtype_a} --benchmark"
     )

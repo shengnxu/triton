@@ -41,16 +41,21 @@ def matmul_kernel(
         bias = tl.load(bias_ptrs, mask=offs_am < M, other=0.0)
     acc_dtype = tl.float32 if a_ptr.type.element_ty != tl.int8 else tl.int32
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)):
-        if EVEN_K:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
-        else:
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+
+    max_k = tl.cdiv(K, BLOCK_SIZE_K * SPLIT_K)
+
+    for k in range(0, max_k-1):
+        a = tl.load(tl.multiple_of(a_ptrs, (1, 16)))
+        b = tl.load(tl.multiple_of(b_ptrs, (16, 1)))
         accumulator += tl.dot(a, b)
         a_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
+
+    k = max_k - 1
+    a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+    b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+    accumulator += tl.dot(a, b)
+
     c = accumulator.to(c_ptr.type.element_ty)
     if BIAS:
         c += bias[:, None]

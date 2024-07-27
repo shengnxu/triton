@@ -52,8 +52,11 @@ def matmul_kernel(
         b_ptrs += BLOCK_SIZE_K * SPLIT_K * stride_bk
 
     k = max_k - 1
-    a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-    b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+    offs_k = k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+    a_ptrsX = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+    b_ptrsX = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+    a = tl.load(a_ptrsX, mask=offs_k[None, :] < K, other=0.0)
+    b = tl.load(b_ptrsX, mask=offs_k[:, None] < K, other=0.0)
     accumulator += tl.dot(a, b)
 
     c = accumulator.to(c_ptr.type.element_ty)

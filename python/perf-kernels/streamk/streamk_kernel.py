@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit()
 def get_new_pid(current_pid, num_sms):
     # Number of XCDs
@@ -15,9 +16,16 @@ def get_new_pid(current_pid, num_sms):
     new_pid = xcd * pids_per_xcd + local_pid
     return new_pid
 
+
 @triton.jit()
-def get_tiles_config(M, N, K, num_sms,
-        BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
+def get_tiles_config(
+    M,
+    N,
+    K,
+    num_sms,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
 ):
     total_blocks_M = tl.cdiv(M, BLOCK_SIZE_M)
     total_blocks_N = tl.cdiv(N, BLOCK_SIZE_N)
@@ -42,20 +50,40 @@ def get_tiles_config(M, N, K, num_sms,
 
     return iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters
 
+
 @triton.jit()
 def streamk_gemm(
-        A, B, C, bias_ptr, P, locks,
-        M, N, K, num_sms,
-        stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, stride_bias,
-        BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
-        GROUP_SIZE_M: tl.constexpr, BIAS: tl.constexpr, EVEN_K: tl.constexpr,
+    A,
+    B,
+    C,
+    bias_ptr,
+    P,
+    locks,
+    M,
+    N,
+    K,
+    num_sms,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    stride_bias,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
+    BIAS: tl.constexpr,
+    EVEN_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
     pid = get_new_pid(pid, num_sms)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-    iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters = get_tiles_config(M, N, K, num_sms, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
+    iters_per_tile, total_full_tiles, total_streamk_tiles, streamk_iters_pcu, streamk_remainder_iters = get_tiles_config(
+        M, N, K, num_sms, BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K)
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
     rk = tl.arange(0, BLOCK_SIZE_K)
@@ -72,8 +100,8 @@ def streamk_gemm(
             pid_m = first_pid_m + (tile_id % group_size_m)
             pid_n = (tile_id % num_pid_in_group) // group_size_m
 
-        rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
-        rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+        rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+        rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
         rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
         rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
@@ -97,7 +125,7 @@ def streamk_gemm(
 
         c = acc.to(C.type.element_ty)
         if BIAS:
-             c += bias[:, None]
+            c += bias[:, None]
 
         rm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         rn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -106,7 +134,8 @@ def streamk_gemm(
         tl.store(C_, c, mask=mask)
 
     start_iter = total_full_tiles * iters_per_tile + pid * streamk_iters_pcu + tl.minimum(pid, streamk_remainder_iters)
-    last_iter = total_full_tiles * iters_per_tile + (pid + 1) * streamk_iters_pcu + tl.minimum(pid + 1, streamk_remainder_iters)
+    last_iter = total_full_tiles * iters_per_tile + (pid + 1) * streamk_iters_pcu + tl.minimum(
+        pid + 1, streamk_remainder_iters)
     while start_iter < last_iter:
         remainder = start_iter % iters_per_tile
         end_iter = tl.minimum(start_iter + (iters_per_tile - remainder), last_iter)
@@ -123,11 +152,11 @@ def streamk_gemm(
             pid_m = first_pid_m + (tile_id % group_size_m)
             pid_n = (tile_id % num_pid_in_group) // group_size_m
 
-        rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
-        rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+        rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+        rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
         rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
         rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
-    #    rk = tl.arange(0, BLOCK_SIZE_K)
+        #    rk = tl.arange(0, BLOCK_SIZE_K)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak + BLOCK_SIZE_K * stride_ak * remainder
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn + BLOCK_SIZE_K * stride_bk * remainder
 
@@ -156,7 +185,7 @@ def streamk_gemm(
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
                 while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
-         #       while tl.load(locks + next_pid, cache_modifier='.ca') != 1:
+                    #       while tl.load(locks + next_pid, cache_modifier='.ca') != 1:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)
                 rn1 = tl.arange(0, BLOCK_SIZE_N)
@@ -170,10 +199,10 @@ def streamk_gemm(
 
             c = acc.to(C.type.element_ty)
             if BIAS:
-                 c += bias[:, None]
+                c += bias[:, None]
 
-            rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
-            rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+            rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+            rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
             rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
             rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
             C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
@@ -185,7 +214,7 @@ def streamk_gemm(
             rn1 = tl.arange(0, BLOCK_SIZE_N)
             rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
             rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
-            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
             tl.store(P_, acc)
             tl.atomic_xchg(locks + pid, 1)
 

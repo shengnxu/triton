@@ -15,9 +15,9 @@ from streamk_kernel import streamk_gemm
 from datetime import datetime
 import multiprocessing
 import pandas as pd
-import csv
 
-device_oi = 650./3.0
+device_oi = 650. / 3.0
+
 
 def get_full_tuning_space():
     configs = []
@@ -43,17 +43,24 @@ def get_full_tuning_space():
                             for waves_per_eu in waves_per_eu_range:
                                 for matrix_instr_nonkdim in matrix_instr_nonkdim_range:
                                     for kpack in kpack_range:
-                                        configs.append({'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m, 'num_warps': num_warps, 'num_stages': num_stages, 'waves_per_eu': waves_per_eu, 'matrix_instr_nonkdim': matrix_instr_nonkdim, 'kpack': kpack})
+                                        configs.append({
+                                            'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k,
+                                            'GROUP_SIZE_M': group_m, 'num_warps': num_warps, 'num_stages': num_stages,
+                                            'waves_per_eu': waves_per_eu, 'matrix_instr_nonkdim': matrix_instr_nonkdim,
+                                            'kpack': kpack
+                                        })
 
     return configs
+
 
 def get_gemm_oi(M, N, K):
     FLOPs = 2 * M * N * K
     # 4 for fp32
-    # to do check dtype for bytesmoved 
+    # to do check dtype for bytesmoved
     bytesmoved = (M * K + K * N + 2 * M * N) * 4
     return FLOPs / bytesmoved
-     
+
+
 def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
     pruned_configs = []
 
@@ -64,7 +71,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 
     # TODO (zhanglx): figure out the boundary between large and small gemms
     large_gemm = False
-    if M >= 2048 and N >=2048:
+    if M >= 2048 and N >= 2048:
         large_gemm = True
 
     for config in configs:
@@ -123,10 +130,11 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 def run_bash_command_wrapper(commandstring, capture=True):
     try:
         run_bash_command(commandstring, capture)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         if not capture:
             print(f"running {commandstring} one more time")
         run_bash_command(commandstring, capture)
+
 
 def run_bash_command(commandstring, capture=True):
     if capture:
@@ -134,6 +142,7 @@ def run_bash_command(commandstring, capture=True):
         return proc.stdout.splitlines()
     proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash')
     return None
+
 
 def read_config(config):
     block_m = config.get('BLOCK_SIZE_M')
@@ -148,7 +157,8 @@ def read_config(config):
     return block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfma_instr_size, kpack
 
 
-def gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock):
+def gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a, dtype_b, dtype_c, dtype_p,
+                                         dtype_lock):
     block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(config)
     torch_dtype_a = 'fp16'
     torch_dtype_b = 'fp16'
@@ -231,7 +241,8 @@ def generated_kernel_name(M, N, K, gpu_id):
 # 4. test_gemm to invoke
 # 4.1 run try_config in parallel
 # 4.2 matmul in a loop of 10 iterations
-def generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, jobs, iters, run_bench):
+def generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs,
+                    jobs, iters, run_bench):
     filenames = []
     for i in range(jobs):
         filenames.append(generated_kernel_name(M, N, K, i))
@@ -257,7 +268,8 @@ from tune_streamk import gen_input
     for config in configs:
         file_idx = idx % jobs
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock)
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, dtype_a,
+                                                                         dtype_b, dtype_c, dtype_p, dtype_lock)
         # Copy the streamk_gemm with name replaced
         streamk_gemm_config = streamk_gemm_code.replace("streamk_gemm", f"streamk_gemm_{configStr}")
         streamk_gemm_config = streamk_gemm_config.replace("import triton.language as tl", "")
@@ -291,7 +303,8 @@ from tune_streamk import gen_input
     idx = 0
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None,
+                                                            None)
         task_str = f"        results += [thread_pool.apply_async(try_config_{configStr}, args=task_args)]\n" + \
                    f"        config_names += ['{configStr}']\n"
         f_kernel[idx % jobs].write(task_str)
@@ -323,7 +336,8 @@ from tune_streamk import gen_input
     runs = iters if run_bench else 200
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
-        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
+        configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None,
+                                                            None)
         block_m = config.get('BLOCK_SIZE_M')
         block_n = config.get('BLOCK_SIZE_N')
         matmul_call_str = f"""
@@ -362,7 +376,10 @@ def main():
 def extract_kernel_time(M, N, K, num_sms, EVEN_K, config, df):
     # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
     # once the bug is fixed, we should not need below two lines
-    cols = ['Index','KernelName','gpu-id','queue-id','queue-index','pid','tid','grd','wgr','lds','scr','arch_vgpr','accum_vgpr','sgpr','wave_size','DispatchNs','BeginNs','EndNs','CompleteNs']
+    cols = [
+        'Index', 'KernelName', 'gpu-id', 'queue-id', 'queue-index', 'pid', 'tid', 'grd', 'wgr', 'lds', 'scr',
+        'arch_vgpr', 'accum_vgpr', 'sgpr', 'wave_size', 'DispatchNs', 'BeginNs', 'EndNs', 'CompleteNs'
+    ]
     df.columns = cols
 
     configStr, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, config, None, None, None, None, None)
@@ -383,13 +400,17 @@ def profile_batch_kernels(M, N, K, num_sms, gpuid, gpus, jobs, verbose):
     while jobId < jobs:
         if verbose:
             print(f"profiling {generated_kernel_name(M, N, K, jobId)} on GPU {gpuid}")
-        run_bash_command_wrapper(f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {generated_kernel_name(M, N, K, jobId)}", capture=(verbose < 2))
+        run_bash_command_wrapper(
+            f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {generated_kernel_name(M, N, K, jobId)}",
+            capture=(verbose < 2))
         jobId += ngpus
 
 
-def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, run_bench, jobs, iters, skipWarmup, verbose=0, num_threads=16, gpus=[0]):
+def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs,
+                     run_bench, jobs, iters, skipWarmup, verbose=0, num_threads=16, gpus=[0]):
     # Generate kernel out of all configs
-    generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs, jobs, iters, run_bench)
+    generate_kernel(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs,
+                    jobs, iters, run_bench)
 
     # remove any compiled kernel in the cache
     run_bash_command("rm -rf ~/.triton/cache")
@@ -405,7 +426,10 @@ def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
         print(f"compile time: {compile_time}", flush=True)
 
     # profile generated kernels
-    running = [multiprocessing.Process(target=profile_batch_kernels, args=(M, N, K, num_sms, gpu_id, gpus, jobs, verbose)) for gpu_id in gpus]
+    running = [
+        multiprocessing.Process(target=profile_batch_kernels, args=(M, N, K, num_sms, gpu_id, gpus, jobs, verbose))
+        for gpu_id in gpus
+    ]
     for p in running:
         p.start()
     for p in running:
@@ -422,11 +446,16 @@ def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\') for i in range(jobs)]
+    df_prof = [
+        pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\')
+        for i in range(jobs)
+    ]
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
         file_idx = idx % jobs
-        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, num_sms, EVEN_K, config, df_prof[file_idx]))]
+        tasks += [
+            thread_pool.apply_async(extract_kernel_time, args=(M, N, K, num_sms, EVEN_K, config, df_prof[file_idx]))
+        ]
         idx += 1
     thread_pool.close()
     thread_pool.join()
@@ -447,6 +476,7 @@ def tune_gemm_config(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
         print(f"post procesing time: {post_time}", flush=True)
     return minTime, bestConfig, compile_time, profile_time, post_time
 
+
 def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
     d_type = name_to_tl_types[ty_name]
     torch.manual_seed(seed)
@@ -466,7 +496,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         # This init type has element[i] in row[j] equal to sin(i+j*N)
         elif init_type == 'trig_float':
             M, N = size
-            return torch.reshape(torch.arange(0, M*N), (M, N)).sin().to(dtype=dtype, device='cuda')
+            return torch.reshape(torch.arange(0, M * N), (M, N)).sin().to(dtype=dtype, device='cuda')
         elif init_type == 'zeros':
             return torch.zeros(size, dtype=dtype, device='cuda')
         elif init_type == "randn":
@@ -475,7 +505,7 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         else:
             raise ValueError("Bad matrix initialization type.")
 
-    raw_data = init_by_size_and_type((N,M) if needTrans else (M,N), torch.float32, init_type)
+    raw_data = init_by_size_and_type((N, M) if needTrans else (M, N), torch.float32, init_type)
     if needTrans:
         raw_data = raw_data.T
     if (d_type == tl.float8e4b8 and TORCH_HAS_FP8E4B8) or \
@@ -488,13 +518,15 @@ def gen_input(M, N, ty_name, needTrans, seed, init_type, device='cuda'):
         f8_tensor = f8_tensor & 0b00111111
         input = triton.reinterpret(f8_tensor, d_type)
         input_f16 = torch.empty_like(f8_tensor, dtype=torch.float16)
-        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
         n_elements = raw_data.numel()
         copy_kernel[grid](input, input_f16, n_elements, BLOCK_SIZE=1024)
 
     return input, input_f16
 
-def matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K):
+
+def matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu,
+           mfmaInstrSize, kpack, EVEN_K):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     #assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -503,25 +535,13 @@ def matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_w
     K, N = b.shape
     # 1D launch kernel where each block gets its own program.
 
-    grid = num_sms 
+    grid = num_sms
 
-    streamk_gemm[grid,](
-        a, b, c, P, locks,
-        M, N, K, num_sms,
-        a.stride(0), a.stride(1),
-        b.stride(0), b.stride(1),
-        c.stride(0), c.stride(1),
-        BLOCK_SIZE_M=block_m,
-        BLOCK_SIZE_N=block_n,
-        BLOCK_SIZE_K=block_k,
-        GROUP_SIZE_M=group_m,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        waves_per_eu=waves_per_eu,
-        matrix_instr_nonkdim = mfmaInstrSize,
-        kpack = kpack,
-        EVEN_K = EVEN_K
-    )
+    streamk_gemm[
+        grid,
+    ](a, b, c, P, locks, M, N, K, num_sms, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1),
+      BLOCK_SIZE_M=block_m, BLOCK_SIZE_N=block_n, BLOCK_SIZE_K=block_k, GROUP_SIZE_M=group_m, num_warps=num_warps,
+      num_stages=num_stages, waves_per_eu=waves_per_eu, matrix_instr_nonkdim=mfmaInstrSize, kpack=kpack, EVEN_K=EVEN_K)
     return c
 
 
@@ -536,14 +556,15 @@ def test_correctness(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, 
     print(f"{block_k}")
     EVEN_K = K % block_k == 0
     c = torch.zeros((M, N), device=a.device, dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
-    locks = torch.zeros((num_sms,), device = "cuda", dtype = torch.int32)
-    P = torch.zeros((num_sms,  block_m*block_n), device="cuda", dtype=torch.float32)
-    triton_output = matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack, EVEN_K)
+    locks = torch.zeros((num_sms, ), device="cuda", dtype=torch.int32)
+    P = torch.zeros((num_sms, block_m * block_n), device="cuda", dtype=torch.float32)
+    triton_output = matmul(a, b, c, P, locks, num_sms, block_m, block_n, block_k, group_m, num_warps, num_stages,
+                           waves_per_eu, mfmaInstrSize, kpack, EVEN_K)
     torch_output = torch.matmul(a_fp16, b_fp16)
     # print(f"triton_output={triton_output}")
     # print(f"torch_output={torch_output}")
     rtol = 0 if torch.version.hip is None else 1e-2
-    atol = 1e-3 
+    atol = 1e-3
     row_a_str = 'N' if col_a else 'T'
     row_b_str = 'N' if col_b else 'T'
     size_str = ''
@@ -581,19 +602,26 @@ def parse_args():
     parser.add_argument("-dtype_b", type=str, default='fp16', help="matrix b element data type")
     parser.add_argument("-dtype_c", type=str, default='fp16', help="output element data type")
     parser.add_argument("--ngpus", type=int, default=0, help='number of GPUs used in the profiling step')
-    parser.add_argument("--gpu_ids", type=lambda s: [int(id) for id in s.split(',')], default=[], help='list of gpu ids to use for tuning')
+    parser.add_argument("--gpu_ids", type=lambda s: [int(id) for id in s.split(',')], default=[],
+                        help='list of gpu ids to use for tuning')
     parser.add_argument("--gemm_size_file", type=str, default="", help='yaml file to indicate matrix size')
-    parser.add_argument("--o", type=str, default=get_default_tuning_result_filename(), help='yaml file to store tuning results')
+    parser.add_argument("--o", type=str, default=get_default_tuning_result_filename(),
+                        help='yaml file to store tuning results')
     parser.add_argument("--keep", action='store_true', default=False, help='keep generated files')
     parser.add_argument("--compare", action='store_true', default=False, help="Whether check result correctness")
-    parser.add_argument("--compare_wo_tuning", action='store_true', default=False, help="Whether check result correctness")
+    parser.add_argument("--compare_wo_tuning", action='store_true', default=False,
+                        help="Whether check result correctness")
     parser.add_argument("--benchmark", action='store_true', default=False, help="Benchmark the given config")
-    parser.add_argument("--time_breakdown", action='store_true', default=False, help="Show detailed time breakdown of each step during the tuning")
-    parser.add_argument("--verbose", action='store_true', default=False, help="enables time_breakdown and additional logging messages")
-    parser.add_argument("--num_threads", type=int, default=16, help="number of threads to use for kernel compilation and post processing")
+    parser.add_argument("--time_breakdown", action='store_true', default=False,
+                        help="Show detailed time breakdown of each step during the tuning")
+    parser.add_argument("--verbose", action='store_true', default=False,
+                        help="enables time_breakdown and additional logging messages")
+    parser.add_argument("--num_threads", type=int, default=16,
+                        help="number of threads to use for kernel compilation and post processing")
     parser.add_argument("--jobs", type=int, default=1, help="number of generated files")
     parser.add_argument("--iters", type=int, default=1000, help="number of generated files")
-    parser.add_argument("--init_type", type=str, default='randn', help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
+    parser.add_argument("--init_type", type=str, default='randn',
+                        help="Initialization type for input matrices (default uniform rand [0, 1.0)])")
     parser.add_argument("--no_warmup", action='store_true', default=False, help="Do not call the warmup kernel")
     args = parser.parse_args()
 
@@ -624,6 +652,7 @@ name_to_tl_types = {
     'bf8': tl.float8e5b16,
 }
 
+
 def process_item(item):
     M = item['M']
     N = item['N']
@@ -637,6 +666,7 @@ def process_item(item):
     del item['rowMajorB']
     return M, N, K, col_a, col_b, item
 
+
 def type_name_to_bytes(ty_name):
     if '32' in ty_name:
         return 4
@@ -648,6 +678,7 @@ def type_name_to_bytes(ty_name):
         print(f"Unrecognized input type name {ty_name}")
         sys.exit(1)
 
+
 def format_output(unformatted):
     if unformatted < 0.0001:
         formatted = "{:.3e}".format(unformatted)
@@ -656,6 +687,7 @@ def format_output(unformatted):
     else:
         formatted = "{:.2f}".format(unformatted)
     return formatted
+
 
 def main():
     args = parse_args()
@@ -691,11 +723,10 @@ def main():
     dtype_c = args.dtype_c
     dtype_p = 'fp32'
     dtype_lock = 'int32'
-    if not dtype_a in name_to_tl_types or not dtype_b in name_to_tl_types or not dtype_c in name_to_tl_types:
+    if dtype_a not in name_to_tl_types or dtype_b not in name_to_tl_types or dtype_c not in name_to_tl_types:
         print(f"Unsupported dtype_a {args.dtype_a} or dtype_b {args.dtype_b} or dtype_c {args.dtype_c}")
         print("Supported types: ", list(name_to_tl_types.keys()))
         sys.exit(1)
-
 
     mnks = []
     # TODO: make it more robust to get user input
@@ -734,7 +765,8 @@ def main():
         start_local_time = datetime.now()
         # Obtain a pruned tuning space according to gemm size
         # If running benchmark, use the provided config
-        pruned_configs = [myConfig] if run_bench else prune_configs(M, N, K, configs_full, type_name_to_bytes(dtype_a), type_name_to_bytes(dtype_b))
+        pruned_configs = [myConfig] if run_bench else prune_configs(M, N, K, configs_full, type_name_to_bytes(dtype_a),
+                                                                    type_name_to_bytes(dtype_b))
 
         row_a_str = 'N' if col_a else 'T'
         row_b_str = 'N' if col_b else 'T'
@@ -751,10 +783,8 @@ def main():
         if args.verbose:
             verbose_level = 2
         minTime, bestConfig, compile_time, profile_time, post_time = tune_gemm_config(
-                M, N, K, num_sms, col_a, col_b, dtype_a,
-                dtype_b, dtype_c, dtype_p, dtype_lock, init_type, pruned_configs,
-                run_bench, jobs, iters, skipWarmup, num_threads=args.num_threads, gpus=gpus,
-                verbose=verbose_level)
+            M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, pruned_configs,
+            run_bench, jobs, iters, skipWarmup, num_threads=args.num_threads, gpus=gpus, verbose=verbose_level)
 
         EVEN_K = True if K % bestConfig.get('BLOCK_SIZE_K') == 0 else False
         # post processing the numbers
@@ -765,7 +795,8 @@ def main():
         if not run_bench:
             print(f'TFLOPS: {formatted_tflops} time(us): {minTime}', end=" ", flush=True)
 
-        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, bestConfig, None, None, None, None, None)
+        bestConfig_compact_str, _ = gen_kernel_and_configStr_from_config(M, N, K, num_sms, EVEN_K, bestConfig, None,
+                                                                         None, None, None, None)
         if not run_bench:
             print(f'best_config: {bestConfig_compact_str}', end=" ", flush=True)
 
@@ -798,7 +829,9 @@ def main():
 
         end_local_time = datetime.now()
         if not run_bench:
-            print(f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)", flush=True)
+            print(
+                f">>> Elapsed time: {end_local_time - start_local_time} = {compile_time} (compile) + {profile_time} (profile) + {post_time} (post processing)",
+                flush=True)
 
     if not run_bench:
         f_results.close()

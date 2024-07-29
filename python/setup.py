@@ -73,6 +73,7 @@ def get_llvm_package_info():
     if os.getenv("TRITON_LLVM_TARBALL_PATH"):
         url = os.getenv("TRITON_LLVM_TARBALL_PATH")
         name = url.split("/")[-1].split(".")[0]
+    name = "llvm-8e5a41e8-almalinux8-x64_gcc8"
     return Package("llvm", name, url, "lib", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
 
 
@@ -85,16 +86,19 @@ def get_thirdparty_packages(triton_cache_path):
         if p.syspath_var_name in os.environ:
             package_dir = os.environ[p.syspath_var_name]
         test_file_path = os.path.join(package_dir, p.test_file)
-        if not os.path.exists(test_file_path):
-            try:
-                shutil.rmtree(package_root_dir)
-            except Exception:
-                pass
-            os.makedirs(package_root_dir, exist_ok=True)
-            print(f'downloading and extracting {p.url} for {p.name} ...')
-            ftpstream = urllib.request.urlopen(p.url)
-            file = tarfile.open(fileobj=ftpstream, mode="r|*")
-            file.extractall(path=package_root_dir)
+        if p.name == "llvm":
+            print(f"Skipping download and extract of {p.url}")
+        else:
+            if not os.path.exists(test_file_path):
+                try:
+                    shutil.rmtree(package_root_dir)
+                except Exception:
+                    pass
+                os.makedirs(package_root_dir, exist_ok=True)
+                print(f'downloading and extracting {p.url} for {p.name} ...')
+                ftpstream = urllib.request.urlopen(p.url)
+                file = tarfile.open(fileobj=ftpstream, mode="r|*")
+                file.extractall(path=package_root_dir)
         if p.include_flag:
             thirdparty_cmake_args.append(f"-D{p.include_flag}={package_dir}/include")
         if p.lib_flag:

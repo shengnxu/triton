@@ -10,6 +10,8 @@ std::unique_ptr<Pass> createTritonAMDGPUStreamPipelinePass(int numStages = 2);
 
 std::unique_ptr<Pass> createTritonAMDGPUStreamPipelineV2Pass(int numStages = 2);
 
+std::unique_ptr<Pass> createTritonAMDGPUUnmaskPass();
+
 std::unique_ptr<Pass>
 createTritonAMDGPUAccelerateMatmulPass(std::string archGenName = std::string(),
                                        int matrixInstructionSize = 0,

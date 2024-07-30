@@ -41,4 +41,3 @@ python tune_streamk.py --gemm_size_file input_gemm_sizes.yaml --o output_tuning.
 ```bash
 python tune_streamk.py --gemm_size_file output_tuning.yaml --compare_wo_tuning
 ```
-

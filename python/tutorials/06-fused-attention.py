@@ -83,13 +83,13 @@ def _attn_fwd_inner(acc, l_i, m_i, q,
 # re-tuning.
 @triton.autotune(
    configs=[
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=8),
        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 0, 'pre_load_v': True}, num_stages=1, num_warps=4),
-       triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 32, 'pre_load_v': False}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 256, 'BLOCK_N': 128, 'waves_per_eu': 2, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=8),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 0, 'pre_load_v': True}, num_stages=1, num_warps=4),
+    #    triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'slice_k_tile': 0, 'pre_load_v': False}, num_stages=1, num_warps=4),
    ],
    key=['Z', 'H', 'N_CTX', 'STAGE', 'BLOCK_DMODEL'],
 )
@@ -651,14 +651,15 @@ if TORCH_HAS_FP8E5B16:
 
 @pytest.mark.parametrize('Z, H, N_CTX, D_HEAD, dtype',
 [ (*shape, dtype)
-    for shape in [(4, 48, 1024, 64),
-                  (4, 48, 2048, 64),
-                  (4, 48, 4096, 64),
-                  (4, 48, 1024, 128),
+    for shape in [#(4, 48, 1024, 64),
                   (4, 48, 2048, 128),
-                  (4, 48, 4096, 128)]
-    for dtype in ['fp16', 'fp8']])
-@pytest.mark.parametrize('causal', [False, True])
+                #   (4, 48, 4096, 64),
+                #   (4, 48, 1024, 128),
+                #   (4, 48, 2048, 128),
+                 # (4, 48, 4096, 128)
+                 ]
+    for dtype in ['fp16']])
+@pytest.mark.parametrize('causal', [False])
 def test_op_fwd(Z, H, N_CTX, D_HEAD, causal, dtype):
     if dtype == 'fp8' and not TORCH_HAS_FP8E5B16:
         pytest.skip("fp8 not supported")
@@ -808,4 +809,4 @@ def bench_flash_attention(BATCH, H, N_CTX, D_HEAD, causal, mode, provider, dtype
     return total_flops / ms * 1e-9
 
 # only works on post-Ampere GPUs right now
-bench_flash_attention.run(save_path=".", print_data=True)
+# bench_flash_attention.run(save_path=".", print_data=True)

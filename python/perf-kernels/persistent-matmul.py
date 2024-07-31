@@ -180,10 +180,74 @@ def matmul_kernel_persistent(a_ptr, b_ptr, c_ptr,  #
             accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
 
-def matmul_persistent(a, b):
+@triton.jit
+def matmul_kernel_persistentV2(a_ptr, b_ptr, c_ptr,  #
+                             M, N, K,  #
+                             stride_am, stride_ak,  #
+                             stride_bk, stride_bn,  #
+                             stride_cm, stride_cn,  #
+                             BLOCK_SIZE_M: tl.constexpr,  #
+                             BLOCK_SIZE_N: tl.constexpr,  #
+                             BLOCK_SIZE_K: tl.constexpr,  #
+                             GROUP_SIZE_M: tl.constexpr,  #
+                             NUM_SMS: tl.constexpr,  #
+                             ):
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_tiles = num_pid_m * num_pid_n
+
+    reps = num_tiles // NUM_SMS
+    if pid < num_tiles % NUM_SMS:
+        reps += 1
+
+    tile_id = pid
+
+    offs_k = tl.arange(0, BLOCK_SIZE_K)
+    max_k = tl.cdiv(K, BLOCK_SIZE_K)
+
+    for _ in range(0, reps):
+
+        if GROUP_SIZE_M == 1:
+            pid_m = tile_id // num_pid_n
+            pid_n = tile_id % num_pid_n
+        else:
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            group_id = tile_id // num_pid_in_group
+            first_pid_m = group_id * GROUP_SIZE_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+            pid_m = first_pid_m + (tile_id % group_size_m)
+            pid_n = (tile_id % num_pid_in_group) // group_size_m
+
+        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
+        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))
+        a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+        b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+
+        acc_dtype = tl.float32 if a_ptr.type.element_ty != tl.int8 else tl.int32
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+
+        for k in range(0, max_k):
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+            accumulator += tl.dot(a, b)
+            a_ptrs += BLOCK_SIZE_K * stride_ak
+            b_ptrs += BLOCK_SIZE_K * stride_bk
+
+        c = accumulator.to(c_ptr.type.element_ty)
+        offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+        tl.store(c_ptrs, c, mask=c_mask)
+
+        tile_id += NUM_SMS
+
+
+def matmul_persistent(a, b, version):
     configs = {
         torch.float16: {
-            "BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 8, "num_stages": 1,
+            "BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 256, "BLOCK_SIZE_K": 64, "GROUP_SIZE_M": 8, "num_stages": 0,
             "num_warps": 8
         }
     }
@@ -198,21 +262,40 @@ def matmul_persistent(a, b):
     c = torch.empty((M, N), device=a.device, dtype=dtype)
     # 1D launch kernel where each block gets its own program.
     grid = lambda META: (min(NUM_SMS, triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"])), )
-    matmul_kernel_persistent[grid](
-        a, b, c,  #
-        M, N, K,  #
-        a.stride(0), a.stride(1),  #
-        b.stride(0), b.stride(1),  #
-        c.stride(0), c.stride(1),  #
-        BLOCK_SIZE_M=configs[dtype]["BLOCK_SIZE_M"],  #
-        BLOCK_SIZE_N=configs[dtype]["BLOCK_SIZE_N"],  #
-        BLOCK_SIZE_K=configs[dtype]["BLOCK_SIZE_K"],  #
-        GROUP_SIZE_M=configs[dtype]["GROUP_SIZE_M"],  #
-        NUM_SMS=NUM_SMS,  #
-        num_stages=configs[dtype]["num_stages"],  #
-        num_warps=configs[dtype]["num_warps"],  #
-    )
-    return c
+    if version == 1:
+        num_stages = 1
+        matmul_kernel_persistent[grid](
+            a, b, c,  #
+            M, N, K,  #
+            a.stride(0), a.stride(1),  #
+            b.stride(0), b.stride(1),  #
+            c.stride(0), c.stride(1),  #
+            BLOCK_SIZE_M=configs[dtype]["BLOCK_SIZE_M"],  #
+            BLOCK_SIZE_N=configs[dtype]["BLOCK_SIZE_N"],  #
+            BLOCK_SIZE_K=configs[dtype]["BLOCK_SIZE_K"],  #
+            GROUP_SIZE_M=configs[dtype]["GROUP_SIZE_M"],  #
+            NUM_SMS=NUM_SMS,  #
+            num_stages=num_stages,  #
+            num_warps=configs[dtype]["num_warps"],  #
+        )
+        return c
+    else:
+        matmul_kernel_persistentV2[grid](
+            a, b, c,  #
+            M, N, K,  #
+            a.stride(0), a.stride(1),  #
+            b.stride(0), b.stride(1),  #
+            c.stride(0), c.stride(1),  #
+            BLOCK_SIZE_M=configs[dtype]["BLOCK_SIZE_M"],  #
+            BLOCK_SIZE_N=configs[dtype]["BLOCK_SIZE_N"],  #
+            BLOCK_SIZE_K=configs[dtype]["BLOCK_SIZE_K"],  #
+            GROUP_SIZE_M=configs[dtype]["GROUP_SIZE_M"],  #
+            NUM_SMS=NUM_SMS,  #
+            num_stages=configs[dtype]["num_stages"],  #
+            num_warps=configs[dtype]["num_warps"],  #
+        )
+        return c
+
 
 def torch_matmul(a, b):
     M, K = a.shape
@@ -232,7 +315,9 @@ def bench(M, K, N, dtype, provider):
     elif provider == "matmul":
         ms = triton.testing.do_bench(lambda: matmul(a, b.T))
     elif provider == "persistent_matmul":
-        ms = triton.testing.do_bench(lambda: matmul_persistent(a, b.T))
+        ms = triton.testing.do_bench(lambda: matmul_persistent(a, b.T, 1))
+    elif provider == "persistent_matmulV2":
+        ms = triton.testing.do_bench(lambda: matmul_persistent(a, b.T, 2))
     else:
         assert(False)
     
@@ -246,17 +331,22 @@ def validate(M, N, K, dtype):
 
     torch_result = torch_matmul(a, b) if dtype == torch.float16 else None
     naive_result = matmul(a, b.T)
-    persistent_result = matmul_persistent(a, b.T)
+    persistent_result = matmul_persistent(a, b.T, 1)
+    persistentV2_result = matmul_persistent(a, b.T, 2)
 
     if torch_result is not None:
         naive_vs_torch = "✅" if torch.allclose(naive_result.to(torch.float16), torch_result.to(torch.float16),
                                                atol=1.0) else "❌"
     naive_vs_persistent = "✅" if torch.allclose(naive_result.to(torch.float16), persistent_result.to(torch.float16),
                                                atol=1.0) else "❌"
+    naive_vs_persistentV2 = "✅" if torch.allclose(naive_result.to(torch.float16), persistentV2_result.to(torch.float16),
+                                               atol=1.0) else "❌"
     print(f"M={M}, N={N}, K={K} verification naive vs: ", end="")
     print(f"torch: {naive_vs_torch} \n")
     print(f"M={M}, N={N}, K={K} verification naive vs: ", end="")
     print(f"persistent: {naive_vs_persistent} \n")
+    print(f"M={M}, N={N}, K={K} verification naive vs: ", end="")
+    print(f"persistentV2: {naive_vs_persistentV2} \n")
 
 
 if __name__ == "__main__":
@@ -275,6 +365,8 @@ if __name__ == "__main__":
     tf_torch = bench(args.M, args.K, args.N, dtype, provider="torch")
     tf_matmul = bench(args.M, args.K, args.N, dtype, provider="matmul")
     tf_persistent = bench(args.M, args.K, args.N, dtype, provider="persistent_matmul")
+    tf_persistentV2 = bench(args.M, args.K, args.N, dtype, provider="persistent_matmulV2")
     print(f"Torch TFLOPS = {tf_torch}")
     print(f"General Triton Matmul TFLOPS = {tf_matmul}")
     print(f"Triton Persistent Matmul TFLOPS = {tf_persistent}")
+    print(f"Triton Persistent Matmul V2 TFLOPS = {tf_persistentV2}")

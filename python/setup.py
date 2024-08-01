@@ -276,7 +276,6 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=cmake_dir)
 
 
-download_and_copy_ptxas()
 
 
 setup(

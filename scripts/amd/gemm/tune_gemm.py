@@ -427,7 +427,7 @@ def gen_rotating_tensors(M,
 
 def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k,
            num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack,
-           use_bias):
+           use_bias, sorted_token_ids_ptr, num_valid_tokens):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     #assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -442,7 +442,6 @@ def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k,
     matmul_kernel[grid](a,
                         b,
                         c,
-                        bias,
                         M,
                         N,
                         K,
@@ -452,7 +451,8 @@ def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k,
                         b.stride(1),
                         c.stride(0),
                         c.stride(1),
-                        stride_bias=stride_bias,
+                        sorted_token_ids_ptr,
+                        num_valid_tokens,
                         BLOCK_SIZE_M=block_m,
                         BLOCK_SIZE_N=block_n,
                         BLOCK_SIZE_K=block_k,
@@ -463,7 +463,6 @@ def matmul(a, b, c, bias, block_m, block_n, block_k, group_m, split_k,
                         waves_per_eu=waves_per_eu,
                         matrix_instr_nonkdim=mfmaInstrSize,
                         kpack=kpack,
-                        BIAS=use_bias,
                         EVEN_K=EVEN_K)
     return c
 
@@ -493,10 +492,17 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
     c = torch.zeros((M, N),
                     device=a.device,
                     dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
+
+    ## Allocate a fake expert_ids_ptr as 0,1,...,M-1
+    sorted_token_ids_ptr = torch.arange(0, M, dtype=torch.int32, device=a.device)
+    num_valid_tokens = 8
     triton_output = matmul(a, b, c, bias, block_m, block_n, block_k, group_m,
                            split_k, num_warps, num_stages, waves_per_eu,
-                           mfmaInstrSize, kpack, use_bias)
-    torch_output = torch.matmul(a_fp16, b_fp16)
+                           mfmaInstrSize, kpack, use_bias, sorted_token_ids_ptr, num_valid_tokens)
+    a[8:16, :] = 0
+    #torch_output = torch.matmul(a, b)
+    #torch.save(torch_output, 'tensor_cache_16x40961024_num-valid-tokens=8.pt')
+    torch_output = torch.load('tensor_cache_16x40961024_num-valid-tokens=8.pt', weights_only=True)
     if use_bias:
         torch_output += bias_fp16[:, None]
     rtol = 0 if torch.version.hip is None else 1e-2
@@ -504,6 +510,10 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
     row_a_str = 'N' if col_a else 'T'
     row_b_str = 'N' if col_b else 'T'
     size_str = ''
+    torch.set_printoptions(precision=2)
+    torch.set_printoptions(linewidth=400)
+    torch.set_printoptions(threshold=2048)
+    torch.set_printoptions(sci_mode=False)
     if verbose:
         size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {row_a_str}{row_b_str}'
     if torch.allclose(triton_output.to(torch.float16),
@@ -514,6 +524,7 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
     else:
         print(f"triton_output={triton_output}")
         print(f"torch_output={torch_output}")
+        print(f"diff={torch_output - triton_output}")
         print(f'{size_str} Incorrect❌')
 
 

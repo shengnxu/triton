@@ -125,7 +125,9 @@ jobs:
           pip install -v -e .
       - name: Run Perf Kernels Unit Tests
         run: |
+          pytest -vvv ./python/perf-kernels/06-attention-decode.py
           pytest -vvv ./python/perf-kernels/flash-attention.py
       - name: Run Perf Kernels Benchmark
         run: |
+          python ./python/perf-kernels/06-attention-decode.py
           python ./python/perf-kernels/flash-attention.py

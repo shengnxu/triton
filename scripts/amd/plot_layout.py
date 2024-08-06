@@ -82,22 +82,13 @@ def draw_dot_layout_cmd(M, N, K, mfmaNonKDim, warpsPerCTA, trans, kpack):
 
     \\coordinate (C TL) at ($(C TL)+({N}*\elem+32*\elem, 0)$);
     \\def\\mfmaTrans{{{trans}}}
-    \\ifthenelse{{\\mfmaTrans=0}}{{
-      \\def\\opColorAL{{magenta}}
-      \\def\\opColorAR{{cyan}}
-      \\def\\opColorBL{{Maroon}}
-      \\def\\opColorBR{{BlueGreen}}
-    }}{{
-      \\def\\opColorBL{{magenta}}
-      \\def\\opColorBR{{cyan}}
-      \\def\\opColorAL{{Maroon}}
-      \\def\\opColorAR{{BlueGreen}}
-    }}
+
     %% Draw zoomed in view of mfma
     \\def\\elem{{.16}}
     \\pgfmathsetmacro{{\\gap}}{{\\elem*5}}
     \\pgfmathsetmacro{{\\nonTrans}}{{1-\\mfmaTrans}}
-    \\coordinate (C TL) at ($(C TL)+(.5*\\gap+1.2*\\nonTrans*\\gap+2*{kpack}*\\elem, 0)$);
+    \\pgfmathsetmacro{{\\groups}}{{64/{mfmaNonKDim}}}
+    \\coordinate (C TL) at ($(C TL)+(.5*\\gap+1.2*\\nonTrans*\\gap+\\groups*{kpack}*\\elem, 0)$);
     \\drawMFMAInstr{{{mfmaNonKDim}}}{{{kpack}}}{{\\mfmaTrans}}
 
   \\end{{tikzpicture}}
@@ -195,7 +186,7 @@ def parse_args():
         "-nonKDim",
         type=int,
         default=32,
-        choices=[32],
+        choices=[16, 32],
         help='mfma instruction dim, only 32 is supported for now')
     ## blocked layout parameters
     parser.add_argument("-sizePerThread", type=int, nargs=2, default=(1, 4))

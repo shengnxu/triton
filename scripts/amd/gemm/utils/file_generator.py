@@ -267,7 +267,6 @@ import argparse
 import sys
 import multiprocessing
 from tune_gemm import gen_rotating_tensors
-from {get_filename_without_extension(get_filename_myKernels())} import *
 """
     if icache_flush:
         import_str += """
@@ -276,6 +275,9 @@ from icache_flush import icache_flush
     for fi in range(jobs):
         f_kernel[fi].write(import_str + "\n")
 
+    with open("matmul_kernel.py") as file:
+        matmul_kernel_code = file.read()
+
     idx = 0
     for config in configs:
         file_idx = idx % jobs
@@ -283,6 +285,10 @@ from icache_flush import icache_flush
         configStr, matmul_def_str = gen_kernel_and_configStr_from_config(
             config, EVEN_K, dtype_a, dtype_b, dtype_c, bias_size, False)
         # Copy the matmul_kernel with name replaced
+        matmul_kernel_config = matmul_kernel_code.replace("matmul_kernel", f"matmul_kernel_{configStr}")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton.language as tl", "")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton", "")
+        f_kernel[file_idx].write(matmul_kernel_config + "\n\n")
         f_kernel[file_idx].write(matmul_def_str + "\n")
         idx += 1
 

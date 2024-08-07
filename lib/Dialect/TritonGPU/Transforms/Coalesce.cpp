@@ -96,7 +96,13 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     SmallVector<unsigned> sizePerThread(refTensorType.getRank(), 1);
     sizePerThread[order[0]] = perThread;
     if (notTransposed)
-      sizePerThread[order[1]] = 2;
+    {
+      int numIterations = preThread / product(sizePerThread);
+      int packingBitWidth = 32 * 1;
+      int numElemToPack = min(packingBitWidth / elemNumBis, numIterations);
+      sizePerThread[order[1]] = numElemToPack;
+      // sizePerThread[order[1]] = 2;
+    }
     llvm::outs() << "sizePerThread: " << sizePerThread[0] << " " << sizePerThread[1] << "\n";
 
     auto CTALayout = triton::gpu::getCTALayout(refTensorType.getEncoding());
@@ -152,6 +158,31 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       op->getResult(i).replaceAllUsesWith(newResult);
     }
     op->erase();
+  }
+
+  bool checkTranspositionNew(Value ptr) {
+    // the memAccessPtr can be load/store or addptr
+    auto memOps = ptr.getUsers();
+    for (auto memOp : memOps) {
+      // Since this function is only called during CoalescePass, there should be
+      // no other layout than blockedEncoding and dopOpEncoding, so this assumes
+      // tt.load -> tt.convert_layout -> tt.dot
+      if (!isa<triton::LoadOp>(memOp))
+        continue;
+      auto cvtOps = memOp->getUsers();
+      for (auto cvtOp : cvtOps) {
+        // here should be only 1 ConvertLayoutOp presumably
+        if (!isa<triton::gpu::ConvertLayoutOp>(cvtOp))
+          continue;
+          auto dstType = cast<RankedTensorType>(cvtOp.getType());
+          auto dstDotOp =
+          dstType.getEncoding().dyn_cast<triton::gpu::DotOperandEncodingAttr>();
+          int kDimNum = dotOpEnc.getOpIdx() == 0 ? 1 : 0;
+          bool isKDimOuter = (order[1] == kDimNum);
+          return isKDimOuter;
+      }
+    }
+    return false;
   }
 
   bool checkTransposition(Value ptr) {

@@ -283,10 +283,13 @@ assignMemoryLayouts(llvm::SmallVector<std::tuple<Operation *, int, Operation *>>
     }
 
     if (use->hasTrait<OpTrait::DotLike>()) {
-      // Only use shared memory when feeding into a dot op.
-      loadInfo.usedByDot = true;
-      loadInfo.sharedEncoding =
-          getSharedEncIfAllUsersAreDotEnc(op->getResult(0)).value_or(nullptr);
+      auto dotTy = dyn_cast<RankedTensorType>(use->getResult(0).getType());
+      if (cvtNeedsSharedMemory(tensorTy, dotTy)) {
+        // Only use shared memory when feeding into a dot op.
+        loadInfo.usedByDot = true;
+        loadInfo.sharedEncoding =
+            getSharedEncIfAllUsersAreDotEnc(op->getResult(0)).value_or(nullptr);
+      }
     } else if (auto useOp = dyn_cast<tt::LoadOp>(use)) {
       // The use of this loadOp is another loadOp. If the use is not in the
       // loadToInfo already, it means that the use is not valid for pipelining

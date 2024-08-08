@@ -603,12 +603,14 @@ bool cvtNeedsSharedMemory(RankedTensorType srcTy, RankedTensorType dstTy) {
     }
   }
 
-  if (auto blockSrc = llvm::dyn_cast<triton::gpu::BlockedEncodingAttr>(
-          srcTy.getEncoding())) {
-    auto dotOp = llvm::dyn_cast<triton::gpu::DotOperandEncodingAttr>(
-        dstTy.getEncoding());
-    if (dotOp && dotOp.getOpIdx() == 1) {
-      return false;
+  if (isMoeLDSBypass()) {
+    if (auto blockSrc = llvm::dyn_cast<triton::gpu::BlockedEncodingAttr>(
+            srcTy.getEncoding())) {
+      auto dotOp = llvm::dyn_cast<triton::gpu::DotOperandEncodingAttr>(
+          dstTy.getEncoding());
+      if (dotOp && dotOp.getOpIdx() == 1) {
+        return false;
+      }
     }
   }
 

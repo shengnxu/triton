@@ -632,14 +632,14 @@ def _bwd_kernel_dk_dv(dk, dv, Q, k, v, sm_scale, alibi_slope, DO, M, D,
         do = tl.load(DO_block_ptr)
         # Compute dV.
         ppT = pT
-        ppT = ppT.to(tl.float16)
+        ppT = ppT.to(do.dtype)
         dv += tl.dot(ppT, do)
         # D (= delta) is pre-divided by ds_scale.
         Di = tl.load(D + offs_m)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do))
         dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(tl.float16)
+        dsT = dsT.to(qT.dype)
         dk += tl.dot(dsT, tl.trans(qT))
         # Increment pointers.
         curr_m += step_m
@@ -685,7 +685,7 @@ def _bwd_kernel_dq(dq, q, K, V, do, m, D, alibi_slope,
         vT = tl.load(VT_block_ptr)
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
-        ds = ds.to(tl.float16)
+        ds = ds.to(kT.dtype)
         # Compute dQ.0.
         # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
         dq += tl.dot(ds, tl.trans(kT))
@@ -765,14 +765,14 @@ def _attn_bwd(Q, K, V, sm_scale, alibi_slopes, DO, DQ, DK, DV, M, D,
     # compute dK and dV for blocks close to the diagonal that need to be masked
     num_steps = BLOCK_N1 // MASK_BLOCK_M1
     dk, dv = _bwd_kernel_dk_dv(dk, dv, Q, k, v, sm_scale, alibi_slope, DO, M, D, stride_tok, stride_d, H, N_CTX,
-                               MASK_BLOCK_M1, BLOCK_N1, BLOCK_DMODEL, start_n, start_m, num_steps, MASK=True)
+                               MASK_BLOCK_M1, BLOCK_N1, BLOCK_DMODEL, start_n, start_m, num_steps, MASK=CAUSAL)
 
     # compute dK and dV for blocks that don't need masking further from the diagonal
     start_m += num_steps * MASK_BLOCK_M1
     num_steps = (N_CTX - start_m) // BLOCK_M1
 
     dk, dv = _bwd_kernel_dk_dv(dk, dv, Q, k, v, sm_scale, alibi_slope, DO, M, D, stride_tok, stride_d, H, N_CTX,
-                               BLOCK_M1, BLOCK_N1, BLOCK_DMODEL, start_n, start_m, num_steps, MASK=False)
+                               BLOCK_M1, BLOCK_N1, BLOCK_DMODEL, start_n, start_m, num_steps, MASK=CAUSAL)
 
     DV_block_ptrs = tl.make_block_ptr(base=DV, shape=(N_CTX, BLOCK_DMODEL), strides=(stride_tok, stride_d),
                                       offsets=(start_n, 0), block_shape=(BLOCK_N1, BLOCK_DMODEL), order=(1, 0))
@@ -999,6 +999,7 @@ class _attention(torch.autograd.Function):
             q.stride(3),
             N_HEAD,
             N_CTX,
+            CAUSAL=ctx.causal,
             BLOCK_DMODEL=ctx.BLOCK_DMODEL,
             BLOCK_M1=BLOCK_M1,
             BLOCK_N1=BLOCK_N1,
@@ -1261,10 +1262,11 @@ def test_op_varlen_mqa_fwd(Z, HQ, HK, N_CTX, D_HEAD, causal, dtype=torch.float16
 ])
 @pytest.mark.parametrize('qseqlen_not_equal_kseqlen', [None])
 @pytest.mark.parametrize('torch_sdpa_test', [False, True])
-@pytest.mark.parametrize('causal', [True])
+@pytest.mark.parametrize('causal', [False,True])
 @pytest.mark.parametrize('use_alibi', [False, True])
+@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
 def test_op_bwd(Z, H, N_CTX, D_HEAD, qseqlen_not_equal_kseqlen, causal, torch_sdpa_test, use_alibi,
-                dtype=torch.float16):
+                dtype):
     pytest.skip()
     torch.manual_seed(20)
     if qseqlen_not_equal_kseqlen is not None:
@@ -1396,6 +1398,15 @@ def varlen_benchmark_configs():
     ]
     return configs
 
+def nonvarlen_backward_benchmark_configs():
+    configs=[(16, 16, 16, 1024, 1024),
+            (8, 16, 16, 2048, 2048),
+            (4, 16, 16, 4096, 4096),
+            (2, 16, 16, 8192, 8192),
+            (1, 16, 16, 16384, 16384),
+            (2, 48, 48, 1024, 1024),
+            ]
+    return configs
 
 def run_benchmark(custom, args):
 
@@ -1403,7 +1414,7 @@ def run_benchmark(custom, args):
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
     head_size = 128 if not args.d else args.d
-    mode = 'fwd'
+    mode = args.direction
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = args.causal
     varlen = args.layout == 'thd'
@@ -1413,6 +1424,8 @@ def run_benchmark(custom, args):
     else:
         if varlen:
             x_vals_list = varlen_benchmark_configs()
+        elif mode == 'bwd':
+            x_vals_list = nonvarlen_backward_benchmark_configs()
         else:
             x_vals_list = nonvarlen_benchmark_configs()
     print_time = args.return_time
@@ -1435,10 +1448,6 @@ def run_benchmark(custom, args):
         # else:
         #     bias = None
         # bias = None
-
-        # Bwd pass only supports causal=True right now
-        if mode == 'bwd':
-            causal = True
 
         flops_per_matmul = 0
         if varlen:
@@ -1502,6 +1511,7 @@ def parse_args():
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-return_time", action='store_true', default=False)
     parser.add_argument("-layout", type=str, default='bhsd', help=supported_layouts())
+    parser.add_argument("-direction", default='fwd')
     return parser.parse_args()
 
 

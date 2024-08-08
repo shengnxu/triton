@@ -284,7 +284,8 @@ assignMemoryLayouts(llvm::SmallVector<std::tuple<Operation *, int, Operation *>>
 
     if (use->hasTrait<OpTrait::DotLike>()) {
       auto dotTy = dyn_cast<RankedTensorType>(use->getResult(0).getType());
-      if (cvtNeedsSharedMemory(tensorTy, dotTy)) {
+      if (!triton::isMoeLDSBypass() ||
+          cvtNeedsSharedMemory(tensorTy, dotTy)) {
         // Only use shared memory when feeding into a dot op.
         loadInfo.usedByDot = true;
         loadInfo.sharedEncoding =

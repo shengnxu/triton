@@ -58,6 +58,9 @@ public:
             dstDotOp.getParent() == srcMfmaEncoding)
           return;
       }
+      // skip decomposition for blocked to dotOp for OpIdx == 1
+      if (dstDotOp.getOpIdx() == 1)
+        return;
       auto srcOrder = triton::gpu::getOrder(srcEncoding);
       auto rank = srcOrder.size();
       SmallVector<unsigned> sharedOrder;

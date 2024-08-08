@@ -223,7 +223,7 @@ struct DecomposeUnsupportedAMDConversions
       cvtOp.erase();
     });
 
-    triton::gpu::decomposeBlockedToDotLayoutConversion(mod);
+    // triton::gpu::decomposeBlockedToDotLayoutConversion(mod);
   }
 };
 

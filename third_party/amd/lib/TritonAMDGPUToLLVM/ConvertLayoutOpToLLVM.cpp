@@ -129,6 +129,11 @@ public:
         isa<DotOperandEncodingAttr>(dstLayout)) {
       return lowerMfmaToDotOperand(op, adaptor, rewriter);
     }
+
+    if (isa<BlockedEncodingAttr>(srcLayout) &&
+        isa<DotOperandEncodingAttr>(dstLayout)) {
+      return hackBlockedToDotOperand(op, adaptor, rewriter);
+    }
     return failure();
   }
 
@@ -157,6 +162,17 @@ private:
       return success();
     }
     return failure();
+  }
+
+  LogicalResult
+  hackBlockedToDotOperand(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
+                          ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    RankedTensorType dstTy = op.getType();
+    auto vals = unpackLLElements(loc, adaptor.getSrc(), rewriter);
+    Value view = packLLElements(loc, getTypeConverter(), vals, rewriter, dstTy);
+    rewriter.replaceOp(op, view);
+    return success();
   }
 };
 } // namespace

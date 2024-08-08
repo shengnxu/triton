@@ -490,13 +490,29 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
         bias = bias.squeeze()
         bias_fp16 = bias.squeeze()
     # Allocates output.
+
+    a = torch.randn((M, K), device='cuda', dtype=torch.float16)
+    b = torch.randn((N, K), device='cuda', dtype=torch.float16)
     c = torch.zeros((M, N),
                     device=a.device,
                     dtype=tl_to_torch_types[name_to_tl_types[dtype_c]])
+
+
+    torch_output = torch.matmul(a, b.T)
+
+
+    BM = block_m
+    BN = block_n
+    BK = block_k
+    b = b.view(N//BN, BN//16, 16, K//BK, BK//32, 4, 8)
+    b = b.permute(0,4,1,5,3,2,6)
+    b = b.contiguous()
+    b = b.view(N,K);
+    b = b.T
+
     triton_output = matmul(a, b, c, bias, block_m, block_n, block_k, group_m,
                            split_k, num_warps, num_stages, waves_per_eu,
                            mfmaInstrSize, kpack, use_bias)
-    torch_output = torch.matmul(a_fp16, b_fp16)
     if use_bias:
         torch_output += bias_fp16[:, None]
     rtol = 0 if torch.version.hip is None else 1e-2

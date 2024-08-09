@@ -682,7 +682,7 @@ LogicalResult LoopPipelinerInternal::emitEpilogue(
   for (int64_t i = 1; i <= maxStage; i++) {
     OpBuilder::InsertionGuard g(rewriter);
     scf::IfOp guardIfOp;
-    if (dynamicLoop) {
+    if (0 && dynamicLoop) {
       // if (ub > lb(maxStage - i)) {
       Value lbStage = valueMapping[forOp.getInductionVar()][maxStage - i + 1];
       Value pred = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, ub, lbStage);
@@ -744,7 +744,7 @@ LogicalResult LoopPipelinerInternal::emitEpilogue(
         }
       }
     }
-    if (dynamicLoop) {
+    if (0 && dynamicLoop) {
       // scf.yield rvals;
       rewriter.create<scf::YieldOp>(loc, returnValues);
       for (int ri = 0; ri < returnValues.size(); ++ri) {

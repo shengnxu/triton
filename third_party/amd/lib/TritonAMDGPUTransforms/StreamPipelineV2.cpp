@@ -148,7 +148,7 @@ getSharedEncIfAllUsersAreDotEnc(Value val) {
       if (!getSharedEncIfAllUsersAreDotEnc(user->getResult(0)).has_value())
         return std::nullopt;
     } else {
-      if (!isa<ttg::LocalLoadOp>(user))
+      if (!isa<ttg::LocalLoadOp, ttg::ConvertLayoutOp>(user))
         return std::nullopt;
       auto dotOpEnc = dyn_cast<ttg::DotOperandEncodingAttr>(
           cast<TensorOrMemDesc>(user->getResult(0).getType()).getEncoding());
@@ -283,9 +283,33 @@ assignMemoryLayouts(llvm::SmallVector<std::tuple<Operation *, int, Operation *>>
     }
 
     if (use->hasTrait<OpTrait::DotLike>()) {
-      auto dotTy = dyn_cast<RankedTensorType>(use->getResult(0).getType());
-      if (!triton::isMoeLDSBypass() ||
-          cvtNeedsSharedMemory(tensorTy, dotTy)) {
+      RankedTensorType oprTy;
+      DenseSet<Value> seen;
+      std::function<bool(Value, Value)> findLoad =
+        [&](Value loadOp, Value opr) -> bool {
+          if (loadOp == opr)
+            return true;
+          // Skip previously visited load ops.
+          if (seen.contains(opr))
+            return false;
+          seen.insert(opr);
+
+          if (Operation *op = opr.getDefiningOp()) {
+            for (Value operand : op->getOperands()) {
+              if (findLoad(loadOp, operand))
+                return true;
+            }
+          }
+          return false;
+        };
+      for (Value opr : use->getOperands()) {
+        if (findLoad(loadOp.getResult(), opr)) {
+          oprTy = dyn_cast<RankedTensorType>(opr.getType());
+          break;
+        }
+      }
+      assert(oprTy);
+      if (cvtNeedsSharedMemory(tensorTy, oprTy)) {
         // Only use shared memory when feeding into a dot op.
         loadInfo.usedByDot = true;
         loadInfo.sharedEncoding =
@@ -544,8 +568,8 @@ createStreamOps(scf::ForOp &forOp, tt::CoarseSchedule &schedule,
   SmallVector<Value> allocs;
   SmallVector<std::pair<Operation *, Value>> loadToAllocs;
   for (auto &[loadOp, info] : loadToInfo) {
-    // if (!info.sharedEncoding)
-    //   continue;
+    if (!info.sharedEncoding)
+      continue;
 
     Value alloc = createAlloc(forOp, loadOp, info.sharedEncoding, numBuffers);
     assert(alloc && "Failed to create alloc for the async load.");

@@ -215,10 +215,10 @@ public:
 
     // Should we use only one configuration?
     auto shape = dstType.getShape();
+    newOrder[0] = 1;
+    newOrder[1] = 0;
     switch (shape[nonKDim]) {
     case 128:
-      newOrder[0] = 0;
-      newOrder[1] = 1;
       newThreadsPerWarp[0] = 4;
       newThreadsPerWarp[1] = 16;
       newSizePerThread[0] = 8;
@@ -227,8 +227,6 @@ public:
       newWarpsPerCTA[1] = numWarps;
       break;
     case 64:
-      newOrder[0] = 0;
-      newOrder[1] = 1;
       newThreadsPerWarp[0] = 4;
       newThreadsPerWarp[1] = 16;
       newSizePerThread[0] = 8;
@@ -237,8 +235,6 @@ public:
       newWarpsPerCTA[1] = numWarps;
       break;
     case 32:
-      newOrder[0] = 0;
-      newOrder[1] = 1;
       newThreadsPerWarp[0] = 4;
       newThreadsPerWarp[1] = 16;
       newSizePerThread[0] = 8;
@@ -247,8 +243,6 @@ public:
       newWarpsPerCTA[1] = numWarps;
       break;
     case 16:
-      newOrder[0] = 0;
-      newOrder[1] = 1;
       newThreadsPerWarp[0] = 4;
       newThreadsPerWarp[1] = 16;
       newSizePerThread[0] = 8;

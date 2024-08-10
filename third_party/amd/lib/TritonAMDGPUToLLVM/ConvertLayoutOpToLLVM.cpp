@@ -126,6 +126,12 @@ public:
     Attribute dstLayout = dstTy.getEncoding();
 
     if (isMoeLDSBypass() && !cvtNeedsSharedMemory(srcTy, dstTy)) {
+      auto srcElems = triton::gpu::getTotalElemsPerThread(srcTy);
+      auto dstElems = triton::gpu::getTotalElemsPerThread(dstTy);
+      if (srcElems != dstElems) {
+        llvm::errs() << "incompatible layout conversion: " << op << "\n";
+      }
+      assert(srcElems == dstElems);
       auto loc = op.getLoc();
       auto vals = unpackLLElements(loc, adaptor.getSrc(), rewriter);
       Value view =

@@ -53,7 +53,7 @@ np.set_printoptions(threshold=100_000)
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
 kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(2), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
-                  enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16)
+                  enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16, kpack=2)
 
 print(to_numpy(z.reshape(N, M).to(torch.int32)))
 

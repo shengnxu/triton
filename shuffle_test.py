@@ -30,18 +30,18 @@ def permute_weight(x: torch.Tensor, numWarps) -> torch.Tensor:
     K = x.shape[2]
     x_ = x.clone()
 
-    mfmaSize = 16
+    mfmaNSize = 16
     kWidth = 8
     numKGroups = 4
 
-    kBlockSize = K // numKGroups // kWidth
-    NBlockSize = N // numWarps // mfmaSize
-    #            0  1         2           3         4           5           6
-    #            B  NNNNNNNN  NNNNNNNNNN  NNNNNNNN  KKKKKKKKKK  KKKKKKKKKK  KKKKKK
-    x_ = x_.view(B, numWarps, NBlockSize, mfmaSize, kBlockSize, numKGroups, kWidth)
+    kRepeats = K // numKGroups // kWidth
+    nRepeats = N // numWarps // mfmaNSize
+    #            0     1        2           3         4         5          6
+    #            B  NNNNNNNN  NNNNNNNN  NNNNNNNNN  KKKKKKKK  KKKKKKKKKK  KKKKKK
+    x_ = x_.view(B, nRepeats, numWarps, mfmaNSize, kRepeats, numKGroups, kWidth)
 
     x_ = x_.permute(0, 1, 2, 4, 5, 3, 6)
-    # x_ = x_.permute(, 5, 3, 6)
+
     x_ = x_.contiguous()
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
     return x_

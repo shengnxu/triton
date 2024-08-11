@@ -24,6 +24,15 @@ def kernel(X, stride_xm, stride_xk, Y, stride_yk, stride_yn, Z, stride_zm, strid
     tl.store(Zs, z)
 
 
+def permute_weight(x: torch.Tensor) -> torch.Tensor:
+    x_ = x.clone()
+    x_ = x_.view(x.shape[0], x.shape[1] // 16, 16, x.shape[2] // 32, 4, 8)
+    x_ = x_.permute(0, 1, 3, 4, 2, 5)
+    x_ = x_.contiguous()
+    x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
+    return x_
+
+
 M = 128
 N = 128
 K = 128
@@ -31,13 +40,15 @@ K = 128
 x = torch.zeros((M, K), dtype=torch.float16, device="cuda")
 for i in range(M):
     x[i, i] = 1
-y = torch.zeros((K, N), dtype=torch.float16, device="cuda")
+y = torch.zeros((N, K), dtype=torch.float16, device="cuda")
 for i in range(K):
     for j in range(N):
-        y[i, j] = i + j * K
+        y[k, i] = i + j * K
+
+y = permute_weight(y)
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
-kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
+kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(1), y.stride(0), z, z.stride(0), z.stride(1), M, N, K,
                   enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16)
 
 ref = torch.matmul(x, y)

@@ -22,16 +22,17 @@ M = 128
 N = 128
 K = 128
 
-x = torch.zeros((M, K), dtype=torch.float16, device="hip")
+x = torch.zeros((M, K), dtype=torch.float16, device="cuda")
 for i in range(M):
     x[i, i] = 1
-y = torch.zeros((K, N), dtype=torch.float16, device="hip")
+y = torch.zeros((K, N), dtype=torch.float16, device="cuda")
 for i in range(K):
     for j in range(N):
         y[i, j] = i + j * K
-z = torch.zeros((M, N), dtype=torch.float32, device="hip")
+z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
-kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z.stride(0), z.stride(1))
+kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z.stride(0), z.stride(1),
+                  enable_moe_lds_bypass=False)
 
 ref = torch.matmul(x, y)
 

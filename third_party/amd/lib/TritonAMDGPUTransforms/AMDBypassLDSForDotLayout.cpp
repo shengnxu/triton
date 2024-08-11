@@ -217,7 +217,7 @@ public:
     auto shape = dstType.getShape();
     newOrder[0] = 1;
     newOrder[1] = 0;
-    switch (shape[nonKDim]) {
+    switch (shape[kDim]) {
     case 128:
       newSizePerThread[0] = 8;
       newSizePerThread[1] = 1;
@@ -229,29 +229,9 @@ public:
       newOrder[1] = 1;
       break;
     case 64:
-      newThreadsPerWarp[0] = 4;
-      newThreadsPerWarp[1] = 16;
-      newSizePerThread[0] = 8;
-      newSizePerThread[1] = 1;
-      newWarpsPerCTA[0] = 1;
-      newWarpsPerCTA[1] = numWarps;
-      break;
     case 32:
-      newThreadsPerWarp[0] = 4;
-      newThreadsPerWarp[1] = 16;
-      newSizePerThread[0] = 8;
-      newSizePerThread[1] = 1;
-      newWarpsPerCTA[0] = 1;
-      newWarpsPerCTA[1] = numWarps;
-      break;
     case 16:
-      newThreadsPerWarp[0] = 4;
-      newThreadsPerWarp[1] = 16;
-      newSizePerThread[0] = 8;
-      newSizePerThread[1] = 1;
-      newWarpsPerCTA[0] = 1;
-      newWarpsPerCTA[1] = numWarps;
-      break;
+      assert(false);
     default:
       return failure();
     }

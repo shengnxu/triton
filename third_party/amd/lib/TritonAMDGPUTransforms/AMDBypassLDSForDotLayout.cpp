@@ -160,8 +160,8 @@ triton::LoadOp getLoadInst(Operation *op, ModuleOp &mod) {
   // from global memory (applicable for dot ops that don't depend on other dot
   // ops). This condition can be lifted if necessary.
   // assert(loadOpsVec.size() == 1);
-  llvm::outs() << loadOpsVec.size() << "\n";
-  return loadOpsVec[2];
+  llvm::outs() << "number of loads in DF chain: " << loadOpsVec.size() << "\n";
+  return loadOpsVec[0];
 }
 
 class BypassLDSForDotLayout : public mlir::RewritePattern {
@@ -219,12 +219,14 @@ public:
     newOrder[1] = 0;
     switch (shape[nonKDim]) {
     case 128:
-      newThreadsPerWarp[0] = 4;
-      newThreadsPerWarp[1] = 16;
       newSizePerThread[0] = 8;
       newSizePerThread[1] = 1;
+      newThreadsPerWarp[0] = 16;
+      newThreadsPerWarp[1] = 4;
       newWarpsPerCTA[0] = 1;
       newWarpsPerCTA[1] = numWarps;
+      newOrder[0] = 0;
+      newOrder[1] = 1;
       break;
     case 64:
       newThreadsPerWarp[0] = 4;

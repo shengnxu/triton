@@ -43,7 +43,7 @@ for i in range(M):
 y = torch.zeros((1, N, K), dtype=torch.float16, device="cuda")
 for i in range(K):
     for j in range(N):
-        y[j, i] = i + j * K
+        y[0, j, i] = i + j * K
 
 y = permute_weight(y)
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")

@@ -33,10 +33,10 @@ def permute_weight(x: torch.Tensor, numWarps) -> torch.Tensor:
     mfmaSize = 16
     kWidth = 8
     numKGroups = 4
-    #            0  1         2                          3         4           5
-    x_ = x_.view(B, numWarps, N // mfmaSize // numWarps, mfmaSize, numKGroups, kWidth)
+    #            0  1         2                          3         4                          5           6
+    x_ = x_.view(B, numWarps, N // mfmaSize // numWarps, mfmaSize, K // numKGroups // kWidth, numKGroups, kWidth)
 
-    x_ = x_.permute(0, 1, 2, 4, 3, 5)
+    x_ = x_.permute(0, 1, 2, 4, 5, 3, 6)
     x_ = x_.contiguous()
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
     return x_
@@ -66,7 +66,7 @@ np.set_printoptions(threshold=100_000)
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
 kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(2), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
-                  enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16, kpack=2)
+                  enable_moe_lds_bypass=True, num_warps=numWarps, matrix_instr_nonkdim=16, kpack=2)
 
 print(to_numpy(z.reshape(N, M).to(torch.int32)))
 

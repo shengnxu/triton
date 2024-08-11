@@ -2,6 +2,12 @@ import triton
 import triton.language as tl
 import torch
 
+import numpy as np
+
+
+def to_numpy(x):
+    return x.cpu().numpy()
+
 
 @triton.jit
 def kernel(X, stride_xm, stride_xk, Y, stride_yk, stride_yn, Z, stride_zm, stride_zn, BLOCK_M: tl.constexpr,
@@ -36,4 +42,4 @@ kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z
 
 ref = torch.matmul(x, y)
 
-assert_allclose(ref, z)
+np.testing.assert_allclose(to_numpy(ref), to_numpy(z))

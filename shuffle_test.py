@@ -40,17 +40,17 @@ K = 128
 x = torch.zeros((M, K), dtype=torch.float16, device="cuda")
 for i in range(M):
     x[i, i] = 1
-y = torch.zeros((N, K), dtype=torch.float16, device="cuda")
+y = torch.zeros((1, N, K), dtype=torch.float16, device="cuda")
 for i in range(K):
     for j in range(N):
-        y[k, i] = i + j * K
+        y[j, i] = i + j * K
 
 y = permute_weight(y)
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
-kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(1), y.stride(0), z, z.stride(0), z.stride(1), M, N, K,
+kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(2), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
                   enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16)
 
-ref = torch.matmul(x, y)
+ref = torch.matmul(x, y.permute([0, 2, 1]).reshape(K, N))
 
 np.testing.assert_allclose(to_numpy(ref), to_numpy(z))

@@ -48,12 +48,14 @@ for i in range(K):
 y = permute_weight(y)
 
 np.set_printoptions(threshold=100_000)
-print(to_numpy(y.reshape(K, N).to(torch.int32)))
+# print(to_numpy(y.reshape(N, K).to(torch.int32)))
 
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
 kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(2), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
                   enable_moe_lds_bypass=True, num_warps=4, matrix_instr_nonkdim=16)
+
+print(to_numpy(z.reshape(N, M).to(torch.int32)))
 
 ref = torch.matmul(x, y.permute([0, 2, 1]).reshape(K, N))
 

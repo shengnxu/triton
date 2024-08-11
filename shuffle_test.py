@@ -4,8 +4,8 @@ import torch
 
 
 @triton.jit
-def kernel(X, stride_xm, stride_xk, Y, stride_yk, stride_yn, W, Z, stride_zm, stride_zn, BLOCK_M: tl.constexpr,
-           BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr, ADD_MATRIX: tl.constexpr):
+def kernel(X, stride_xm, stride_xk, Y, stride_yk, stride_yn, Z, stride_zm, stride_zn, BLOCK_M: tl.constexpr,
+           BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
     off_m = tl.arange(0, BLOCK_M)
     off_n = tl.arange(0, BLOCK_N)
     off_k = tl.arange(0, BLOCK_K)
@@ -31,7 +31,7 @@ for i in range(K):
         y[i, j] = i + j * K
 z = torch.zeros((M, N), dtype=torch.float32, device="cuda")
 
-kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z.stride(0), z.stride(1),
+kernel[(1, 1, 1)](x, x.stride(0), x.stride(1), y, y.stride(0), y.stride(1), z, z.stride(0), z.stride(1), M, N, K,
                   enable_moe_lds_bypass=False)
 
 ref = torch.matmul(x, y)

@@ -40,7 +40,7 @@ def permute_weight(x: torch.Tensor, numWarps) -> torch.Tensor:
     #            B  NNNNNNNN  NNNNNNNN  NNNNNNNNN  KKKKKKKK  KKKKKKKKKK  KKKKKK
     x_ = x_.view(B, nRepeats, numWarps, mfmaNSize, kRepeats, numKGroups, kWidth)
 
-    x_ = x_.permute(0, 1, 2, 4, 5, 3, 6)
+    x_ = x_.permute(0, 1, 4, 2, 5, 3, 6)
 
     x_ = x_.contiguous()
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])

@@ -27,7 +27,7 @@ static bool isLocalLoadOrDotLayoutConversion(Operation *op) {
 // be either an atomic op or last usage of source pointer. Search ends when move
 // op is encountered.
 static llvm::ilist<Operation>::iterator
-findEarlyInsertionPoint(Block *block, Operation *move, bool &found) {
+findEarlyInsertionPoint(Block *block, Operation *move) {
   Value src;
   if (auto ld = dyn_cast<triton::LoadOp>(move))
     src = ld.getPtr();
@@ -42,22 +42,16 @@ findEarlyInsertionPoint(Block *block, Operation *move, bool &found) {
       if (src) {
         // Check for ops accessing src value.
         for (auto opr : wop->getOperands()) {
-          if (opr == src) {
+          if (opr == src)
             ipnt = bi;
-            found = true;
-          }
         }
       }
       // Atomics used for global synchronization.
-      if (isa<triton::AtomicRMWOp, triton::AtomicCASOp>(wop)) {
+      if (isa<triton::AtomicRMWOp, triton::AtomicCASOp>(wop))
         ipnt = bi;
-        found = true;
-      }
       // Break at loops.
-      if (isa<scf::ForOp, scf::WhileOp>(wop)) {
+      if (isa<scf::ForOp, scf::WhileOp>(wop))
         ipnt = bi;
-        found = true;
-      }
     });
   }
   return ipnt;
@@ -131,8 +125,7 @@ public:
       if (isa<ttg::LocalStoreOp>(op) && leadsToLoad)
         continue;
 
-      bool found;
-      auto ipoint = findEarlyInsertionPoint(block, op, found);
+      auto ipoint = findEarlyInsertionPoint(block, op);
       // Remove ops that already precede the insertion point. This is done
       // before moves happen to avoid `Operation::isBeforeInBlock` N^2
       // complexity.

@@ -145,10 +145,10 @@ bool LoopPipelinerInternal::initializeLoopInfo(
     LDBG("--no epilogue or predicate set -> BAIL");
     return false;
   }
-  if (dynamicLoop && peelEpilogue) {
-    LDBG("--dynamic loop doesn't support epilogue yet -> BAIL");
-    return false;
-  }
+  //if (dynamicLoop && peelEpilogue) {
+  //  LDBG("--dynamic loop doesn't support epilogue yet -> BAIL");
+  //  return false;
+  //}
   std::vector<std::pair<Operation *, unsigned>> schedule;
   options.getScheduleFn(forOp, schedule);
   if (schedule.empty()) {

@@ -1069,6 +1069,7 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD', [
+    (1, 1, 1, 512, 256, 160),
     (4, 48, 24, 1024, 1024, 64),
     (1, 24, 6, 8192, 8192, 64),
     (1, 4, 2, 16384, 16384, 128),

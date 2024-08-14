@@ -37,65 +37,6 @@
 using namespace mlir;
 namespace ttg = triton::gpu;
 
-// // convert(val) : mma -> blocked
-// // tt.store(ptr, val, mask, ...) : blocked
-// // ==>
-// // convert(ptr) : blocked -> mma
-// // convert(mask) : blocked -> mma
-// // tt.store(ptr, val, mask, ...) : mma
-// //
-// // Store with mma layout directly
-
-// static Type getNewType(Type type, Attribute encoding) {
-//   RankedTensorType tensorType = typecast<RankedTensorType>();
-//   return RankedTensorType::get(tensorType.getShape(),
-//                                tensorType.getElementType(), encoding);
-// }
-
-// void convertLayout(Attribute encoding, Operation *op) {
-//   OpBuilder builder(op);
-//   // Convert operands
-//   // For load/store with tensor pointers, we don't have to change the
-//   // operands' type, we do this by changing the outputs' type of
-//   // `make_tensor_ptr`
-//   SmallVector<Value, 4> newArgs;
-//   for (auto operand : op->getOperands()) {
-//     auto tensorType = operand.getType().dyn_cast<RankedTensorType>();
-//     if (tensorType &&
-//         !tensorType.getEncoding().isa<ttg::SharedEncodingAttr>()) {
-//       Type newType = getNewType(tensorType, encoding);
-//       newArgs.push_back(
-//           builder.create<ttg::ConvertLayoutOp>(op->getLoc(), newType,
-//           operand));
-//     } else {
-//       newArgs.push_back(operand);
-//     }
-//   }
-
-//   // Convert output types
-//   SmallVector<Type, 4> newTypes;
-//   for (auto t : op->getResultTypes()) {
-//     bool isAsync = isa<ttg::InsertSliceAsyncOp>(op);
-//     newTypes.push_back(isAsync ? t : getNewType(t, encoding));
-//   }
-
-//   // Construct new op with the new encoding
-//   Operation *newOp = builder.create(op->getLoc(),
-//   op->getName().getIdentifier(),
-//                                     newArgs, newTypes, op->getAttrs());
-
-//   // Cast the results back to the original layout
-//   for (size_t i = 0; i < op->getNumResults(); i++) {
-//     Value newResult = newOp->getResult(i);
-//     if (newTypes[i] != op->getResultTypes()[i]) {
-//       newResult = builder.create<ttg::ConvertLayoutOp>(
-//           op->getLoc(), op->getResult(i).getType(), newResult);
-//     }
-//     op->getResult(i).replaceAllUsesWith(newResult);
-//   }
-//   op->erase();
-// }
-
 static Type getNewType(Type type, Attribute encoding) {
   RankedTensorType tensorType = cast<RankedTensorType>(type);
   return RankedTensorType::get(tensorType.getShape(),
@@ -221,24 +162,31 @@ public:
     case 128:
       newSizePerThread[0] = 8;
       newSizePerThread[1] = 1;
-      newThreadsPerWarp[0] = 16;
-      newThreadsPerWarp[1] = 4;
+      newThreadsPerWarp[0] = 4;
+      newThreadsPerWarp[1] = 16;
       newWarpsPerCTA[0] = 1;
       newWarpsPerCTA[1] = numWarps;
-      newOrder[0] = 0;
-      newOrder[1] = 1;
+      newOrder[0] = 1;
+      newOrder[1] = 0;
       break;
     case 64:
     case 32:
     case 16:
-      assert(false);
-    default:
+      newSizePerThread[0] = 8;
+      newSizePerThread[1] = 1;
+      newThreadsPerWarp[0] = 4;
+      newThreadsPerWarp[1] = 16;
+      newWarpsPerCTA[0] = 1;
+      newWarpsPerCTA[1] = numWarps;
+      newOrder[0] = 1;
+      newOrder[1] = 0;
+      break;    default:
       return failure();
     }
 
     auto newBlockedEncoding = triton::gpu::BlockedEncodingAttr::get(
         mod.getContext(), newSizePerThread, newThreadsPerWarp, newWarpsPerCTA,
-        newOrder, srcBlocked.getCTALayout());
+        newOrder, srcBlocked.getCTALayout(), false);
 
     auto loadInst = getLoadInst(cvtOp, mod);
 

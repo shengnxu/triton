@@ -176,7 +176,7 @@ struct TritonExpandDimsPattern
     triton::gpu::BlockedEncodingAttr retEncoding =
         triton::gpu::BlockedEncodingAttr::get(getContext(), retSizePerThread,
                                               retThreadsPerWarp, retWarpsPerCTA,
-                                              retOrder, retCTALayout);
+                                              retOrder, retCTALayout, true);
     // convert operand to slice of return type
     Attribute newArgEncoding = triton::gpu::SliceEncodingAttr::get(
         getContext(), op.getAxis(), retEncoding);
@@ -316,7 +316,7 @@ struct TritonCatPattern : public OpConversionPattern<triton::CatOp> {
     triton::gpu::BlockedEncodingAttr newRetEncoding =
         triton::gpu::BlockedEncodingAttr::get(
             getContext(), newRetSizePerThread, retThreadsPerWarp,
-            retWarpsPerCTA, retOrder, retEncoding.getCTALayout());
+            retWarpsPerCTA, retOrder, retEncoding.getCTALayout(), true);
     auto newRetType = RankedTensorType::get(retShape, retType.getElementType(),
                                             newRetEncoding);
     addNamedAttrs(rewriter.replaceOpWithNewOp<triton::CatOp>(
@@ -390,7 +390,7 @@ struct TritonSplitOpPattern : public OpConversionPattern<triton::SplitOp> {
           CTALayoutAttr::get(getContext(),
                              append(defaultEnc.getCTAsPerCGA(), 1),
                              append(defaultEnc.getCTASplitNum(), 1),
-                             prepend(defaultEnc.getCTAOrder(), rank - 1)));
+                             prepend(defaultEnc.getCTAOrder(), rank - 1)), true);
       srcTy = RankedTensorType::get(srcTy.getShape(), srcTy.getElementType(),
                                     srcEnc);
       src = rewriter.create<ConvertLayoutOp>(op.getLoc(), srcTy, src);

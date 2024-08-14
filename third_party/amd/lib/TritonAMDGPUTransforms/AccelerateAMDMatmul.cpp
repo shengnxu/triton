@@ -460,6 +460,8 @@ public:
     if (!isSecondDot(dotOp))
       kWidth *= kPack;
 
+    kWidth = 8;
+    
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),
         ttg::DotOperandEncodingAttr::get(ctx, 0, mfmaEnc, kWidth));

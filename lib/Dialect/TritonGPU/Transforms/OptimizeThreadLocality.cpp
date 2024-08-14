@@ -411,7 +411,7 @@ private:
         reduce.getContext(), ctasPerCGA3d, ctasSplitNum3d, ctaOrder3d);
     auto blocked3d = triton::gpu::BlockedEncodingAttr::get(
         reduce.getContext(), sizePerThread3d, threadsPerWarp3d, warsPerCTA3d,
-        order3d, ctaLayout3d);
+        order3d, ctaLayout3d, true);
     return blocked3d;
   }
 

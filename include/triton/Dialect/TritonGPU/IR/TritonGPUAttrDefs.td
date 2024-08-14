@@ -679,7 +679,8 @@ for
     // CTALayout is optional in the textual IR.  If omitted, we infer it to be a
     // single CTA (so CTAsPerCGA = [1,...,1], CTASplitNum = [1,...,1],
     // CTAOrder=[n,n-1,...,0]).
-    "CTALayoutAttr":$CTALayout
+    "CTALayoutAttr":$CTALayout,
+    DefaultValuedParameter<"bool", "true">:$respectOrderDuringLowering
   );
   let genVerifyDecl = 1;
 
@@ -690,6 +691,7 @@ for
                      "unsigned":$numWarps,
                      "unsigned":$numThreadsPerWarp,
                      "CTALayoutAttr":$CTALayout), [{
+      bool respectOrderDuringLowering = true;
       unsigned rank = sizePerThread.size();
       SmallVector<unsigned, 4> threadsPerWarp(rank);
       SmallVector<unsigned, 4> warpsPerCTA(rank);
@@ -718,7 +720,7 @@ for
       threadsPerWarp[order[rank - 1]] = numThreadsPerWarp / prevLanes;
       warpsPerCTA[order[rank - 1]] = numWarps / prevWarps;
 
-      return $_get(context, sizePerThread, threadsPerWarp, warpsPerCTA, order, CTALayout);
+      return $_get(context, sizePerThread, threadsPerWarp, warpsPerCTA, order, CTALayout, respectOrderDuringLowering);
     }]>,
 
     AttrBuilder<(ins "ArrayRef<int64_t>":$shape,

@@ -1211,9 +1211,18 @@ unsigned ModuleAxisInfoAnalysis::getPtrContiguity(Value ptr) {
   assert(order[0] < uniqueContigPerThread.size() &&
          "Unexpected uniqueContigPerThread size");
   unsigned contiguity = uniqueContigPerThread[order[0]];
+
+
+
   LDBG("getPtrContiguity uniqueContigPerThread = " << contiguity);
   contiguity = std::min(align, contiguity);
 
+  if(auto blockedLayout = mlir::dyn_cast<triton::gpu::BlockedEncodingAttr>(layout)){
+    if (!blockedLayout.getRespectOrderDuringLowering()){
+      contiguity = uniqueContigPerThread[order[1]];
+      // llvm::outs() << contiguity << "\n";
+    }
+  }
   return contiguity;
 }
 

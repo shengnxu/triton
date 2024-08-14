@@ -25,7 +25,7 @@ namespace mlir::triton {
 
 static bool moeLDSBypass = false;
 
-void enableMoeLDSBypass(bool value) { moeLDSBypass = value; }
+void enableMoeLDSBypass(bool value) { moeLDSBypass = true; }
 
 bool isMoeLDSBypass() { return moeLDSBypass; }
 } // namespace mlir::triton

@@ -62,7 +62,7 @@ Attribute createTmpLayout(Attribute layout, ArrayRef<unsigned> warpsPerCTA) {
   if (auto src = dyn_cast<triton::gpu::BlockedEncodingAttr>(layout))
     return triton::gpu::BlockedEncodingAttr::get(
         ctx, src.getSizePerThread(), src.getThreadsPerWarp(), warpsPerCTA,
-        src.getOrder(), src.getCTALayout());
+        src.getOrder(), src.getCTALayout(), true);
   if (auto src = dyn_cast<triton::gpu::DotOperandEncodingAttr>(layout)) {
     return triton::gpu::DotOperandEncodingAttr::get(
         ctx, src.getOpIdx(), createTmpLayout(src.getParent(), warpsPerCTA),

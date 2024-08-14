@@ -494,7 +494,7 @@ TEST_F(InferLayoutTest, FuzzReshape) {
     auto srcTy = RankedTensorType::get(
         srcShape, FloatType::getF32(&ctx),
         BlockedEncodingAttr::get(&ctx, sizePerThread, threadsPerWarp,
-                                 warpsPerCTA, order, ctaLayout));
+                                 warpsPerCTA, order, ctaLayout, true));
     auto dstTy = RankedTensorType::get(dstShape, FloatType::getF32(&ctx));
 
     bool couldReshape = false;

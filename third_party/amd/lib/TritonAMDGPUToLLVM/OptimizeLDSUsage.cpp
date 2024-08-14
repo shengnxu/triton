@@ -116,7 +116,7 @@ class OptimizeAMDLDSUsage
     SmallVector<unsigned> dummyWarpsPerCTA(rank, 1);
     auto baseFallbackLayout = triton::gpu::BlockedEncodingAttr::get(
         ctx, elemsPerThread, threadsPerWarp, dummyWarpsPerCTA, order,
-        layoutCTA);
+        layoutCTA, true);
     SmallVector<Attribute> tmpLayouts;
     for (int i = 0; i < factorizedNumWarps.size(); i++) {
       auto warpsPerCTA = factorizedNumWarps[i];

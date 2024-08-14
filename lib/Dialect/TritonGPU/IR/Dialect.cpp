@@ -455,12 +455,11 @@ LogicalResult CTALayoutAttr::verify(
   return success();
 }
 
-LogicalResult
-BlockedEncodingAttr::verify(function_ref<InFlightDiagnostic()> emitError,
-                            ArrayRef<unsigned> sizePerThread,
-                            ArrayRef<unsigned> threadsPerWarp,
-                            ArrayRef<unsigned> warpsPerCTA,
-                            ArrayRef<unsigned> order, CTALayoutAttr CTALayout) {
+LogicalResult BlockedEncodingAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError,
+    ArrayRef<unsigned> sizePerThread, ArrayRef<unsigned> threadsPerWarp,
+    ArrayRef<unsigned> warpsPerCTA, ArrayRef<unsigned> order,
+    CTALayoutAttr CTALayout, bool respectOrderDuringLowering) {
   if (sizePerThread.size() != threadsPerWarp.size() ||
       threadsPerWarp.size() != warpsPerCTA.size() ||
       warpsPerCTA.size() != order.size()) {
@@ -1146,7 +1145,7 @@ Attribute BlockedEncodingAttr::parse(AsmParser &parser, Type type) {
 
   return parser.getChecked<BlockedEncodingAttr>(parser.getContext(),
                                                 sizePerThread, threadsPerWarp,
-                                                warpsPerCTA, order, *CTALayout);
+                                                warpsPerCTA, order, *CTALayout, true);
 }
 
 void BlockedEncodingAttr::print(mlir::AsmPrinter &printer) const {
@@ -1159,6 +1158,7 @@ void BlockedEncodingAttr::print(mlir::AsmPrinter &printer) const {
   maybePrintCTALayout(getContext(), printer, getCTALayout(),
                       /*rank=*/getSizePerThread().size());
 
+  printer << ", respectOrderDuringLowering = " << getRespectOrderDuringLowering();
   printer << "}>";
 }
 
@@ -2243,7 +2243,7 @@ struct TritonGPUInferLayoutInterface
           applyPermutation(enc.getSizePerThread(), order),
           applyPermutation(enc.getThreadsPerWarp(), order),
           applyPermutation(enc.getWarpsPerCTA(), order),
-          applyPermutation(invOrderUnsigned, enc.getOrder()), *ctaLayout);
+          applyPermutation(invOrderUnsigned, enc.getOrder()), *ctaLayout, true);
       return success();
     }
 
@@ -2577,7 +2577,7 @@ struct TritonGPUInferLayoutInterface
 
     dstEnc = BlockedEncodingAttr::get(src.getContext(), dstSizePerThread,
                                       dstThreadsPerWarp, dstWarpsPerCTA,
-                                      dstOrder, CTALayout);
+                                      dstOrder, CTALayout, true);
 
     return success();
   }
@@ -2613,7 +2613,7 @@ struct TritonGPUInferLayoutInterface
         CTALayoutAttr::get(enc.getContext(), //
                            append(enc.getCTAsPerCGA(), 1),
                            append(enc.getCTASplitNum(), 1),
-                           appendMinorDim(enc.getCTAOrder())));
+                           appendMinorDim(enc.getCTAOrder())), true);
     return success();
   }
 
@@ -2660,7 +2660,7 @@ struct TritonGPUInferLayoutInterface
         CTALayoutAttr::get(enc.getContext(), //
                            ArrayRef(enc.getCTAsPerCGA()).drop_back(1),
                            ArrayRef(enc.getCTASplitNum()).drop_back(1),
-                           ArrayRef(enc.getCTAOrder()).drop_front(1)));
+                           ArrayRef(enc.getCTAOrder()).drop_front(1)), true);
     return success();
   }
 };

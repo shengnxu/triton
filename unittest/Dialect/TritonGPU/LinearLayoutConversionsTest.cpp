@@ -27,7 +27,7 @@ public:
                               ArrayRef<unsigned> cSplit, ArrayRef<unsigned> ord,
                               ArrayRef<unsigned> cOrd) {
     return BlockedEncodingAttr::get(
-        &ctx, spt, tpw, wpb, ord, CTALayoutAttr::get(&ctx, cpg, cSplit, cOrd));
+        &ctx, spt, tpw, wpb, ord, CTALayoutAttr::get(&ctx, cpg, cSplit, cOrd), true);
   }
 
   NvidiaMmaEncodingAttr mma(unsigned versionMaj, unsigned versionMin,

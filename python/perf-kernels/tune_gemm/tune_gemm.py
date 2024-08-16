@@ -54,7 +54,7 @@ def get_full_tuning_space():
     block_k_range = [16, 32, 64, 128, 256]
     split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
     num_warps_range = [1, 2, 4, 8]
-    group_m_range = [1, 4, 8, 16, 32]
+    group_m_range = [1, 2, 4, 8, 16]
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
@@ -169,19 +169,10 @@ def need_split_k(SIZE_M, SIZE_N, SIZE_K):
     return (SIZE_M < 64 or SIZE_N < 64) and SIZE_K > 1024
 
 
-def extract_kernel_time(M, N, K, config, df, bias_size):
-    # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
-    # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should
-    # not need below two lines
-    cols = [
-        'Index', 'KernelName', 'gpu-id', 'queue-id', 'queue-index', 'pid', 'tid', 'grd', 'wgr', 'lds', 'scr',
-        'arch_vgpr', 'accum_vgpr', 'sgpr', 'wave_size', 'DispatchNs', 'BeginNs', 'EndNs', 'CompleteNs'
-    ]
-    df.columns = cols
+def extract_kernel_time(M, N, K, config, df):
     configStr = gen_configStr(config)
-    filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
-    filtered_df['DurationNs'] = filtered_df['EndNs'] - filtered_df['BeginNs']
-    meanTime = filtered_df['DurationNs'].tail(100).mean()
+    df = df[df['KernelName'].str.contains(configStr)]
+    meanTime = df['DurationNs'].tail(100).mean()
     return config, meanTime
 
 
@@ -197,7 +188,7 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
         if verbose:
             print(f"profiling {kernel_name} on GPU {gpuid}")
         run_bash_command_wrapper(
-            f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {get_filename_profile_driver(M, N, K, jobId)}",
+            f"rocprof --stats -o results_{jobId}.csv python {get_filename_profile_driver(M, N, K, jobId)}",
             capture=(verbose < 2))
         jobId += ngpus
 
@@ -244,13 +235,10 @@ def tune_gemm_config(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, init_type
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [
-        pd.read_csv(f"results_{i}.csv", skiprows=1, header=None, delimiter=',', quotechar='"', escapechar='\\')
-        for i in range(jobs)
-    ]
+    df_prof = [pd.read_csv(f"results_{i}.csv") for i in range(jobs)]
     for config in configs:
         file_idx = idx % jobs
-        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx], bias_size))]
+        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx]))]
         idx += 1
     thread_pool.close()
     thread_pool.join()

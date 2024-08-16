@@ -90,7 +90,7 @@ def get_llvm_package_info():
     # release_suffix = "assert" if use_assert_enabled_llvm else "release"
     rev = "49af6502"
     name = f"llvm-{rev}-{system_suffix}"
-    url = f"https://tritonlang.blob.core.windows.net/llvm-builds/{name}.tar.gz"
+    url = f"https://compute-artifactory.amd.com/artifactory/rocm-generic-local/triton-llvm/aotriton_pytorch_2.3/{name}.tar.bz2"
     return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
 
 

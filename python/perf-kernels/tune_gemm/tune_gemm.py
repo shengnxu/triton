@@ -173,7 +173,16 @@ def extract_kernel_time(M, N, K, config, df):
     configStr = gen_configStr(config)
     df = df[df['KernelName'].str.contains(configStr)]
     meanTime = df['DurationNs'].tail(100).mean()
-    return config, meanTime
+
+    first_value = df['DurationNs'].iloc[0]
+    filtered_data = df['DurationNs'][df['DurationNs'] <= first_value]
+    new_meanTime = filtered_data.tail(100).mean()
+
+    maxTime = df['DurationNs'].max()
+    maxTimeID = df['DurationNs'].idxmax()
+    #print(f"{maxTime=}  {maxTimeID=}  {meanTime=}  {new_meanTime=}  {first_value=}")
+    df['DurationNs'].to_csv(f"{M}-{N}-{K}.csv", index=False)
+    return config, new_meanTime
 
 
 def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
@@ -429,7 +438,7 @@ def parse_args():
     parser.add_argument("--num_threads", type=int, default=32,
                         help="number of threads to use for kernel compilation and post processing")
     parser.add_argument("--jobs", type=int, default=1, help="number of tasks during the profiling process")
-    parser.add_argument("--iters", type=int, default=1000, help="number of iterations used in --benchmark mode")
+    parser.add_argument("--iters", type=int, default=200, help="number of iterations used in --benchmark mode")
     parser.add_argument("--init_type", type=str, default='randn', choices=['randn', 'hpl', 'trig_float', 'zeros'],
                         help="Input tensor initialization (default normal distribution)")
     parser.add_argument(

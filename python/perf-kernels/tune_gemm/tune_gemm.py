@@ -157,7 +157,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
             if num_warps < 4:
                 continue
             # check if tiling is integer multiple of GEMM size because we have no boundary check
-            if M % BLOCK_SIZE_M != 0 or N % BLOCK_SIZE_N != 0 or K % BLOCK_SIZE_K != 0:
+            if M % BLOCK_SIZE_M != 0 or N % BLOCK_SIZE_N != 0:
                 continue
 
         pruned_configs.append(config)

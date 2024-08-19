@@ -30,6 +30,11 @@ import triton
 import triton.language as tl
 
 DEBUG = True
+if True:
+    RCP_LN2_FWD = triton.language.constexpr(1)
+else:
+    RCP_LN2_FWD = triton.language.constexpr(1.4426950408889634) # = 1.0 / ln(2)
+
 
 
 class MetaData():
@@ -269,25 +274,25 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
                 mask = size_n < boundary_m[:, None]
                 qk = tl.where(mask, qk, float("-inf"))
 
-        # if tl.program_id(0) == 7:
+        # if tl.program_id(0) == 0:
             # tl.device_print("q:", q)
             # tl.device_print("k:", k)
 
         # -- compute qk ----
         qk += tl.dot(q, k)
 
-        # if tl.program_id(0) == 7:
-        #     tl.device_print("qk before causal:", qk)
+        if tl.program_id(0) == 0:
+            tl.device_print("qk before causal:", qk)
 
         if IS_CAUSAL:
             causal_boundary = start_n + offs_n_causal
             causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
-            # if tl.program_id(0) == 7:
+            # if tl.program_id(0) == 0:
             #     tl.device_print("causal_mask:", causal_mask)
             
             qk = tl.where(causal_mask, qk, float("-inf"))
 
-            if tl.program_id(0) == 7:
+            if tl.program_id(0) == 0:
                 tl.device_print("qk after causal:", qk)
 
         if bias_ptrs is not None:
@@ -296,7 +301,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
-            qk += (bias * 1.44269504089)
+            qk += (bias * RCP_LN2_FWD)
 
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
@@ -304,7 +309,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
             alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_q, actual_seqlen_k, global_m_positions,
                                               global_n_positions)
-            qk += (alibi_block * 1.44269504089)  # scale factor of log2(e)
+            qk += (alibi_block * RCP_LN2_FWD)  # scale factor of log2(e)
 
         # softmax
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -377,9 +382,9 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
              BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr, PRE_LOAD_V: tl.constexpr, USE_BIAS: tl.constexpr,
              ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr, USE_ALIBI: tl.constexpr):
     
-    # if tl.program_id(0) == 7:
+    # if tl.program_id(0) == 0:
     #     tl.device_print("tl.program_id(0):", tl.program_id(0))
-    # if tl.program_id(0) == 7:
+    # if tl.program_id(0) == 0:
     #     tl.device_print("BLOCK_M:", BLOCK_M)
     #     tl.device_print("BLOCK_N:", BLOCK_N)
     #     tl.device_print("BLOCK_DMODEL:", BLOCK_DMODEL)
@@ -458,7 +463,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     elif seqlen_k % BLOCK_N:
         n_extra_tokens = seqlen_k % BLOCK_N
     PADDED_HEAD: tl.constexpr = (ACTUAL_BLOCK_DMODEL != BLOCK_DMODEL)
-    # if tl.program_id(0) == 7:
+    # if tl.program_id(0) == 0:
     #     tl.device_print("PADDED_HEAD", PADDED_HEAD)
 
     # Compute pointers for all the tensors used in this kernel.
@@ -499,12 +504,14 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     # scale sm_scale by log_2(e) and use 2^x in the loop as we do not
     # have native e^x support in HW.
-    qk_scale = sm_scale * 1.44269504089
+    qk_scale = sm_scale * RCP_LN2_FWD
     # Q is loaded once at the beginning and shared by all N blocks.
     q_ptrs_mask = offs_m[:, None] < seqlen_q
     if PADDED_HEAD:
         q_ptrs_mask = q_ptrs_mask & (offs_d[None, :] < ACTUAL_BLOCK_DMODEL)
     q = tl.load(q_ptrs, mask=q_ptrs_mask, other=0.0)
+    # if tl.program_id(0) == 0:
+    #     tl.device_print("q:", q)
     q = (q * qk_scale).to(q.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
@@ -575,7 +582,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     acc = acc.to(Out.type.element_ty)
     if IS_CAUSAL:
         if causal_start_idx > start_m_idx and causal_start_idx < end_m_idx:
-            # if tl.program_id(0) == 7:
+            # if tl.program_id(0) == 0:
             #     tl.device_print("causal_start_idx:", causal_start_idx)
             #     tl.device_print("start_m_idx:", start_m_idx)
             #     tl.device_print("end_m_idx:", end_m_idx)
@@ -683,7 +690,7 @@ def _bwd_kernel_dk_dv(dk, dv, Q, k, v, sm_scale, alibi_slope, DO, M, D,
         kqT = tl.dot(k, qT)
         if alibi_slope is not None:
             alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n, True)
-            kqT += alibi_block * 1.44269504089
+            kqT += alibi_block * RCP_LN2_FWD
 
         pT = tl.math.exp2(kqT - m[None, :])
         # Autoregressive masking.
@@ -734,7 +741,7 @@ def _bwd_kernel_dq(dq, q, K, V, do, m, D, alibi_slope,
         qk = tl.dot(q, kT)
         if alibi_slope is not None:
             alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n)
-            qk += alibi_block * 1.44269504089
+            qk += alibi_block * RCP_LN2_FWD
 
         p = tl.math.exp2(qk - m)
         # Autoregressive masking.
@@ -1251,7 +1258,10 @@ def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX
     k.requires_grad_(True)
     v.requires_grad_(True)
 
-    sm_scale = D_HEAD**-0.5
+    if True:
+        sm_scale = 1
+    else:
+        sm_scale = D_HEAD**-0.5
     input_metadata = MetaData(sm_scale=sm_scale)
     input_metadata.max_seqlens_q = N_CTX_Q
     input_metadata.max_seqlens_k = N_CTX_K
@@ -1263,7 +1273,12 @@ def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD', [
     (1, 1, 1, 512, 256, 128),
     (1, 1, 1, 256, 128, 160),
+    (1, 1, 1, 4, 2, 160),
+    (1, 1, 1, 16, 2, 160),
+    (1, 1, 1, 64, 2, 160),
+    (1, 1, 1, 256, 2, 160),
     (1, 1, 1, 512, 2, 160),
+    (1, 1, 1, 512, 4, 160),
     (1, 1, 1, 512, 128, 160),
     (1, 1, 1, 512, 256, 160),
     (1, 1, 1, 1024, 512, 160),

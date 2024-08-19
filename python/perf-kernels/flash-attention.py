@@ -269,32 +269,26 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
                 mask = size_n < boundary_m[:, None]
                 qk = tl.where(mask, qk, float("-inf"))
 
-        if tl.program_id(0) == 4:
-            tl.device_print("q:", q)
-        # print("q:", q)
-        #     tl.device_print("k:", k)
+        # if tl.program_id(0) == 7:
+            # tl.device_print("q:", q)
+            # tl.device_print("k:", k)
 
         # -- compute qk ----
         qk += tl.dot(q, k)
 
-        # if tl.program_id(0) == 4:
-        #     tl.device_print("qk:", qk)
+        # if tl.program_id(0) == 7:
+        #     tl.device_print("qk before causal:", qk)
 
         if IS_CAUSAL:
             causal_boundary = start_n + offs_n_causal
             causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
-            # if tl.program_id(0) == 4:
+            # if tl.program_id(0) == 7:
             #     tl.device_print("causal_mask:", causal_mask)
-
-            # if tl.program_id(0) == 4:
-            #     tl.device_print("qk max before causal:", tl.max(qk))
-            #     tl.device_print("qk min before causal:", tl.min(qk))
             
             qk = tl.where(causal_mask, qk, float("-inf"))
 
-            # if tl.program_id(0) == 4:
-            #     tl.device_print("qk max after causal:", tl.max(qk))
-            #     tl.device_print("qk min after causal:", tl.min(qk))
+            if tl.program_id(0) == 7:
+                tl.device_print("qk after causal:", qk)
 
         if bias_ptrs is not None:
             bias_offs_n = start_n + tl.arange(0, BLOCK_N) if MASK_STEPS else None
@@ -383,9 +377,9 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
              BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr, PRE_LOAD_V: tl.constexpr, USE_BIAS: tl.constexpr,
              ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr, USE_ALIBI: tl.constexpr):
     
-    # if tl.program_id(0) == 4:
+    # if tl.program_id(0) == 7:
     #     tl.device_print("tl.program_id(0):", tl.program_id(0))
-    # if tl.program_id(0) == 4:
+    # if tl.program_id(0) == 7:
     #     tl.device_print("BLOCK_M:", BLOCK_M)
     #     tl.device_print("BLOCK_N:", BLOCK_N)
     #     tl.device_print("BLOCK_DMODEL:", BLOCK_DMODEL)
@@ -464,7 +458,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     elif seqlen_k % BLOCK_N:
         n_extra_tokens = seqlen_k % BLOCK_N
     PADDED_HEAD: tl.constexpr = (ACTUAL_BLOCK_DMODEL != BLOCK_DMODEL)
-    # if tl.program_id(0) == 4:
+    # if tl.program_id(0) == 7:
     #     tl.device_print("PADDED_HEAD", PADDED_HEAD)
 
     # Compute pointers for all the tensors used in this kernel.
@@ -581,7 +575,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     acc = acc.to(Out.type.element_ty)
     if IS_CAUSAL:
         if causal_start_idx > start_m_idx and causal_start_idx < end_m_idx:
-            # if tl.program_id(0) == 4:
+            # if tl.program_id(0) == 7:
             #     tl.device_print("causal_start_idx:", causal_start_idx)
             #     tl.device_print("start_m_idx:", start_m_idx)
             #     tl.device_print("end_m_idx:", end_m_idx)
@@ -1001,13 +995,13 @@ class _attention_prefill(torch.autograd.Function):
                        USE_ALIBI=False if metadata.alibi_slopes is None else True, ENABLE_DROPOUT=metadata.dropout_p
                        > 0.0, RETURN_ENCODED_SOFTMAX=metadata.return_encoded_softmax)
 
-        if DEBUG:
-            print("Saving in ctx for backward")
-            print("q:", q, q.shape)
-            print("k:", k, k.shape)
-            print("v:", v, v.shape)
-            print("o:", o, o.shape)
-            print("M:", M, M.shape)
+        # if DEBUG:
+            # print("Saving in ctx for backward")
+            # print("q:", q, q.shape)
+            # print("k:", k, k.shape)
+            # print("v:", v, v.shape)
+            # print("o:", o, o.shape)
+            # print("M:", M, M.shape)
 
         ctx.save_for_backward(q, k, v, o, M)
         ctx.grid = grid
@@ -1269,6 +1263,8 @@ def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD', [
     (1, 1, 1, 512, 256, 128),
     (1, 1, 1, 256, 128, 160),
+    (1, 1, 1, 512, 2, 160),
+    (1, 1, 1, 512, 128, 160),
     (1, 1, 1, 512, 256, 160),
     (1, 1, 1, 1024, 512, 160),
     (1, 1, 1, 512, 256, 256),

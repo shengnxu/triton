@@ -245,6 +245,13 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
                     OFFS_M: tl.constexpr, OFFS_N: tl.constexpr, PRE_LOAD_V: tl.constexpr, MASK_STEPS: tl.constexpr,
                     ENABLE_DROPOUT: tl.constexpr, RETURN_ENCODED_SOFTMAX: tl.constexpr, PADDED_HEAD: tl.constexpr,
                     ACTUAL_BLOCK_DMODEL: tl.constexpr):
+    # tl.device_print("actual_seqlen_k:", actual_seqlen_k)
+    # tl.device_print("ACTUAL_BLOCK_DMODEL:", ACTUAL_BLOCK_DMODEL)
+    # tl.device_print("BLOCK_N:", BLOCK_N)
+    # tl.device_print("BLOCK_M:", BLOCK_M)
+    # tl.device_print("block_min:", block_min)
+    # tl.device_print("block_max:", block_max)
+    
     # loop over k, v, and update accumulator
     for start_n in range(block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
@@ -253,7 +260,11 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             k_offs_n = start_n + tl.arange(0, BLOCK_N)
         else:
             k_offs_n = None
-        k_offs_k = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL)
+
+        if PADDED_HEAD:
+            k_offs_k = tl.arange(0, BLOCK_DMODEL)
+        else:
+            k_offs_k = None
         k = load_fn(k_ptrs, k_offs_k, k_offs_n, ACTUAL_BLOCK_DMODEL, actual_seqlen_k)
         if PRE_LOAD_V:
             # We can use the same offsets as k, just with dims transposed.
@@ -281,8 +292,8 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
         # -- compute qk ----
         qk += tl.dot(q, k)
 
-        if tl.program_id(0) == 0:
-            tl.device_print("qk before causal:", qk)
+        # if tl.program_id(0) == 0:
+        #     tl.device_print("qk before causal:", qk)
 
         if IS_CAUSAL:
             causal_boundary = start_n + offs_n_causal
@@ -292,8 +303,8 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             
             qk = tl.where(causal_mask, qk, float("-inf"))
 
-            if tl.program_id(0) == 0:
-                tl.device_print("qk after causal:", qk)
+        # if tl.program_id(0) == 0:
+        # tl.device_print("qk after causal:", qk)
 
         if bias_ptrs is not None:
             bias_offs_n = start_n + tl.arange(0, BLOCK_N) if MASK_STEPS else None
@@ -310,11 +321,24 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_q, actual_seqlen_k, global_m_positions,
                                               global_n_positions)
             qk += (alibi_block * RCP_LN2_FWD)  # scale factor of log2(e)
+        
+
+        # tl.device_print("qk:", qk)
 
         # softmax
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        qk = qk - m_ij[:, None]
+        # tl.device_print("m_ij:", m_ij)
+        # this can lead to -inf - (-inf) which is nan
+        if IS_CAUSAL:
+            # tl.device_print("qk before clamp:", qk)
+            qk = tl.where(qk > float("-inf"), qk - m_ij[:, None], float("-inf"))
+        else:
+            qk = qk - m_ij[:, None]
+        # if tl.program_id(0) == 0:
+        # tl.device_print("qk before exp:", qk)
         p = tl.math.exp2(qk)
+        # if tl.program_id(0) == 0:
+        # tl.device_print("p:", p)
 
         # CAVEAT: Must update l_ij before applying dropout
         l_ij = tl.sum(p, 1)
@@ -326,22 +350,39 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             p = tl.where(keep, p, 0.0)
         elif RETURN_ENCODED_SOFTMAX:
             tl.store(encoded_sm_ptrs, p.to(encoded_sm_ptrs.type.element_ty))
+        
         # -- update output accumulator --
-        alpha = tl.math.exp2(m_i - m_ij)
+        if IS_CAUSAL: # this can lead to -inf - (-inf) which is nan
+            alpha = tl.math.exp2(tl.where(m_i > float("-inf"), m_i - m_ij, float("-inf")))
+        else:
+            alpha = tl.math.exp2(m_i - m_ij)
+        # tl.device_print("alpha:", alpha)
+
+
         acc = acc * alpha[:, None]
+        # tl.device_print("acc:", acc)
         if not PRE_LOAD_V:
             v = load_fn(v_ptrs, k_offs_n, k_offs_k, actual_seqlen_k, ACTUAL_BLOCK_DMODEL)
+        # tl.device_print("v:", v)
         # -- update m_i and l_i
+        # tl.device_print("l_i before:", l_i)
         l_i = l_i * alpha + l_ij
+        # tl.device_print("l_i after:", l_i)
         # update m_i and l_i
         m_i = m_ij
+        # tl.device_print("acc before:", acc)
+        # tl.device_print("p:", p)
         acc += tl.dot(p.to(v.type.element_ty), v)
+        # tl.device_print("acc after:", acc)
         k_ptrs += BLOCK_N * stride_kn
         v_ptrs += BLOCK_N * stride_vk
         if bias_ptrs is not None:
             bias_ptrs += BLOCK_N * stride_bn
         if RETURN_ENCODED_SOFTMAX:
             encoded_sm_ptrs += BLOCK_N
+    
+    # tl.device_print("acc:", acc)
+    
     return acc, l_i, m_i
 
 
@@ -372,11 +413,12 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
     key=['IS_CAUSAL', 'dropout_p', 'BLOCK_DMODEL'],
     use_cuda_graph=True,
 )
+
 @triton.jit
-def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, stride_qk, stride_kz, stride_kh,
-             stride_kn, stride_kk, stride_vz, stride_vh, stride_vk, stride_vn, stride_oz, stride_oh, stride_om,
-             stride_on, stride_bz, stride_bh, stride_bm, stride_bn, stride_az, stride_ah, cu_seqlens_q, cu_seqlens_k,
-             dropout_p, philox_seed, philox_offset_base, encoded_softmax, alibi_slopes, HQ: tl.constexpr,
+def attn_fwd(Q, K, V, bias, SM_SCALE: tl.constexpr, L, Out, stride_qz, stride_qh, stride_qm, stride_qk, stride_kz,
+             stride_kh, stride_kn, stride_kk, stride_vz, stride_vh, stride_vk, stride_vn, stride_oz, stride_oh,
+             stride_om, stride_on, stride_bz, stride_bh, stride_bm, stride_bn, stride_az, stride_ah, cu_seqlens_q,
+             cu_seqlens_k, dropout_p, philox_seed, philox_offset_base, encoded_softmax, alibi_slopes, HQ: tl.constexpr,
              HK: tl.constexpr, ACTUAL_BLOCK_DMODEL: tl.constexpr, MAX_SEQLENS_Q: tl.constexpr,
              MAX_SEQLENS_K: tl.constexpr, VARLEN: tl.constexpr, IS_CAUSAL: tl.constexpr, BLOCK_M: tl.constexpr,
              BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr, PRE_LOAD_V: tl.constexpr, USE_BIAS: tl.constexpr,
@@ -504,7 +546,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     # scale sm_scale by log_2(e) and use 2^x in the loop as we do not
     # have native e^x support in HW.
-    qk_scale = sm_scale * RCP_LN2_FWD
+    QK_SCALE: tl.constexpr = SM_SCALE * RCP_LN2_FWD
     # Q is loaded once at the beginning and shared by all N blocks.
     q_ptrs_mask = offs_m[:, None] < seqlen_q
     if PADDED_HEAD:
@@ -512,7 +554,7 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
     q = tl.load(q_ptrs, mask=q_ptrs_mask, other=0.0)
     # if tl.program_id(0) == 0:
     #     tl.device_print("q:", q)
-    q = (q * qk_scale).to(q.type.element_ty)
+    q = (q * QK_SCALE).to(q.type.element_ty)
 
     # Here we compute how many full and masked blocks we have.
     padded_block_k = n_extra_tokens != 0
@@ -569,7 +611,10 @@ def attn_fwd(Q, K, V, bias, sm_scale, L, Out, stride_qz, stride_qh, stride_qm, s
                                         PRE_LOAD_V, True, ENABLE_DROPOUT, RETURN_ENCODED_SOFTMAX, PADDED_HEAD,
                                         ACTUAL_BLOCK_DMODEL)
     # epilogue
-    acc = acc / l_i[:, None]
+    # This helps the compiler do Newton Raphson on l_i vs on acc which is much larger.
+    l_recip = 1 / l_i[:, None]
+    acc = acc * l_recip
+
     if ENABLE_DROPOUT:
         acc = acc / (1 - dropout_p)
     # If seqlen_q > seqlen_k but the delta is not a multiple of BLOCK_M,
@@ -1201,34 +1246,6 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     input_metadata = MetaData(sm_scale=sm_scale)
     input_metadata.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
     return q, k, v, input_metadata
-
-
-def compare_tensors(out, ref, atol=2e-2, rtol=2e-2):
-    if out.shape != ref.shape:
-        print(f"Shapes mismatch: {out.shape} vs {ref.shape}")
-        return
-
-    abs_diff = torch.abs(out - ref)
-    rel_diff = abs_diff / torch.abs(ref)
-    
-    abs_mask = abs_diff > atol
-    rel_mask = rel_diff > rtol
-    
-    mismatch_mask = torch.logical_or(abs_mask, rel_mask)
-    
-    if torch.any(mismatch_mask):
-        mismatch_indices = torch.nonzero(mismatch_mask)
-        print(f"Found {len(mismatch_indices)} mismatching elements:")
-        for idx in mismatch_indices:
-            idx_tuple = tuple(idx.tolist())
-            print(f"  Index {idx_tuple}:")
-            print(f"    out: {out[idx_tuple].item()}")
-            print(f"    ref: {ref[idx_tuple].item()}")
-            print(f"    Absolute difference: {abs_diff[idx_tuple].item()}")
-            print(f"    Relative difference: {rel_diff[idx_tuple].item()}")
-    else:
-        print("No mismatches found within the specified tolerance.")
-
 
 def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX_K: int, D_HEAD: int, dtype: torch.dtype, layout: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, MetaData]:
     torch.manual_seed(20)

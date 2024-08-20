@@ -388,7 +388,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
 
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=1),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=8),
         # triton.Config({'BLOCK_M': 256, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
         #               num_warps=8),
         # triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
@@ -1288,9 +1288,14 @@ def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX
 
 
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD', [
+    (1, 1, 1, 4, 2, 16),
+    (1, 1, 1, 4, 2, 32),
+    (1, 1, 1, 4, 2, 64),
+    (1, 1, 1, 4, 2, 128),
+    (1, 1, 1, 4, 2, 160),
+    (1, 1, 1, 4, 2, 256),
     (1, 1, 1, 512, 256, 128),
     (1, 1, 1, 256, 128, 160),
-    (1, 1, 1, 4, 2, 160),
     (1, 1, 1, 16, 2, 160),
     (1, 1, 1, 64, 2, 160),
     (1, 1, 1, 256, 2, 160),

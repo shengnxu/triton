@@ -21,12 +21,20 @@ Currently only the forward kernel is supported, and contains these features:
 """
 
 import argparse
+from typing import Tuple
 import pytest
 import sys
 import torch
 
 import triton
 import triton.language as tl
+
+DEBUG = True
+if True:
+    RCP_LN2_FWD = triton.language.constexpr(1)
+else:
+    RCP_LN2_FWD = triton.language.constexpr(1.4426950408889634) # = 1.0 / ln(2)
+
 
 
 class MetaData():
@@ -255,7 +263,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an additional
             # scale factor of log2(e) which we must also multiply the bias with.
-            qk += (bias * 1.44269504089)
+            qk += (bias * RCP_LN2_FWD)
 
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
@@ -263,7 +271,7 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
             alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_q, actual_seqlen_k, global_m_positions,
                                               global_n_positions)
-            qk += (alibi_block * 1.44269504089)  # scale factor of log2(e)
+            qk += (alibi_block * RCP_LN2_FWD)  # scale factor of log2(e)
 
         # softmax
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -301,19 +309,20 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
 
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
-        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
-        # Fall-back config.
-        triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1,
-                      num_warps=4),
+        triton.Config({'BLOCK_M': 64, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1, num_warps=1),
+    #     triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
+    #     triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
+    #     triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 3, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
+    #     triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
+    #     triton.Config({'BLOCK_M': 128, 'BLOCK_N': 32, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
+    #     # Fall-back config.
+    #     triton.Config({'BLOCK_M': 16, 'BLOCK_N': 16, 'waves_per_eu': 1, 'PRE_LOAD_V': False}, num_stages=1,
+    #                   num_warps=4),
     ],
     key=['IS_CAUSAL', 'dropout_p', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K', 'ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK'],
     use_cuda_graph=True,
@@ -439,7 +448,7 @@ def attn_fwd(Q, K, V, bias, SM_SCALE: tl.constexpr, L, Out, stride_qz, stride_qh
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
     # scale sm_scale by log_2(e) and use 2^x in the loop as we do not
     # have native e^x support in HW.
-    QK_SCALE: tl.constexpr = SM_SCALE * 1.44269504089
+    QK_SCALE: tl.constexpr = SM_SCALE * RCP_LN2_FWD
     # Q is loaded once at the beginning and shared by all N blocks.
     q_ptrs_mask = offs_m[:, None] < seqlen_q
     if PADDED_HEAD:
@@ -622,7 +631,7 @@ def _bwd_kernel_dk_dv(dk, dv, Q, k, v, sm_scale, alibi_slope, DO, M, D,
         kqT = tl.dot(k, qT)
         if alibi_slope is not None:
             alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n, True)
-            kqT += alibi_block * 1.44269504089
+            kqT += alibi_block * RCP_LN2_FWD
 
         pT = tl.math.exp2(kqT - m[None, :])
         # Autoregressive masking.
@@ -673,7 +682,7 @@ def _bwd_kernel_dq(dq, q, K, V, do, m, D, alibi_slope,
         qk = tl.dot(q, kT)
         if alibi_slope is not None:
             alibi_block = compute_alibi_block(alibi_slope, N_CTX, N_CTX, offs_m, offs_n)
-            qk += alibi_block * 1.44269504089
+            qk += alibi_block * RCP_LN2_FWD
 
         p = tl.math.exp2(qk - m)
         # Autoregressive masking.
@@ -1068,7 +1077,48 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     return q, k, v, input_metadata
 
 
+def input_helper_increasing_seqlen(Z: int, HQ: int, HK: int, N_CTX_Q: int, N_CTX_K: int, D_HEAD: int, dtype: torch.dtype, layout: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, MetaData]:
+    torch.manual_seed(20)
+
+    # Generate increasing values for the sequence dimension
+    q_seq_values = torch.arange(N_CTX_Q, dtype=dtype, device="cuda").unsqueeze(-1).expand(-1, D_HEAD)
+    k_seq_values = torch.arange(N_CTX_K, dtype=dtype, device="cuda").unsqueeze(-1).expand(-1, D_HEAD)
+
+    # Initialize q, k, v with increasing sequence lengths
+    if layout == 'bhsd':
+        q = q_seq_values.unsqueeze(0).unsqueeze(0).expand(Z, HQ, -1, -1)
+        k = k_seq_values.unsqueeze(0).unsqueeze(0).expand(Z, HK, -1, -1)
+    elif layout == 'bshd':
+        q = q_seq_values.unsqueeze(0).unsqueeze(2).expand(Z, -1, HQ, -1)
+        k = k_seq_values.unsqueeze(0).unsqueeze(2).expand(Z, -1, HK, -1)
+    else:
+        assert False, 'Got unsupported tensor layout'
+
+    v = k.clone()  # v has the same shape as k
+
+    # # Add some randomness to avoid exact equality
+    # q += torch.randn_like(q) * 0.1
+    # k += torch.randn_like(k) * 0.1
+    # v += torch.randn_like(v) * 0.1
+
+    q.requires_grad_(True)
+    k.requires_grad_(True)
+    v.requires_grad_(True)
+
+    if True:
+        sm_scale = 1
+    else:
+        sm_scale = D_HEAD**-0.5
+    input_metadata = MetaData(sm_scale=sm_scale)
+    input_metadata.max_seqlens_q = N_CTX_Q
+    input_metadata.max_seqlens_k = N_CTX_K
+    input_metadata.layout = layout
+
+    return q, k, v, input_metadata
+
 @pytest.mark.parametrize('Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD', [
+    (1, 1, 1, 4, 2, 160),
+    (1, 1, 1, 512, 256, 160),
     (4, 48, 24, 1024, 1024, 64),
     (1, 24, 6, 8192, 8192, 64),
     (1, 4, 2, 16384, 16384, 128),
@@ -1091,7 +1141,10 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
 @pytest.mark.parametrize('layout', ['bshd', 'bhsd'])
 def test_op_fwd(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, causal, use_alibi, layout, dtype=torch.float16):
     torch.manual_seed(20)
-    q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
+    if True:
+        q, k, v, input_metadata = input_helper_increasing_seqlen(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
+    else:
+        q, k, v, input_metadata = input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, layout)
     if causal:
         input_metadata.need_causal()
 

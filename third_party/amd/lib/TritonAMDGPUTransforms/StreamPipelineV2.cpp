@@ -194,12 +194,12 @@ loadOpsToIndirectionLevelAndUse(scf::ForOp forOp) {
 
   // If the loop has numStages attribute, also consider pipelining other loads
   // that are not directly used by dot ops.
-  if (forOp->hasAttr(tt::kNumStagesAttrName)) {
+  //if (forOp->hasAttr(tt::kNumStagesAttrName)) {
     for (Operation &op : forOp.getBody()->without_terminator()) {
       if (!isa<tt::LoadOp>(op))
         dfs(&op, 0, &op);
     }
-  }
+  //}
 
   return loadOpToIndLevelAndUse;
 }

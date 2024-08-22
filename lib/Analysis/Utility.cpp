@@ -620,6 +620,16 @@ bool cvtNeedsSharedMemory(RankedTensorType srcTy, RankedTensorType dstTy) {
   // checks.
   // TODO(Keren): We didn't check `cvtNeedsWarpShuffle` here because it's not
   // supported yet in Triton's backend.
+
+  if (auto blockSrc = llvm::dyn_cast<triton::gpu::BlockedEncodingAttr>(
+          srcTy.getEncoding())) {
+    auto dotOp = llvm::dyn_cast<triton::gpu::DotOperandEncodingAttr>(
+        dstTy.getEncoding());
+    if (dotOp && dotOp.getOpIdx() == 1) {
+      return false;
+    }
+  }
+
   return !cvtReordersRegisters(srcTy, dstTy) &&
          !isMmaToDotShortcut(srcTy, dstTy) &&
          !isMfmaToDotShortcut(srcTy, dstTy);

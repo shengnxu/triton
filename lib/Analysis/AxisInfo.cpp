@@ -1217,12 +1217,12 @@ unsigned ModuleAxisInfoAnalysis::getPtrContiguity(Value ptr) {
   LDBG("getPtrContiguity uniqueContigPerThread = " << contiguity);
   contiguity = std::min(align, contiguity);
 
-  if(auto blockedLayout = mlir::dyn_cast<triton::gpu::BlockedEncodingAttr>(layout)){
-    if (!blockedLayout.getRespectOrderDuringLowering()){
-      contiguity = uniqueContigPerThread[order[1]];
-      // llvm::outs() << contiguity << "\n";
-    }
-  }
+  // if(auto blockedLayout = mlir::dyn_cast<triton::gpu::BlockedEncodingAttr>(layout)){
+  //   if (!blockedLayout.getRespectOrderDuringLowering()){
+  //     contiguity = uniqueContigPerThread[order[1]];
+  //     // llvm::outs() << contiguity << "\n";
+  //   }
+  // }
   return contiguity;
 }
 

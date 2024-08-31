@@ -33,6 +33,9 @@ def AMDGPU_Dialect : Dialect {
   }];
 
   let dependentDialects = [
+    "triton::TritonDialect",
+    // "triton::gpu::TritonGPUDialect",
+    "mlir::tensor::TensorDialect",
     "mlir::LLVM::LLVMDialect"
   ];
 }

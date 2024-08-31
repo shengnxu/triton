@@ -11,8 +11,8 @@ def ConvertAMDGPUToLLVM : Pass<"convert-amd-gpu-to-llvm", "mlir::ModuleOp"> {
     }];
     let constructor = "mlir::triton::createConvertAMDGPUToLLVMPass()";
 
-    let dependentDialects = ["mlir::arith::ArithDialect",
-                             "mlir::LLVM::LLVMDialect",
+    let dependentDialects = ["mlir::LLVM::LLVMDialect",
+                             "mlir::triton::TritonDialect",
                              "mlir::triton::amdgpu::AMDGPUDialect"];
 }
 

@@ -165,6 +165,43 @@ public:
           dfgop->moveBefore(block, block->begin());
       }
     }
+
+    // hoist local_load and local_alloc out of the loop
+    m.walk([&](scf::ForOp forOp) {
+      for (Operation &op : forOp) {
+        if (isa<triton::gpu::LocalAllocOp>(op)) {
+          // llvm::outs() << "Found local_xxx op\n";
+          auto defOp = op.getOperand(0).getDefiningOp();
+          if (!defOp) // blockArg
+            continue;
+          // llvm::outs() << "And it's defOp is not block arg\n";
+          if (defOp->getParentRegion() == &forOp.getRegion())
+            continue;
+          // llvm::outs() << "And it's defOp is outside of the loop\n";
+          // op.dump();
+          op.moveAfter(defOp);
+          break;
+        }
+      }
+    });
+
+    m.walk([&](scf::ForOp forOp) {
+      for (Operation &op : forOp) {
+        if (isa<triton::gpu::LocalLoadOp>(op)) {
+          // llvm::outs() << "Found local_xxx op\n";
+          auto defOp = op.getOperand(0).getDefiningOp();
+          if (!defOp) // blockArg
+            continue;
+          // llvm::outs() << "And it's defOp is not block arg\n";
+          if (defOp->getParentRegion() == &forOp.getRegion())
+            continue;
+          // llvm::outs() << "And it's defOp is outside of the loop\n";
+          // op.dump();
+          op.moveAfter(defOp);
+          break;
+        }
+      }
+    });
   }
 };
 

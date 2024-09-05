@@ -202,6 +202,26 @@ public:
         }
       }
     });
+
+    // Sink loadV after loadK
+    m.walk([&](scf::ForOp forOp) {
+      SetVector<Operation *> loadOps;
+      for (Operation &op : forOp)
+        if (isa<triton::LoadOp>(op))
+          loadOps.insert(&op);
+
+      assert(loadOps.size() == 3 && "There should be three loads!!");
+
+      for (Operation &op : forOp) {
+        if (isa<triton::DotOp>(op)) {
+          // Sink loadK after local_load
+          loadOps[2]->moveBefore(&op);
+          // Sink loadV after loadK
+          loadOps[1]->moveAfter(loadOps[2]);
+          break;
+        }
+      }
+    });
   }
 };
 

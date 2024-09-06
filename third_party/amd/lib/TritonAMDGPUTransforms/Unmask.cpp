@@ -53,10 +53,13 @@ struct UnmaskPass : public TritonAMDGPUUnmaskBase<UnmaskPass> {
   }
 
   void runOnOperation() override {
-    SmallVector<scf::ForOp> loops;
+    DenseSet<scf::ForOp> loops;
     getOperation()->walk([&](scf::ForOp forOp) {
       if (hasMaskedLoads(forOp))
-        loops.push_back(forOp);
+        loops.insert(forOp);
+      // remove outer loops
+      if (auto par = forOp->getParentOfType<scf::ForOp>())
+        loops.erase(par);
     });
 
     for (auto loop : loops) {
@@ -64,14 +67,34 @@ struct UnmaskPass : public TritonAMDGPUUnmaskBase<UnmaskPass> {
       auto loc = loop.getLoc();
       IRRewriter b(loop->getContext());
       b.setInsertionPoint(loop);
+      auto lb = loop.getLowerBound();
       auto ub = loop.getUpperBound();
+      auto step = loop.getStep();
       auto ubMinusOne = b.create<arith::SubIOp>(loc, ub, loop.getStep());
       loop.setUpperBound(ubMinusOne);
       // body for last iteration
+      // iter = 
+      Type t = lb.getType();
+      Value minus1 =
+        b.create<arith::ConstantOp>(loc, b.getIntegerAttr(t, -1));
+      Value boundsRange = b.create<arith::SubIOp>(loc, ub, lb);
+      Value rangeIncr = b.create<arith::AddIOp>(loc, boundsRange, step);
+      Value rangeDecr = b.create<arith::AddIOp>(loc, rangeIncr, minus1);
+      Value totalIterations = b.create<arith::DivUIOp>(loc, rangeDecr, step);
+      Value iterI = b.create<arith::AddIOp>(loc, totalIterations, minus1);
+      // newLastIter = lb + step * iterI
+      Value newLastIter = b.create<arith::AddIOp>(
+          loc, lb, b.create<arith::MulIOp>(loc, step, iterI));
+
+      // pred = lb <= newLastIter
+      Value predicate = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sle, lb, newLastIter);
+      
+      // if (lb <= iter) {
       b.setInsertionPointAfter(loop);
       auto body = loop.getBody();
       SmallVector<Value> lresults, castResults, lastResults;
-      lresults.push_back(ubMinusOne);
+      lresults.push_back(newLastIter);
+      
       //llvm::copy(loop.getResults(), lresults.end());
       for (Value res : loop.getResults()) {
         lresults.push_back(res);

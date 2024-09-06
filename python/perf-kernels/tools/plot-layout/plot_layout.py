@@ -95,8 +95,7 @@ def draw_dot_layout_cmd(M, N, K, mfmaNonKDim, warpsPerCTA, trans, kpack):
 \\end{{document}}'''
 
 
-def draw_blocked_layout_cmd(M, K, sizePerThread, threadsPerWarp, warpsPerCTA,
-                            order):
+def draw_blocked_layout_cmd(M, K, sizePerThread, threadsPerWarp, warpsPerCTA, order):
     return f'''\\begin{{document}}
   \\begin{{tikzpicture}}
     \\def\\scale{{1}}
@@ -107,8 +106,7 @@ def draw_blocked_layout_cmd(M, K, sizePerThread, threadsPerWarp, warpsPerCTA,
 \\end{{document}}'''
 
 
-def draw_lds_access_cmd(M, K, kpack, ldsLayout, ldsAccess, sizePerThread,
-                        threadsPerWarp):
+def draw_lds_access_cmd(M, K, kpack, ldsLayout, ldsAccess, sizePerThread, threadsPerWarp):
     if ldsLayout == 'swizzle':
         hasSwizzle = 1
     elif ldsLayout == 'padding':
@@ -158,11 +156,7 @@ def draw_wmma_instr_cmd(waveSize):
 
 
 def run_bash_command(commandstring):
-    proc = subprocess.run(commandstring,
-                          shell=True,
-                          check=True,
-                          executable='/bin/bash',
-                          stdout=subprocess.PIPE)
+    proc = subprocess.run(commandstring, shell=True, check=True, executable='/bin/bash', stdout=subprocess.PIPE)
     return proc.stdout.splitlines()
 
 
@@ -172,62 +166,27 @@ def parse_args():
         allow_abbrev=False,
     )
     ## tensor shapes
-    parser.add_argument("-shape",
-                        type=int,
-                        nargs=3,
-                        default=(32, 128, 64),
-                        help='Tensor shape in the form of M,N,K')
-    parser.add_argument("-plot",
-                        type=str,
-                        default="blocked",
-                        choices=['blocked', 'dot', 'wmma', 'lds'],
+    parser.add_argument("-shape", type=int, nargs=3, default=(32, 128, 64), help='Tensor shape in the form of M,N,K')
+    parser.add_argument("-plot", type=str, default="blocked", choices=['blocked', 'dot', 'wmma', 'lds'],
                         help='choose plot mode')
-    parser.add_argument(
-        "-nonKDim",
-        type=int,
-        default=32,
-        choices=[16, 32],
-        help='mfma instruction dim')
+    parser.add_argument("-nonKDim", type=int, default=32, choices=[16, 32], help='mfma instruction dim')
     ## blocked layout parameters
     parser.add_argument("-sizePerThread", type=int, nargs=2, default=(1, 4))
     parser.add_argument("-threadsPerWarp", type=int, nargs=2, default=(16, 4))
     parser.add_argument("-warpsPerCTA", type=int, nargs=2, default=(1, 4))
     parser.add_argument("-order", type=int, nargs=2, default=(1, 0))
     ## LDS access parameters
-    parser.add_argument("-kWidth",
-                        type=int,
-                        default=4,
-                        choices=[4, 8, 16],
-                        help='number of elements per thread')
-    parser.add_argument("-lds_layout",
-                        type=str,
-                        default="none",
-                        choices=['swizzle', 'padding', 'none'],
+    parser.add_argument("-kWidth", type=int, default=4, choices=[4, 8, 16], help='number of elements per thread')
+    parser.add_argument("-lds_layout", type=str, default="none", choices=['swizzle', 'padding', 'none'],
                         help='choose the LDS data layout')
-    parser.add_argument("-lds_access",
-                        type=str,
-                        default="none",
-                        choices=['read', 'write', 'none'],
+    parser.add_argument("-lds_access", type=str, default="none", choices=['read', 'write', 'none'],
                         help='choose LDS access mode')
     ## wmma instruction layout parameter
-    parser.add_argument("-wave_size",
-                        type=int,
-                        default=32,
-                        choices=[32, 64],
-                        help='choose the wmma instruction mode')
+    parser.add_argument("-wave_size", type=int, default=32, choices=[32, 64], help='choose the wmma instruction mode')
 
-    parser.add_argument("-o",
-                        type=str,
-                        default="myplot",
-                        help='output pdf file name (without surfix)')
-    parser.add_argument("-mfmaTrans",
-                        action='store_true',
-                        default=False,
-                        help='If set, then use mfma.trans layout')
-    parser.add_argument("-keep",
-                        action='store_true',
-                        default=False,
-                        help='If set, keep the generated .tex file')
+    parser.add_argument("-o", type=str, default="myplot", help='output pdf file name (without surfix)')
+    parser.add_argument("-mfmaTrans", action='store_true', default=False, help='If set, then use mfma.trans layout')
+    parser.add_argument("-keep", action='store_true', default=False, help='If set, keep the generated .tex file')
 
     args = parser.parse_args()
 
@@ -279,24 +238,19 @@ def main():
 
     if plot_mode == 'blocked' or plot_mode == 'dot':
         print(f"CTAShape={CTAShape}")
-        assert M != 0 and CTAShape[
-            0] <= M and M % CTAShape[0] == 0, "bad tensor dimension M"
+        assert M != 0 and CTAShape[0] <= M and M % CTAShape[0] == 0, "bad tensor dimension M"
 
     if plot_mode == 'blocked':
-        assert K != 0 and CTAShape[
-            1] <= K and K % CTAShape[1] == 0, "bad tensor dimension K"
+        assert K != 0 and CTAShape[1] <= K and K % CTAShape[1] == 0, "bad tensor dimension K"
 
     if plot_mode == 'dot':
-        assert N != 0 and CTAShape[
-            1] <= N and N % CTAShape[1] == 0, "bad tensor dimension N"
+        assert N != 0 and CTAShape[1] <= N and N % CTAShape[1] == 0, "bad tensor dimension N"
         assert K != 0 and K % (2 * kpack) == 0, "bad tensor dimension K"
 
     if plot_mode == 'lds':
         print(f"Plotting LDS access for tensor M={M},K={K} with vec={kpack}")
         if ldsAccess == 'write':
-            print(
-                f"sizePerThread={sizePerThread}, threadsPerWarp={threadsPerWarp}"
-            )
+            print(f"sizePerThread={sizePerThread}, threadsPerWarp={threadsPerWarp}")
 
     with open("myplot.tex", 'w') as f_plot:
         with open("tikzplot.tex") as file:
@@ -304,14 +258,11 @@ def main():
 
         preamble_str = draw_preamble_cmd()
 
-        draw_blockedLayout_str = draw_blocked_layout_cmd(
-            M, K, sizePerThread, threadsPerWarp, warpsPerCTA, order)
+        draw_blockedLayout_str = draw_blocked_layout_cmd(M, K, sizePerThread, threadsPerWarp, warpsPerCTA, order)
 
-        draw_dotLayout_str = draw_dot_layout_cmd(M, N, K, mfmaNonKDim,
-                                                 warpsPerCTA, trans, kpack)
+        draw_dotLayout_str = draw_dot_layout_cmd(M, N, K, mfmaNonKDim, warpsPerCTA, trans, kpack)
 
-        draw_lds_str = draw_lds_access_cmd(M, K, kpack, ldsLayout, ldsAccess,
-                                           sizePerThread, threadsPerWarp)
+        draw_lds_str = draw_lds_access_cmd(M, K, kpack, ldsLayout, ldsAccess, sizePerThread, threadsPerWarp)
 
         draw_wmma_str = draw_wmma_instr_cmd(waveSize)
 

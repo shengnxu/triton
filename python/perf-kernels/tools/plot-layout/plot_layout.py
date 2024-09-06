@@ -1,8 +1,6 @@
 import argparse
 import sys
-import yaml
 import os
-import glob
 import subprocess
 
 

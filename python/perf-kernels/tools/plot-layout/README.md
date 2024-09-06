@@ -31,7 +31,7 @@ options:
 ```
 
 ## Installation
-This script does not require torch or triton to be installed. The only package 
+This script does not require torch or triton to be installed. The only package
 it depends on is latex. On Ubuntu, do
 ```bash
 sudo apt install texlive-full
@@ -60,8 +60,8 @@ Notes
   out of the boundary of the tensor dimensions. This means
   - For M: sizePerThread[0] * threadsPerWarps[0] * warpsPerCTA[0] <= M
   - For K: sizePerThread[1] * threadsPerWarps[1] * warpsPerCTA[1] <= K
-  
-  
+
+
 ## Draw mfma operand and result layouts (`-plot dot`)
 
 Examples:
@@ -78,15 +78,15 @@ This mode draws two graphs:
 2. The layout of a single mfma block, operands and results of one or more mfma
    instructions that share the same accumulating VGPRs.
    This view has thread distributions among tensor elements.
-   
+
 Knobs
 - `-kWidth`: the number of elements that will be loaded into one thread at once
 - `-nonKDim`: 16 ot 32, which is used to control the mfma instruction size
 - `-mfmaTrans`: if set, the transposed mfma layout will be plotted.
 
 Notes
-- The layout shows the mapping from the threads/wave to the elements in the 
-  original tensor. It does not care if the elements are arranged in LDS, like 
+- The layout shows the mapping from the threads/wave to the elements in the
+  original tensor. It does not care if the elements are arranged in LDS, like
   swizzling to avoid bank conflicts.
 - The script does not allow settings for data type or k dim of the mfma instruction.
   This can be controled by the `-kWidth` flag.

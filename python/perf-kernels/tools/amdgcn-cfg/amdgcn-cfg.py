@@ -48,7 +48,7 @@ def find_kernel(text):
     start = None
     for index, line in enumerate(text):
         match = re.search(func_name_expr, line)
-        if not match is None:
+        if match is not None:
             func_name = match[1]
             start = index
             break
@@ -57,7 +57,7 @@ def find_kernel(text):
 
     end = None
     for index, line in enumerate(text):
-        if not re.search(r's_endpgm', line) is None:
+        if re.search(r's_endpgm', line) is not None:
             end = index
             break
 
@@ -72,7 +72,7 @@ def find_label(kernel):
     index = None
     for index, line in enumerate(kernel):
         match = re.search(r'^\.(\w+):', line)
-        if not match is None:
+        if match is not None:
             label = match[1]
             break
     return label, index
@@ -106,14 +106,14 @@ def find_terminators(code):
     terminator_labels = []
     for line in code:
         branch = re.search(r'(c)?branch.*\s+\.?(.*)', line)
-        if not branch is None:
+        if branch is not None:
             is_condional = True if len(branch.groups()) == 2 else False
             label_idx = 2 if is_condional else 1
             terminator_labels.append(branch[label_idx])
             if not is_condional:
                 return terminator_labels, True
         end = re.search(r's_endpgm', line)
-        if not end is None:
+        if end is not None:
             terminator_labels.append(end_label)
             return terminator_labels, True
 

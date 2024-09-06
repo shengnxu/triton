@@ -52,7 +52,7 @@ def find_kernel(text):
             func_name = match[1]
             start = index
             break
-    if start == None:
+    if start is None:
         return None, None, None
 
     end = None
@@ -61,7 +61,7 @@ def find_kernel(text):
             end = index
             break
 
-    if end == None:
+    if end is None:
         return None, None, None
 
     return func_name, text[start:end + 1], end
@@ -85,7 +85,7 @@ def get_block_list(kernel):
     if (index > 1):
         blocks[begin_label] = Block(begin_label, kernel[:index - 1])
 
-    while label != None:
+    while label is not None:
         kernel = kernel[index + 1:]
         next_label, next_index = find_label(kernel)
         if next_label is None:
@@ -182,9 +182,9 @@ def main(options):
 
     kernels = []
     last_end_index = 0
-    while last_end_index != None:
+    while last_end_index is not None:
         func_name, kernel_asm, last_end_index = find_kernel(asm)
-        if kernel_asm == None:
+        if kernel_asm is None:
             break
 
         blocks = get_block_list(kernel_asm)

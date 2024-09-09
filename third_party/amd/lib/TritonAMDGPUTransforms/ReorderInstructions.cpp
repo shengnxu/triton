@@ -165,6 +165,84 @@ public:
           dfgop->moveBefore(block, block->begin());
       }
     }
+
+    // hoist local_load and local_alloc out of the loop
+    m.walk([&](scf::ForOp forOp) {
+      for (Operation &op : forOp) {
+        if (isa<triton::gpu::LocalAllocOp>(op)) {
+          // llvm::outs() << "Found local_xxx op\n";
+          auto defOp = op.getOperand(0).getDefiningOp();
+          if (!defOp) // blockArg
+            continue;
+          // llvm::outs() << "And it's defOp is not block arg\n";
+          if (defOp->getParentRegion() == &forOp.getRegion())
+            continue;
+          // llvm::outs() << "And it's defOp is outside of the loop\n";
+          // op.dump();
+          op.moveAfter(defOp);
+          break;
+        }
+      }
+    });
+
+    Operation *localAllocOp;
+    scf::ForOp *theForOp;
+    m.walk([&](scf::ForOp forOp) {
+      theForOp = &forOp;
+      for (Operation &op : forOp) {
+        if (isa<triton::gpu::LocalLoadOp>(op)) {
+          // llvm::outs() << "Found local_xxx op\n";
+          auto defOp = op.getOperand(0).getDefiningOp();
+          if (!defOp) // blockArg
+            continue;
+          // llvm::outs() << "And it's defOp is not block arg\n";
+          if (defOp->getParentRegion() == &forOp.getRegion())
+            continue;
+          // llvm::outs() << "And it's defOp is outside of the loop\n";
+          // op.dump();
+          localAllocOp = defOp;
+          op.moveAfter(defOp);
+          break;
+        }
+      }
+    });
+
+    // Remove local_alloc and local_load for Q in the epilogue
+    Operation *localLoadOp = getFirstUse(localAllocOp);
+    Value loadedVal = dyn_cast<ttg::LocalLoadOp>(localLoadOp).getResult();
+    Operation *theParent = localAllocOp->getOperand(0).getDefiningOp();
+
+    Operation *targetLocalLoad;
+    m.walk([&](ttg::LocalLoadOp local_loadOp) {
+      if (local_loadOp != dyn_cast<ttg::LocalLoadOp>(localLoadOp)) {
+        auto local_alloc = local_loadOp->getOperand(0).getDefiningOp();
+        if (local_alloc) {
+          auto parent = local_alloc->getOperand(0).getDefiningOp();
+          if (parent == theParent) {
+            local_loadOp.getResult().replaceAllUsesWith(
+                dyn_cast<ttg::LocalLoadOp>(localLoadOp).getResult());
+          }
+        }
+      }
+    });
+
+    // Sink loadV after loadK
+    m.walk([&](scf::ForOp forOp) {
+      SetVector<Operation *> loadOps;
+      for (Operation &op : forOp)
+        if (isa<triton::LoadOp>(op))
+          loadOps.insert(&op);
+
+      assert(loadOps.size() == 2 && "There should be two loads!!");
+
+      for (Operation &op : forOp) {
+        if (isa<triton::gpu::LocalLoadOp>(op)) {
+          // Sink loadV after local_alloc
+          loadOps[0]->moveBefore(&op);
+          break;
+        }
+      }
+    });
   }
 };
 

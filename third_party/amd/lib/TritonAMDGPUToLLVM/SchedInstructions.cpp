@@ -18,8 +18,9 @@ namespace triton {
 using namespace mlir;
 
 namespace {
-enum class InstructionMaskEnum : int64_t {
+enum InstructionMaskEnum {
   NONE = 0x0000000,
+  ALL_ALU = 0x00000001,
   VALU = 0x00000002,
   SALU = 0x00000004,
   MFMA = 0x00000008,
@@ -31,8 +32,22 @@ enum class InstructionMaskEnum : int64_t {
   DS_WRITE = 0x00000200
 };
 
+#define MOD_SCHED
+//#define ENABLE_IGLP_OPT 0
+
+#ifdef MOD_SCHED
+const bool modifyScheduling{true};
+#else
 const bool modifyScheduling{false};
-// const bool modifyScheduling{true};
+#endif // MOD_SCHED
+
+#if defined(ENABLE_IGLP_OPT) && defined(MOD_SCHED)
+const bool useIglpOpt{true};
+const int iglpValue{ENABLE_IGLP_OPT};
+#else
+const bool useIglpOpt{false};
+const int iglpValue{0};
+#endif // ENABLE_IGLP_OPT
 
 void buildSchedGroupBarrier(PatternRewriter &builder,
                             InstructionMaskEnum maskValue, int sizeValue,
@@ -54,14 +69,27 @@ void buildSchedGroupBarrier(PatternRewriter &builder,
 }
 
 Operation *generatedSchedBarrier(PatternRewriter &rewriter,
-                                 InstructionMaskEnum maskValue) {
+                                 int64_t maskValue) {
   MLIRContext *ctx = rewriter.getContext();
   Location loc = rewriter.getUnknownLoc();
   auto intrinsicName = StringAttr::get(ctx, "llvm.amdgcn.sched.barrier");
   LLVM::FastmathFlagsAttr defaultFlags{};
   Type i32 = rewriter.getI32Type();
   auto mask = rewriter.create<LLVM::ConstantOp>(
-      loc, rewriter.getIntegerAttr(i32, static_cast<int64_t>(maskValue)));
+      loc, rewriter.getIntegerAttr(i32, maskValue));
+  return rewriter.create<LLVM::CallIntrinsicOp>(loc, TypeRange{}, intrinsicName,
+                                                ValueRange{mask}, defaultFlags);
+}
+
+Operation *generatedIglpOpt(PatternRewriter &rewriter,
+                            int value) {
+  MLIRContext *ctx = rewriter.getContext();
+  Location loc = rewriter.getUnknownLoc();
+  auto intrinsicName = StringAttr::get(ctx, "llvm.amdgcn.iglp.opt");
+  LLVM::FastmathFlagsAttr defaultFlags{};
+  Type i32 = rewriter.getI32Type();
+  auto mask = rewriter.create<LLVM::ConstantOp>(
+      loc, rewriter.getIntegerAttr(i32, static_cast<int64_t>(value)));
   return rewriter.create<LLVM::CallIntrinsicOp>(loc, TypeRange{}, intrinsicName,
                                                 ValueRange{mask}, defaultFlags);
 }
@@ -71,6 +99,13 @@ struct SchedGroupBarriersRewriter
   using OpRewritePattern<triton::gpu::GroupSched>::OpRewritePattern;
   LogicalResult matchAndRewrite(triton::gpu::GroupSched schedBarrier,
                                 PatternRewriter &rewriter) const override {
+    
+    if (useIglpOpt) {
+      rewriter.setInsertionPointAfter(schedBarrier);
+      auto *op = generatedIglpOpt(rewriter, iglpValue);
+      rewriter.eraseOp(schedBarrier);
+      return mlir::success();
+    }
 
     Block *block = schedBarrier->getBlock();
 
@@ -85,16 +120,18 @@ struct SchedGroupBarriersRewriter
     block->walk([&numDsReads](LLVM::LoadOp op) {
       auto operandType = op.getOperand().getType();
       if (auto ptr = llvm::dyn_cast<LLVM::LLVMPointerType>(operandType))
-        if (ptr.getAddressSpace() == 3)
+        if (ptr.getAddressSpace() == 3) {
           ++numDsReads;
+        }
     });
 
     size_t numDsWrites = 0;
     block->walk([&numDsWrites](LLVM::StoreOp op) {
       auto operandType = op.getOperand(1).getType();
       if (auto ptr = llvm::dyn_cast<LLVM::LLVMPointerType>(operandType))
-        if (ptr.getAddressSpace() == 3)
+        if (ptr.getAddressSpace() == 3) {
           ++numDsWrites;
+        }
     });
 
     size_t numMfmas = 0;
@@ -110,32 +147,103 @@ struct SchedGroupBarriersRewriter
                  << "numDsWrites: " << numDsWrites << ", "
                  << "numMfmas: " << numMfmas << "]\n";
 
-    size_t barrierCounter{0};
-    block->walk([&barrierCounter, &rewriter](ROCDL::BarrierOp op) {
-      if (barrierCounter == 1) {
-        rewriter.setInsertionPointAfter(op);
-        return WalkResult::interrupt();
+    rewriter.setInsertionPointToStart(block);
+    Operation *op;
+    op = generatedSchedBarrier(rewriter, InstructionMaskEnum::NONE);
+    
+    /*
+    constexpr size_t num_mfma_per_issue = 3;
+    constexpr size_t num_buffer_load_inst_a = 4;
+    constexpr size_t num_dswrite_per_issue_a = 1;
+    constexpr size_t num_buffer_load_inst_b = 4;
+    constexpr size_t num_dswrite_per_issue_b = 1;
+    constexpr size_t num_dsread_a_mfma = 4;
+    constexpr size_t num_dsread_b_mfma = 4;
+    constexpr size_t num_ds_read_inst_a = 8;
+    constexpr size_t ds_read_a_mfma_rate = 2;
+    constexpr size_t num_ds_read_inst_b = 8;
+    constexpr size_t ds_read_b_mfma_rate = 2;
+    for (size_t i = 0; i < num_buffer_load_inst_a; ++i) {
+      for (size_t j = 0; num_dswrite_per_issue_a < 1; ++j) {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 1, 0);
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
       }
-      ++barrierCounter;
-      return WalkResult::advance();
-    });
-
-    // rewriter.setInsertionPointToStart(block);
-    auto op = generatedSchedBarrier(rewriter, InstructionMaskEnum::NONE);
-
-    rewriter.setInsertionPointAfter(schedBarrier);
-    const size_t numIssues = numGlbLoads;
-    for (size_t i = 0; i < numIssues; ++i) {
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ,
-                             numDsReads / numIssues, 0);
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE,
-                             numDsWrites / numIssues, 0);
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
-      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA,
-                             (numMfmas / numIssues) - 3, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, num_mfma_per_issue - num_dswrite_per_issue_a, 0);
     }
+
+
+    for (size_t i = 0; i < num_buffer_load_inst_b; ++i) {
+      for (size_t j = 0; num_dswrite_per_issue_b < 1; ++j) {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 1, 0);
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      }
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, num_mfma_per_issue - num_dswrite_per_issue_b, 0);
+    }
+
+    for (size_t i = 0; i < num_dsread_a_mfma; ++i) {
+      if ((num_ds_read_inst_a - (i + 1) * ds_read_a_mfma_rate) >= ds_read_a_mfma_rate) {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, ds_read_a_mfma_rate, 0);
+      } else {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, num_ds_read_inst_a - (num_dsread_a_mfma - 1) *
+                                                                              ds_read_a_mfma_rate, 0);
+      }
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+    }
+
+    for (size_t i = 0; i < num_dsread_b_mfma; ++i) {
+      if ((num_ds_read_inst_b - (i + 1) * ds_read_b_mfma_rate) >= ds_read_b_mfma_rate) {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, ds_read_b_mfma_rate, 0);
+      } else {
+        buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, num_ds_read_inst_b - (num_dsread_b_mfma - 1) *
+                                                                              ds_read_b_mfma_rate, 0);
+      }
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+    }
+    */
+    
+    /*
+    for (size_t i = 0; i < 16; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 1, 0);
+    }
+
+    for (size_t i = 0; i < 4; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 2, 0);
+    }
+
+    for (size_t i = 0; i < 12; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, 2, 0);
+    }
+    */
+
+
+    /*
+    for (size_t j = 0; j < 8; ++j) {
+      //for (size_t i = 0; i < 2; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 2, 0);
+      //}
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 1, 0);
+    }
+
+
+    for (size_t i = 0; i < 8; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, 2, 0);
+    }
+
+    for (size_t i = 0; i < 8; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, 1, 0);
+    }
+    */
+
+    rewriter.setInsertionPoint(block, std::prev(block->end()));
     op = generatedSchedBarrier(rewriter, InstructionMaskEnum::NONE);
     rewriter.eraseOp(schedBarrier);
     return mlir::success();

@@ -32,6 +32,8 @@
 #include "llvm/Support/MathExtras.h"
 
 #include "triton/Dialect/TritonGPU/Transforms/PipelineExpander.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
+
 
 #define DEBUG_TYPE "triton-loop-pipelining"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -673,6 +675,9 @@ void LoopPipelinerInternal::emitEpilogue(
     for (Operation *op : opOrder) {
       if (stages[op] < i)
         continue;
+      if (llvm::dyn_cast<triton::gpu::GroupSched>(op)) {
+        continue;
+      }
       Operation *newOp =
           cloneAndUpdateOperands(rewriter, op, [&](OpOperand *newOperand) {
             auto it = valueMapping.find(newOperand->get());

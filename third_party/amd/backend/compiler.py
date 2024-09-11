@@ -149,6 +149,7 @@ class HIPBackend(BaseBackend):
         passes.ttgpuir.add_remove_layout_conversions(pm)
         amd.passes.ttgpuir.add_optimize_epilogue(pm)
         passes.ttgpuir.add_optimize_dot_operands(pm, True)
+        amd.passes.ttgpuir.insert_sched_group_barriers(pm)
         use_new_pipeliner = os.getenv("TRITON_HIP_USE_NEW_STREAM_PIPELINE", "0") == "1"
         if amd.has_matrix_core_feature(options.arch):
             if use_new_pipeliner:
@@ -183,6 +184,7 @@ class HIPBackend(BaseBackend):
         #
         # If custom_lds_size = 0, pass will consider all LDS is available for one threads block,
         # LDS size is determined by provided arch name.
+
         custom_lds_size = 0
         amd.passes.ttgpuir.add_optimize_lds_usage(pm, options.arch, custom_lds_size)
         passes.convert.add_scf_to_cf(pm)
@@ -190,7 +192,6 @@ class HIPBackend(BaseBackend):
 
         passes.ttgpuir.add_allocate_shared_memory(pm)
 
-        amd.passes.ttgpuir.insert_sched_group_barriers(pm)
         ## __HIP_FTZ is used to control the denorm flushing behavior of exp2 op as follows:
         ## 1. If __HIP_FTZ = 1, exp2 flushes denorms in input and output regardless
         ##    of the value of kernel arg `allow_flush_denorm`.

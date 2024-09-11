@@ -17,6 +17,7 @@ def streamk_gemm(
     total_tiles = num_pid_m * num_pid_n
     if num_sms > 0 and total_tiles > num_sms:
         total_streamk_tiles = total_tiles % num_sms
+    #    total_streamk_tiles = total_streamk_tiles + num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
         total_streamk_iters = total_streamk_tiles * iters_per_tile
         streamk_iters_pcu = total_streamk_iters // num_sms
@@ -29,7 +30,6 @@ def streamk_gemm(
         total_streamk_iters = 0
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
-    rk = tl.arange(0, BLOCK_SIZE_K)
 
     for tile_id in range(pid, total_full_tiles, num_sms):
         if GROUP_SIZE_M == 1:
@@ -45,6 +45,7 @@ def streamk_gemm(
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+        rk = tl.arange(0, BLOCK_SIZE_K)
         rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
         rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
@@ -54,17 +55,26 @@ def streamk_gemm(
             bias_ = bias_ptr + rm * stride_bias
             bias = tl.load(bias_, mask=rm < M, other=0.0)
 
+        loop_k = tl.cdiv(K, BLOCK_SIZE_K)
+        if not EVEN_K:
+            loop_k -= 1
+
         acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-            if EVEN_K:
-                a = tl.load(A_BASE)
-                b = tl.load(B_BASE)
-            else:
-                a = tl.load(A_BASE, mask=rk[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-                b = tl.load(B_BASE, mask=rk[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
+        for k in range(0, loop_k):
+            a = tl.load(tl.multiple_of(A_BASE, (1, 16)))
+            b = tl.load(tl.multiple_of(B_BASE, (16, 1)))
             acc += tl.dot(a, b)
             A_BASE += BLOCK_SIZE_K * stride_ak
             B_BASE += BLOCK_SIZE_K * stride_bk
+
+        if not EVEN_K:
+            k = loop_k
+            rk = k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+            A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
+            B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn
+            a = tl.load(A_BASE, mask=rk[None, :] < K, other=0.0)
+            b = tl.load(B_BASE, mask=rk[:, None] < K, other=0.0)
+            acc += tl.dot(a, b)
 
         c = acc.to(C.type.element_ty)
         if BIAS:
@@ -95,6 +105,7 @@ def streamk_gemm(
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+        rk = tl.arange(0, BLOCK_SIZE_K)
         rm = tl.max_contiguous(tl.multiple_of(rm, BLOCK_SIZE_M), BLOCK_SIZE_M)
         rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak + BLOCK_SIZE_K * stride_ak * remainder
@@ -107,8 +118,8 @@ def streamk_gemm(
         acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
         for current_iter in range(start_iter, end_iter):
             if EVEN_K:
-                a = tl.load(A_BASE)
-                b = tl.load(B_BASE)
+                a = tl.load(tl.multiple_of(A_BASE, (1, 16)))
+                b = tl.load(tl.multiple_of(B_BASE, (16, 1)))
             else:
                 global_k_offset = (current_iter % iters_per_tile) * BLOCK_SIZE_K
                 k_mask = global_k_offset + rk < K
@@ -125,13 +136,15 @@ def streamk_gemm(
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
                 while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
+              #  while tl.load(locks + next_pid, cache_modifier = ".cg") != 1:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)
                 rn1 = tl.arange(0, BLOCK_SIZE_N)
                 rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
                 rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
                 P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
-                acc += tl.load(P_)
+                acc += tl.load(tl.multiple_of(P_, (1, 16)))
+              #  acc += tl.load(P_)
                 end += streamk_iters_pcu + (next_pid < streamk_remainder_iters)
                 next_pid += 1
 
@@ -152,8 +165,10 @@ def streamk_gemm(
             rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
             rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
             P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
-            tl.store(P_, acc)
-            tl.debug_barrier()
-            tl.atomic_xchg(locks + pid, 1)
+            tl.store(P_, acc, cache_modifier=".wt")
+      #      tl.store(P_, acc)
+      #      tl.debug_barrier()
+      #      tl.atomic_xchg(locks + pid, 1)
+            tl.store(locks + pid, 1, cache_modifier=".wt")
 
         start_iter = end_iter

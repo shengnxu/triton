@@ -124,6 +124,7 @@ void StreamPipeliner::createStreamCopy(
   Location loc = loadOp.getLoc();
   Value src = loadOp.getPtr();
   Value mask = loadOp.getMask();
+  Value other = loadOp.getOther();
 
   tt::MemDescType allocTy = cast<tt::MemDescType>(alloc.getType());
   SmallVector<Value> copyOffsets(allocTy.getRank(), zero);
@@ -156,22 +157,27 @@ void StreamPipeliner::createStreamCopy(
 
   auto sharedLoad =
       builder.create<ttg::LocalLoadOp>(loc, loadOp.getType(), viewLoad);
-  auto result = sharedLoad->getResults();
+  Value result = sharedLoad.getResult();
+  schedule.insert(sharedLoad, numStages - 2, localLoadCluster);
 
   // Create a select for non-zero other values.
-  Value other = loadOp.getOther();
   if (other && !isZeroConst(other)) {
     auto select = builder.create<arith::SelectOp>(
         loc, loadOp.getType(), mask, sharedLoad.getResult(), other);
-    result = select->getResults();
+    schedule.insert(select, numStages - 2, localLoadCluster);
+    result = select.getResult();
   }
 
-  loadOp->replaceAllUsesWith(result);
+  loadOp->replaceAllUsesWith(ValueRange{result});
+
+  if (auto cvt = dyn_cast<ttg::ConvertLayoutOp>(*result.getUsers().begin())) {
+    assert(result.hasOneUse());
+    schedule.insert(cvt, numStages - 2, localLoadCluster);
+  }
 
   // Prefetch load ahead of the dot stage if is used by the dot.
   if (loadToInfo[loadOp].usedByDot) {
     assert(numStages >= 2 && "requires num_stages=2 at least");
-    schedule.insert(sharedLoad, numStages - 2, localLoadCluster);
     auto storeOp =
         builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
     schedule.insert(storeOp, numStages - 3, prefetchCluster);

@@ -244,6 +244,35 @@ struct SchedGroupBarriersRewriter
     */
 
     rewriter.setInsertionPoint(block, std::prev(block->end()));
+
+    for (size_t i = 0; i < 7; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 2, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 3, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 3, 0);
+    }
+
+    for (size_t i = 0; i < 5; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 3, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::ALL_VMEM, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 3, 0);
+    }
+
+    for (size_t i = 0; i < 7; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_WRITE, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 3, 0);
+    }
+
+    for (size_t i = 0; i < 28; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::DS_READ, 1, 0);
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+    }
+
+    for (size_t i = 0; i < 7; ++i) {
+      buildSchedGroupBarrier(rewriter, InstructionMaskEnum::MFMA, 1, 0);
+    }
+
     op = generatedSchedBarrier(rewriter, InstructionMaskEnum::NONE);
     rewriter.eraseOp(schedBarrier);
     return mlir::success();

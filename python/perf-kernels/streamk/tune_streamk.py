@@ -39,7 +39,7 @@ def get_full_tuning_space():
     # For now we see better perf with num_stages=0 for all gemm configs we care
     # But keep this explicit so that we do not forget we may need to set it to
     # other values in the future
-    num_stage_range = [3]
+    num_stage_range = [2]
     waves_per_eu_range = [0]
     matrix_instr_nonkdim_range = [16, 32]
     kpack_range = [1, 2]
@@ -135,7 +135,7 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
         # out of shared memory resource
         # TODO (zhanglx): This does not consider the LDS usage in the epilogue
         LDS = BLOCK_SIZE_K * BLOCK_SIZE_M * elemBytes_a + BLOCK_SIZE_K * BLOCK_SIZE_N * elemBytes_b
-        LDS = LDS if not num_stages else LDS * num_stages
+        LDS = LDS if not num_stages else LDS * (num_stages - 1) 
         if LDS > 65536:
             continue
         # Skip small block sizes and num_warps for large gemm
@@ -156,21 +156,34 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
     return pruned_configs
 
 def extract_kernel_time(M, N, K, config, df, bias_size):
-    # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
-    # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should
-    # not need below two lines
-    cols = [
-        'Index', 'KernelName', 'gpu-id', 'queue-id', 'queue-index', 'pid',
-        'tid', 'grd', 'wgr', 'lds', 'scr', 'arch_vgpr', 'accum_vgpr', 'sgpr',
-        'wave_size', 'DispatchNs', 'BeginNs', 'EndNs', 'CompleteNs'
-    ]
-    df.columns = cols
     configStr = gen_configStr(config)
-    filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
-    filtered_df['DurationNs'] = filtered_df['EndNs'] - filtered_df['BeginNs']
-    meanTime = filtered_df['DurationNs'].tail(100).mean()
-    return config, meanTime
+    df = df[df['KernelName'].str.contains(configStr)]
+    if df.empty:
+        print("No data available after filtering. Returning mean time as 0.")
+#        raise ValueError("No data available after filtering.")
+        new_meanTime = 0
+        return config, new_meanTime
 
+    first_value = df['DurationNs'].iloc[0]
+    filtered_data = df['DurationNs'][df['DurationNs'] <= first_value]
+    new_meanTime = filtered_data.tail(100).mean()
+
+    return config, new_meanTime
+#def extract_kernel_time(M, N, K, config, df, bias_size):
+#    # Correct the header by removing 'sig' and 'obj' to reduce number from 21 to 19
+#    # once the bug(https://github.com/ROCm/rocprofiler/issues/144) fixed, we should
+#    # not need below two lines
+#    cols = [
+#        'Index', 'KernelName', 'gpu-id', 'queue-id', 'queue-index', 'pid',
+#        'tid', 'grd', 'wgr', 'lds', 'scr', 'arch_vgpr', 'accum_vgpr', 'sgpr',
+#        'wave_size', 'DispatchNs', 'BeginNs', 'EndNs', 'CompleteNs'
+#    ]
+#    df.columns = cols
+#    configStr = gen_configStr(config)
+#    filtered_df = df[df['KernelName'].str.contains(configStr, na=False)].copy()
+#    filtered_df['DurationNs'] = filtered_df['EndNs'] - filtered_df['BeginNs']
+#    meanTime = filtered_df['DurationNs'].tail(100).mean()
+#    return config, meanTime
 
 def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
     ngpus = len(gpus)
@@ -184,7 +197,8 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
         if verbose:
             print(f"profiling {kernel_name} on GPU {gpuid}")
         run_bash_command_wrapper(
-            f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {get_filename_profile_driver(M, N, K, jobId)}",
+            f"rocprof --stats -o results_{jobId}.csv python {get_filename_profile_driver(M, N, K, jobId)}",
+#            f"rocprofv2 --plugin file --plugin-version 1 --kernel-trace -o {jobId} python {get_filename_profile_driver(M, N, K, jobId)}",
             capture=(verbose < 2))
         jobId += ngpus
 
@@ -255,21 +269,23 @@ def tune_gemm_config(M,
     thread_pool = multiprocessing.Pool(processes=num_threads)
     tasks = []
     idx = 0
-    df_prof = [
-        pd.read_csv(f"results_{i}.csv",
-                    skiprows=1,
-                    header=None,
-                    delimiter=',',
-                    quotechar='"',
-                    escapechar='\\') for i in range(jobs)
-    ]
+#    df_prof = [
+#        pd.read_csv(f"results_{i}.csv",
+#                    skiprows=1,
+#                    header=None,
+#                    delimiter=',',
+#                    quotechar='"',
+#                    escapechar='\\') for i in range(jobs)
+#    ]
+    df_prof = [pd.read_csv(f"results_{i}.csv") for i in range(jobs)]
     for config in configs:
         file_idx = idx % jobs
-        tasks += [
-            thread_pool.apply_async(extract_kernel_time,
-                                    args=(M, N, K, config, df_prof[file_idx],
-                                          bias_size))
-        ]
+#        tasks += [
+#            thread_pool.apply_async(extract_kernel_time,
+#                                    args=(M, N, K, config, df_prof[file_idx],
+#                                          bias_size))
+#        ]
+        tasks += [thread_pool.apply_async(extract_kernel_time, args=(M, N, K, config, df_prof[file_idx], bias_size))]
         idx += 1
     thread_pool.close()
     thread_pool.join()

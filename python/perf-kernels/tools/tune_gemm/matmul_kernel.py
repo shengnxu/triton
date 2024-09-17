@@ -3,7 +3,7 @@ import triton.language as tl
 
 
 @triton.jit
-def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm,
+def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, P, locks, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm,
                   stride_cn, stride_bias, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr,
                   BLOCK_SIZE_K: tl.constexpr, SPLIT_K: tl.constexpr, GROUP_SIZE_M: tl.constexpr, BIAS: tl.constexpr,
                   EVEN_K: tl.constexpr, GRID_MN: tl.constexpr, NUM_XCDS: tl.constexpr):
@@ -63,7 +63,34 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, M, N, K, stride_am, stride_ak, 
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+
     if SPLIT_K == 1:
         tl.store(c_ptrs, c, mask=c_mask)
     else:
-        tl.atomic_add(c_ptrs, c, mask=c_mask)
+        if pid_z == 0:
+            for iter in range(1, SPLIT_K):
+                while tl.atomic_cas(locks + pid*iter, 1, 1) != 1:
+                    pass
+                offs_am1 = tl.arange(0, BLOCK_SIZE_M)
+                offs_bn1 = tl.arange(0, BLOCK_SIZE_N)
+                rm1 = tl.max_contiguous(tl.multiple_of(offs_am1, BLOCK_SIZE_M), BLOCK_SIZE_M)
+                rn1 = tl.max_contiguous(tl.multiple_of(offs_bn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
+                P_ = P + (pid * iter) * BLOCK_SIZE_M * BLOCK_SIZE_N + offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
+                accumulator += tl.load(tl.multiple_of(P_, (1, 16)))
+
+            offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
+            offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
+            offs_am = tl.max_contiguous(tl.multiple_of(offs_am, BLOCK_SIZE_M), BLOCK_SIZE_M)
+            offs_bn = tl.max_contiguous(tl.multiple_of(offs_bn, BLOCK_SIZE_N), BLOCK_SIZE_N)
+            C_ = c_ptr + offs_am[:, None] * stride_cm + offs_bn[None, :] * stride_cn
+            mask = (offs_am < M)[:, None] & (offs_bn < N)[None, :]
+            tl.store(C_, accumulator, mask=mask)
+        else:
+            offs_am1 = tl.arange(0, BLOCK_SIZE_M)
+            offs_bn1 = tl.arange(0, BLOCK_SIZE_N)
+            offs_am1 = tl.max_contiguous(tl.multiple_of(offs_am1, BLOCK_SIZE_M), BLOCK_SIZE_M)
+            offs_bn1 = tl.max_contiguous(tl.multiple_of(offs_bn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
+            P_ = P + (pid * pid_z) * BLOCK_SIZE_M * BLOCK_SIZE_N +  offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
+            tl.store(P_, accumulator)
+            tl.debug_barrier()
+            tl.atomic_xchg(locks + pid * pid_z, 1)

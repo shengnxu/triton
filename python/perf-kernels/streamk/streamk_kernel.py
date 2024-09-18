@@ -6,8 +6,12 @@ def streamk_gemm(
         A, B, C, bias_ptr, P, locks,
         M, N, K, num_sms,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, stride_bias,
-        BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,
-        GROUP_SIZE_M: tl.constexpr, BIAS: tl.constexpr, EVEN_K: tl.constexpr,
+        BLOCK_SIZE_M: tl.constexpr, 
+        BLOCK_SIZE_N: tl.constexpr, 
+        BLOCK_SIZE_K: tl.constexpr,
+        GROUP_SIZE_M: tl.constexpr, 
+        BIAS: tl.constexpr, 
+        EVEN_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
     pid = (pid % 8) * (num_sms // 8) + (pid // 8)
@@ -17,7 +21,7 @@ def streamk_gemm(
     total_tiles = num_pid_m * num_pid_n
     if num_sms > 0 and total_tiles > num_sms:
         total_streamk_tiles = total_tiles % num_sms
-    #    total_streamk_tiles = total_streamk_tiles + num_sms
+        # total_streamk_tiles = total_streamk_tiles + num_sms
         total_full_tiles = total_tiles - total_streamk_tiles
         total_streamk_iters = total_streamk_tiles * iters_per_tile
         streamk_iters_pcu = total_streamk_iters // num_sms
@@ -130,13 +134,22 @@ def streamk_gemm(
             B_BASE += BLOCK_SIZE_K * stride_bk
 
         tile_iter = tile_id * iters_per_tile
-        if start_iter == tile_iter:
-            tile_iter_end = tile_iter + iters_per_tile
+        
+        if start_iter != tile_iter:
+            rm1 = tl.arange(0, BLOCK_SIZE_M)
+            rn1 = tl.arange(0, BLOCK_SIZE_N)
+            rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
+            rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
+            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
+            tl.store(P_, acc, cache_modifier=".wt")
+            tl.store(locks + pid, 1, cache_modifier=".wt")
+        else:
             next_pid = pid + 1
+            tile_iter_end = tile_iter + iters_per_tile
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
-                while tl.atomic_cas(locks + next_pid, 1, 1) != 1:
-              #  while tl.load(locks + next_pid, cache_modifier = ".cg") != 1:
+                # while tl.atomic_cas(locks + next_pid, locked.to(tl.int16), locked.to(tl.int16)) != 1:
+                while tl.load(locks + next_pid, cache_modifier = ".cv", volatile=True) != 1:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)
                 rn1 = tl.arange(0, BLOCK_SIZE_N)
@@ -144,13 +157,12 @@ def streamk_gemm(
                 rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
                 P_ = P + next_pid * BLOCK_SIZE_M * BLOCK_SIZE_N + rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
                 acc += tl.load(tl.multiple_of(P_, (1, 16)))
-              #  acc += tl.load(P_)
                 end += streamk_iters_pcu + (next_pid < streamk_remainder_iters)
                 next_pid += 1
 
             c = acc.to(C.type.element_ty)
             if BIAS:
-                 c += bias[:, None]
+                c += bias[:, None]
 
             rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
             rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
@@ -159,16 +171,5 @@ def streamk_gemm(
             C_ = C + rm[:, None] * stride_cm + rn[None, :] * stride_cn
             mask = (rm < M)[:, None] & (rn < N)[None, :]
             tl.store(C_, c, mask=mask)
-        else:
-            rm1 = tl.arange(0, BLOCK_SIZE_M)
-            rn1 = tl.arange(0, BLOCK_SIZE_N)
-            rm1 = tl.max_contiguous(tl.multiple_of(rm1, BLOCK_SIZE_M), BLOCK_SIZE_M)
-            rn1 = tl.max_contiguous(tl.multiple_of(rn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
-            P_ = P + pid * BLOCK_SIZE_M * BLOCK_SIZE_N +  rm1[:, None] * BLOCK_SIZE_N + rn1[None, :]
-            tl.store(P_, acc, cache_modifier=".wt")
-      #      tl.store(P_, acc)
-      #      tl.debug_barrier()
-      #      tl.atomic_xchg(locks + pid, 1)
-            tl.store(locks + pid, 1, cache_modifier=".wt")
 
         start_iter = end_iter

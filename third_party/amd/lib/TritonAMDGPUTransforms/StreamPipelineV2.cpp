@@ -155,16 +155,20 @@ void StreamPipeliner::createStreamCopy(
   for (auto alloc : allocsToErase)
     alloc.erase();
 
+  int lastStage = numStages - 1;
+  int localLoadStage = lastStage - prefetch;
+  int localStoreStage = lastStage - 1 - prefetch;
+  
   auto sharedLoad =
       builder.create<ttg::LocalLoadOp>(loc, loadOp.getType(), viewLoad);
   Value result = sharedLoad.getResult();
-  schedule.insert(sharedLoad, numStages - 2, localLoadCluster);
+  schedule.insert(sharedLoad, localLoadStage, localLoadCluster);
 
   // Create a select for non-zero other values.
   if (other && !isZeroConst(other)) {
     auto select = builder.create<arith::SelectOp>(
         loc, loadOp.getType(), mask, sharedLoad.getResult(), other);
-    schedule.insert(select, numStages - 2, localLoadCluster);
+    schedule.insert(select, localLoadStage, localLoadCluster);
     result = select.getResult();
   }
 
@@ -172,7 +176,7 @@ void StreamPipeliner::createStreamCopy(
 
   if (auto cvt = dyn_cast<ttg::ConvertLayoutOp>(*result.getUsers().begin())) {
     assert(result.hasOneUse());
-    schedule.insert(cvt, numStages - 2, localLoadCluster);
+    schedule.insert(cvt, localLoadStage, localLoadCluster);
   }
 
   // Prefetch load ahead of the dot stage if is used by the dot.
@@ -180,8 +184,8 @@ void StreamPipeliner::createStreamCopy(
     assert(numStages >= 2 && "requires num_stages=2 at least");
     auto storeOp =
         builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
-    schedule.insert(storeOp, numStages - 3, prefetchCluster);
-    schedule.insert(viewLoad, numStages - 3, prefetchCluster);
+    schedule.insert(storeOp, localStoreStage, prefetchCluster);
+    schedule.insert(viewLoad, localStoreStage, prefetchCluster);
   }
   loadOp.erase();
 }
@@ -547,7 +551,7 @@ void StreamPipeliner::createStreamOps() {
   // TODO: Use the precise number of buffers needed by the particular load.
   int numBuffers = -1;
   for (auto &[_, info] : loadToInfo)
-    numBuffers = std::max(numBuffers, info.distToUse - info.usedByDot);
+    numBuffers = std::max(numBuffers, info.distToUse - (prefetch ? info.usedByDot : 0));
   LDBG("deduced shared memory buffer number = " << numBuffers);
 
   SmallVector<std::pair<Operation *, Value>> loadToAllocs;
@@ -617,6 +621,7 @@ bool StreamPipeliner::preprocessLoopAndBuildSchedule() {
   // Convert the loads into shared memory allocations and loads from them.
   createStreamOps();
 
+  scheduleDependencies(forOp, coarseSchedule, numStages);
   LLVM_DEBUG({
     LDBG("Coarse schedule with stream loads:");
     schedule.dump();
@@ -696,7 +701,10 @@ bool StreamPipeliner::pipelineLoop() {
 namespace {
 struct PipelinePass : public TritonAMDGPUStreamPipelineV2Base<PipelinePass> {
   PipelinePass() = default;
-  PipelinePass(int32_t numStages) { this->numStages = numStages; }
+  PipelinePass(int32_t numStages, int32_t prefetch) {
+    this->numStages = numStages;
+    this->prefetch = prefetch;
+  }
 
   void runOnOperation() override {
     SmallVector<scf::ForOp> loops;
@@ -724,6 +732,6 @@ private:
 } // anonymous namespace
 
 std::unique_ptr<Pass>
-mlir::createTritonAMDGPUStreamPipelineV2Pass(int numStages) {
-  return std::make_unique<PipelinePass>(numStages);
+mlir::createTritonAMDGPUStreamPipelineV2Pass(int numStages, int prefetch) {
+  return std::make_unique<PipelinePass>(numStages, prefetch);
 }

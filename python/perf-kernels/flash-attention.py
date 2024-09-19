@@ -101,7 +101,6 @@ class MetaData():
         assert q.shape[-1] == k.shape[-1] and q.shape[-1] == v.shape[-1]
         # TODO: Change assert if we support qkl f8 and v f16
         assert q.dtype == k.dtype and q.dtype == v.dtype
-        assert head_size <= 256
         assert o.shape == q.shape
         assert (nheads_q % nheads_k) == 0
         assert self.layout is not None
@@ -1085,6 +1084,10 @@ def varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlen
     (4, 4, 2, 65, 1018, 65),
     (4, 4, 4, 128, 128, 65),
     (4, 4, 4, 113, 123, 1),
+    (1, 4, 4, 1024, 1024, 512),
+    (1, 4, 4, 1024, 65, 547),
+    (1, 4, 4, 512, 512, 1024),
+    (1, 4, 4, 512, 256, 1037),
 ])
 @pytest.mark.parametrize('causal', [True, False])
 @pytest.mark.parametrize('use_alibi', [True, False])

@@ -76,6 +76,8 @@ def streamk_gemm(
             rk = k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
             A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak
             B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn
+            A_BASE = tl.multiple_of(A_BASE, (1, 16))
+            B_BASE = tl.multiple_of(B_BASE, (16, 1))
             a = tl.load(A_BASE, mask=rk[None, :] < K, other=0.0)
             b = tl.load(B_BASE, mask=rk[:, None] < K, other=0.0)
             acc += tl.dot(a, b)
@@ -114,6 +116,8 @@ def streamk_gemm(
         rn = tl.max_contiguous(tl.multiple_of(rn, BLOCK_SIZE_N), BLOCK_SIZE_N)
         A_BASE = A + rm[:, None] * stride_am + rk[None, :] * stride_ak + BLOCK_SIZE_K * stride_ak * remainder
         B_BASE = B + rk[:, None] * stride_bk + rn[None, :] * stride_bn + BLOCK_SIZE_K * stride_bk * remainder
+        A_BASE = tl.multiple_of(A_BASE, (1, 16))
+        B_BASE = tl.multiple_of(B_BASE, (16, 1))
 
         if BIAS:
             bias_ = bias_ptr + rm * stride_bias
@@ -122,8 +126,8 @@ def streamk_gemm(
         acc = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
         for current_iter in range(start_iter, end_iter):
             if EVEN_K:
-                a = tl.load(tl.multiple_of(A_BASE, (1, 16)))
-                b = tl.load(tl.multiple_of(B_BASE, (16, 1)))
+                a = tl.load(A_BASE)
+                b = tl.load(B_BASE)
             else:
                 global_k_offset = (current_iter % iters_per_tile) * BLOCK_SIZE_K
                 k_mask = global_k_offset + rk < K
@@ -148,7 +152,6 @@ def streamk_gemm(
             tile_iter_end = tile_iter + iters_per_tile
             end = end_iter
             while (end < tile_iter_end and next_pid < num_sms):
-                # while tl.atomic_cas(locks + next_pid, locked.to(tl.int16), locked.to(tl.int16)) != 1:
                 while tl.load(locks + next_pid, cache_modifier = ".cv", volatile=True) != 1:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)

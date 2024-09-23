@@ -80,6 +80,22 @@ public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
 
+    // Sink load after local_load inside the loop
+    m.walk([&](scf::ForOp forOp) -> void {
+        SetVector<Operation *> loadOps;
+        for (Operation &op : forOp) {
+            if (auto loadOp = dyn_cast<triton::LoadOp>(&op)) {
+                loadOps.insert(loadOp);
+            }
+        }
+        for (Operation &op : forOp) {
+            if (auto dotOp = dyn_cast<triton::DotOp>(&op)) {
+                loadOps[1]->moveBefore(dotOp);
+            }
+        }
+    });
+    return;
+
     // Sink shared memory loads and layout conversions into loops to decrease
     // register pressure when possible.
     DenseMap<Operation *, Operation *> opToMove;

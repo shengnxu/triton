@@ -256,6 +256,7 @@ SmallVector<unsigned> getOrder(Attribute layout) {
     auto rank = distributedLayout.getWarpsPerCTA().size();
     SmallVector<unsigned> order(rank);
     std::iota(order.rbegin(), order.rend(), 0);
+    return order;
     auto mfmaLayout = dyn_cast<AMDMfmaEncodingAttr>(layout);
     if (!mfmaLayout)
       return order;

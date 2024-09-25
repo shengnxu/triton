@@ -1,5 +1,20 @@
 # streamk gemm script v0.2
 
+### features added:
+
+- new streamk tuning script to reduce compiling and profiling time
+
+- use load/store cache modifier to reimplement spinning lock
+
+- add CI test for streamk-kernel
+
+- able to use streampipelineV2
+
+### potential issues:
+
+- there may be hanging issue when use random grid sizes
+- large register spills when using tile size 256x256x64
+
 ### tuning command
 
 ```

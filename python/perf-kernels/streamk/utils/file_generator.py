@@ -44,20 +44,15 @@ def generate_matmul_kernels(configs):
 import triton.language as tl"""
     f_kernel.write(import_str)
 
-    with open(
-            os.path.dirname(os.path.abspath(__file__)) +
-            "/../streamk_kernel.py") as file:
+    with open(os.path.dirname(os.path.abspath(__file__)) + "/../streamk_kernel.py") as file:
         matmul_kernel_code = file.read()
 
     for config in configs:
         configStr = gen_configStr(config)
         # Copy the matmul_kernel with name replaced
-        matmul_kernel_config = matmul_kernel_code.replace(
-            "streamk_gemm", f"streamk_gemm_{configStr}")
-        matmul_kernel_config = matmul_kernel_config.replace(
-            "import triton.language as tl", "")
-        matmul_kernel_config = matmul_kernel_config.replace(
-            "import triton", "")
+        matmul_kernel_config = matmul_kernel_code.replace("streamk_gemm", f"streamk_gemm_{configStr}")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton.language as tl", "")
+        matmul_kernel_config = matmul_kernel_config.replace("import triton", "")
         f_kernel.write(matmul_kernel_config)
 
     f_kernel.close()
@@ -65,8 +60,8 @@ import triton.language as tl"""
 
 ## construct the configStr and generate the wrapper function matmul_{configStr}()
 ## If `warmup` is set, the generated kernel will be **compiled**
-def gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b,
-                                         dtype_c, dtype_p, dtype_lock, bias_size, warmup):
+def gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, bias_size,
+                                         warmup):
     block_m, block_n, block_k, group_m, num_sms, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
         config)
 
@@ -148,8 +143,7 @@ def matmul_{configStr}(a, b, c, bias, P, locks, M, N, K, am, ak, bk, bn, cm, cn,
     return configStr, matmul_def_str
 
 
-def generate_compile_driver(M, N, K, col_a, col_b, dtype_a, dtype_b,
-                            dtype_c, dtype_p, dtype_lock, init_type, configs,
+def generate_compile_driver(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs,
                             rotating_buffer_size, bias_size):
     """
     Generate a single file that contains all kernels in the tuning space.
@@ -174,8 +168,8 @@ from {get_filename_without_extension(get_filename_myKernels())} import *
 
     for config in configs:
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(
-            config, EVEN_K, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, bias_size, True)
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b, dtype_c,
+                                                                         dtype_p, dtype_lock, bias_size, True)
         # Copy the matmul_kernel with name replaced
         f_kernel.write(matmul_def_str + "\n")
 
@@ -248,9 +242,9 @@ def main():
 
     return filename
 
-def generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock,
-                           init_type, configs, jobs, iters, run_bench,
-                           rotating_buffer_size, bias_size, icache_flush):
+
+def generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, init_type, configs,
+                           jobs, iters, run_bench, rotating_buffer_size, bias_size, icache_flush):
     """
     Open {len(jobs)} files
     generated_kernelM-N-K-0.py, generated_kernelM-N-K-1.py, ..., generated_kernelM-N-K-{njobs-1}.py
@@ -266,7 +260,7 @@ def generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dty
     f_kernel = [open(path, 'w') for path in filenames]
 
     # write imports
-    import_str = f"""import torch
+    import_str = """import torch
 import triton
 import triton.language as tl
 import argparse
@@ -288,8 +282,8 @@ from icache_flush import icache_flush
     for config in configs:
         file_idx = idx % jobs
         EVEN_K = True if K % config.get('BLOCK_SIZE_K') == 0 else False
-        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(
-            config, EVEN_K, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock, bias_size, False)
+        configStr, matmul_def_str = gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b, dtype_c,
+                                                                         dtype_p, dtype_lock, bias_size, False)
         # Copy the streamk_gemm with name replaced
         streamk_gemm_config = streamk_gemm_code.replace("streamk_gemm", f"streamk_gemm_{configStr}")
         streamk_gemm_config = streamk_gemm_config.replace("import triton.language as tl", "")
@@ -342,7 +336,7 @@ from icache_flush import icache_flush
             bias = tensors['bias'][i % rotating_num] if bias_size > 0 else None
             bias_stride = bias.stride(0) if bias_size > 0 else 0"""
         if icache_flush:
-            matmul_call_str += f"""
+            matmul_call_str += """
             icache_flush()"""
         matmul_call_str += f"""
             current_locks = locks[i]
@@ -351,10 +345,12 @@ from icache_flush import icache_flush
         f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
+
+
 #    for fi in range(jobs):
 #        f_kernel[fi].write("    return d\n")
 
-    # def main and call test_gemm
+# def main and call test_gemm
     def_main_str = f"""
 def main():
     parser = argparse.ArgumentParser(

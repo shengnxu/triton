@@ -6,10 +6,10 @@
 TRITON_HIP_USE_NEW_STREAM_PIPELINE=1 python tune_streamk.py --gemm_size_file input_nn_size.yaml --ngpus 8 --jobs 24
 ```
 
-### calculate occ 
+### calculate occ
 
 ```
-TRITON_HIP_USE_NEW_STREAM_PIPELINE=1 ../../occ.sh "python tune_streamk.py --gemm_size_file single_item.yaml --compare_wo_tuning" 
+TRITON_HIP_USE_NEW_STREAM_PIPELINE=1 ../../occ.sh "python tune_streamk.py --gemm_size_file single_item.yaml --compare_wo_tuning"
 ```
 
 

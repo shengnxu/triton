@@ -36,8 +36,9 @@ def get_full_tuning_space():
     block_k_range = [16, 32, 64, 128, 256]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8, 16, 32]
-    # set default num_stages = 2 to enable streampipleV2 which is best option for streamk gemm atm
-    # need use TRITON_HIP_USE_NEW_STREAM_PIPELINE=1, this may change soon
+    # For now we see better perf with num_stages=0 for all gemm configs we care
+    # But keep this explicit so that we do not forget we may need to set it to
+    # other values in the future
     num_stage_range = [2]
     waves_per_eu_range = [0]
     matrix_instr_nonkdim_range = [16, 32]
@@ -519,15 +520,12 @@ def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
     size_str = ''
     if verbose:
         size_str = f'SIZE M: {M}, N: {N}, K: {K}, trans: {row_a_str}{row_b_str}'
-    if torch.allclose(triton_output.to(torch.float16),
+    print(f'{size_str} correctness check')
+    torch.testing.assert_close(triton_output.to(torch.float16),
                       torch_output,
                       atol=atol,
-                      rtol=rtol):
-        print(f'{size_str} Correct✅')
-    else:
-        print(f"triton_output={triton_output}")
-        print(f"torch_output={torch_output}")
-        print(f'{size_str} Incorrect❌')
+                      rtol=rtol)
+    print(f'{size_str} Correct✅')
 
 
 def parse_args():

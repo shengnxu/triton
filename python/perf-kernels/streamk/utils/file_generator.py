@@ -1,5 +1,12 @@
 import os
-from .utils import *
+from .utils import (
+    get_filename_compile_driver,
+    get_filename_myKernels,
+    get_filename_profile_driver,
+    get_filename_without_extension,
+    name_to_tl_types,
+    tl_to_torch_types,
+)
 
 
 def read_config(config):
@@ -318,7 +325,6 @@ from icache_flush import icache_flush
     # call all matmul_xxx functions
     idx = 0
     runs = iters if run_bench else 120
-    call_icache_flush = 'icache_flush()' if icache_flush else ''
     for config in configs:
         configStr = gen_configStr(config)
         block_m = config.get('BLOCK_SIZE_M')

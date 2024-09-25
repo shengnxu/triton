@@ -36,43 +36,46 @@ def get_full_tuning_space():
     block_k_range = [16, 32, 64, 128, 256]
     num_warps_range = [1, 2, 4, 8]
     group_m_range = [1, 4, 8, 16, 32]
-    # For now we see better perf with num_stages=0 for all gemm configs we care
-    # But keep this explicit so that we do not forget we may need to set it to
-    # other values in the future
+    # set default num_stages = 2 to enable streampipleV2 which is best option for streamk gemm atm
+    # need use TRITON_HIP_USE_NEW_STREAM_PIPELINE=1, this may change soon
     num_stage_range = [2]
     waves_per_eu_range = [0]
     matrix_instr_nonkdim_range = [16, 32]
     kpack_range = [1, 2]
+    num_sms_range = [304]
 
     for block_m in block_mn_range:
         for block_n in block_mn_range:
             for block_k in block_k_range:
                 for num_warps in num_warps_range:
                     for group_m in group_m_range:
-                        for num_stages in num_stage_range:
-                            for waves_per_eu in waves_per_eu_range:
-                                for matrix_instr_nonkdim in matrix_instr_nonkdim_range:
-                                    for kpack in kpack_range:
-                                        configs.append({
-                                            'BLOCK_SIZE_M':
-                                            block_m,
-                                            'BLOCK_SIZE_N':
-                                            block_n,
-                                            'BLOCK_SIZE_K':
-                                            block_k,
-                                            'GROUP_SIZE_M':
-                                            group_m,
-                                            'num_warps':
-                                            num_warps,
-                                            'num_stages':
-                                            num_stages,
-                                            'waves_per_eu':
-                                            waves_per_eu,
-                                            'matrix_instr_nonkdim':
-                                            matrix_instr_nonkdim,
-                                            'kpack':
-                                            kpack
-                                        })
+                        for num_sms in num_sms_range:
+                            for num_stages in num_stage_range:
+                                for waves_per_eu in waves_per_eu_range:
+                                    for matrix_instr_nonkdim in matrix_instr_nonkdim_range:
+                                        for kpack in kpack_range:
+                                            configs.append({
+                                                'BLOCK_SIZE_M':
+                                                block_m,
+                                                'BLOCK_SIZE_N':
+                                                block_n,
+                                                'BLOCK_SIZE_K':
+                                                block_k,
+                                                'GROUP_SIZE_M':
+                                                group_m,
+                                                'NUM_SMS':
+                                                num_sms,
+                                                'num_warps':
+                                                num_warps,
+                                                'num_stages':
+                                                num_stages,
+                                                'waves_per_eu':
+                                                waves_per_eu,
+                                                'matrix_instr_nonkdim':
+                                                matrix_instr_nonkdim,
+                                                'kpack':
+                                                kpack
+                                            })
 
     return configs
 
@@ -125,9 +128,9 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
             continue
         # Skip BLOCK_SIZE that is too large compare to M/N
         # unless BLOCK_SIZE is already small enough
-        if BLOCK_SIZE_M > M * 2 and BLOCK_SIZE_M != 16:
+        if BLOCK_SIZE_M >= M * 2 and BLOCK_SIZE_M != 16:
             continue
-        if BLOCK_SIZE_N > N * 2 and BLOCK_SIZE_N != 16:
+        if BLOCK_SIZE_N >= N * 2 and BLOCK_SIZE_N != 16:
             continue
         # skip large GROUP_M
         if GROUP_M * BLOCK_SIZE_M > M and GROUP_M != 1:
@@ -206,7 +209,6 @@ def profile_batch_kernels(M, N, K, gpuid, gpus, jobs, verbose):
 def tune_gemm_config(M,
                      N,
                      K,
-                     num_sms,
                      col_a,
                      col_b,
                      dtype_a,
@@ -231,7 +233,7 @@ def tune_gemm_config(M,
     start_time = datetime.now()
     if not skipWarmup:
         # Generate kernel out of all configs
-        fname = generate_compile_driver(M, N, K, num_sms, col_a, col_b, dtype_a,
+        fname = generate_compile_driver(M, N, K, col_a, col_b, dtype_a,
                                         dtype_b, dtype_c,  dtype_p, dtype_lock, init_type, configs,
                                         rotating_buffer_size, bias_size)
 
@@ -243,7 +245,7 @@ def tune_gemm_config(M,
         print(f"compile time: {compile_time}", flush=True)
 
     # Generate kernels out of all configs
-    generate_profile_tasks(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock,
+    generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock,
                            init_type, configs, jobs, iters, run_bench,
                            rotating_buffer_size, bias_size, icache_flush)
 
@@ -455,7 +457,6 @@ def matmul(a, b, c, bias, P, locks, num_sms, block_m, block_n, block_k, group_m,
                         M,
                         N,
                         K,
-                        num_sms,
                         a.stride(0),
                         a.stride(1),
                         b.stride(0),
@@ -467,6 +468,7 @@ def matmul(a, b, c, bias, P, locks, num_sms, block_m, block_n, block_k, group_m,
                         BLOCK_SIZE_N=block_n,
                         BLOCK_SIZE_K=block_k,
                         GROUP_SIZE_M=group_m,
+                        NUM_SMS=num_sms,
                         num_warps=num_warps,
                         num_stages=num_stages,
                         waves_per_eu=waves_per_eu,
@@ -477,9 +479,9 @@ def matmul(a, b, c, bias, P, locks, num_sms, block_m, block_n, block_k, group_m,
     return c
 
 
-def test_correctness(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c,
+def test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
                      init_type, config, bias_vector, verbose):
-    block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
+    block_m, block_n, block_k, group_m, num_sms, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
         config)
     use_bias = bias_vector
     torch.manual_seed(0)
@@ -726,7 +728,6 @@ def main():
         gpus = [gpus[0]]
         jobs = 1
 
-    num_sms = 304
     # Get element type
     dtype_a = args.dtype_a
     dtype_b = args.dtype_b
@@ -775,7 +776,7 @@ def main():
             if myConfig is None:
                 raise Exception(
                     "kernel config is None, need to provide a tuning config")
-            test_correctness(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c,
+            test_correctness(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c,
                              init_type, myConfig, bias_vector, True)
         return
 
@@ -851,7 +852,6 @@ def main():
             M,
             N,
             K,
-            num_sms,
             col_a,
             col_b,
             dtype_a,

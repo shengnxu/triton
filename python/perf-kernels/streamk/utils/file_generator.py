@@ -7,20 +7,21 @@ def read_config(config):
     block_n = config.get('BLOCK_SIZE_N')
     block_k = config.get('BLOCK_SIZE_K')
     group_m = config.get('GROUP_SIZE_M')
+    num_sms = config.get('NUM_SMS')
     num_warps = config.get('num_warps')
     num_stages = config.get('num_stages')
     waves_per_eu = config.get('waves_per_eu')
     mfma_instr_size = config.get('matrix_instr_nonkdim')
     kpack = config.get('kpack')
-    return block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfma_instr_size, kpack
+    return block_m, block_n, block_k, group_m, num_sms, num_warps, num_stages, waves_per_eu, mfma_instr_size, kpack
 
 
 def gen_configStr(config):
-    block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
+    block_m, block_n, block_k, group_m, num_sms, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
         config)
 
     ## {M}_{N}_{K} is removed since the same kernel can be used for differen gemm sizes
-    configStr = f"BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
+    configStr = f"BM{block_m}_BN{block_n}_BK{block_k}_GM{group_m}_nSM{num_sms}_nW{num_warps}_nS{num_stages}_EU{waves_per_eu}_kP{kpack}_mfma{mfmaInstrSize}"
 
     return configStr
 
@@ -66,7 +67,7 @@ import triton.language as tl"""
 ## If `warmup` is set, the generated kernel will be **compiled**
 def gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b,
                                          dtype_c, dtype_p, dtype_lock, bias_size, warmup):
-    block_m, block_n, block_k, group_m, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
+    block_m, block_n, block_k, group_m, num_sms, num_warps, num_stages, waves_per_eu, mfmaInstrSize, kpack = read_config(
         config)
 
     configStr = gen_configStr(config)
@@ -91,15 +92,16 @@ def gen_kernel_and_configStr_from_config(config, EVEN_K, dtype_a, dtype_b,
             torch_dtype_lock = tl_to_torch_types[name_to_tl_types[dtype_lock]]
 
         matmul_def_str = f"""
-def matmul_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn, biasn):
+def matmul_{configStr}(M, N, K, am, ak, bk, bn, cm, cn, biasn):
     streamk_gemm_{configStr}.warmup(
         {torch_dtype_a}, {torch_dtype_b}, {torch_dtype_c}, {torch_dtype_c}, {torch_dtype_p}, {torch_dtype_lock},
-        M, N, K, num_sms,
+        M, N, K,
         am, ak, bk, bn, cm, cn, biasn,
         BLOCK_SIZE_M = {block_m},
         BLOCK_SIZE_N = {block_n},
         BLOCK_SIZE_K = {block_k},
         GROUP_SIZE_M = {group_m},
+        NUM_SMS = {num_sms},
         num_warps = {num_warps},
         num_stages = {num_stages},
         waves_per_eu = {waves_per_eu},
@@ -111,9 +113,10 @@ def matmul_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn, biasn):
     )
     return None
 
-def try_compile_config_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn, biasn):
+def try_compile_config_{configStr}(M, N, K, am, ak, bk, bn, cm, cn, biasn):
     try:
-        matmul_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn, biasn)
+        print(f"compiling {configStr}")
+        matmul_{configStr}(M, N, K, am, ak, bk, bn, cm, cn, biasn)
         return True
     except Exception as e:
         print(f'invalid config(compilation): {configStr}: ', e, flush=True)
@@ -121,16 +124,17 @@ def try_compile_config_{configStr}(M, N, K, num_sms, am, ak, bk, bn, cm, cn, bia
 """
     else:
         matmul_def_str = f"""
-def matmul_{configStr}(a, b, c, bias, P, locks, M, N, K, num_sms, am, ak, bk, bn, cm, cn, biasn):
-    grid = num_sms
+def matmul_{configStr}(a, b, c, bias, P, locks, M, N, K, am, ak, bk, bn, cm, cn, biasn):
+    grid = {num_sms}
     streamk_gemm_{configStr}[grid,](
         a, b, c, bias, P, locks,
-        M, N, K, num_sms,
+        M, N, K,
         am, ak, bk, bn, cm, cn, biasn,
         BLOCK_SIZE_M = {block_m},
         BLOCK_SIZE_N = {block_n},
         BLOCK_SIZE_K = {block_k},
         GROUP_SIZE_M = {group_m},
+        NUM_SMS = {num_sms},
         num_warps = {num_warps},
         num_stages = {num_stages},
         waves_per_eu = {waves_per_eu},
@@ -144,7 +148,7 @@ def matmul_{configStr}(a, b, c, bias, P, locks, M, N, K, num_sms, am, ak, bk, bn
     return configStr, matmul_def_str
 
 
-def generate_compile_driver(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b,
+def generate_compile_driver(M, N, K, col_a, col_b, dtype_a, dtype_b,
                             dtype_c, dtype_p, dtype_lock, init_type, configs,
                             rotating_buffer_size, bias_size):
     """
@@ -180,7 +184,7 @@ from {get_filename_without_extension(get_filename_myKernels())} import *
     stride_a_str = "1, M" if col_a else "M, 1"
     stride_b_str = "1, N" if col_b else "N, 1"
     stride_c_str = "N, 1"
-    compile_kernels_pre_str = f"""def compile_kernels(M, N, K, num_sms, rotating_buffer_size, bias_size, num_threads):
+    compile_kernels_pre_str = f"""def compile_kernels(M, N, K, rotating_buffer_size, bias_size, num_threads):
     thread_pool = multiprocessing.Pool(processes=num_threads)
 
     assert bias_size == M or bias_size == 0
@@ -189,7 +193,7 @@ from {get_filename_without_extension(get_filename_myKernels())} import *
     stride_am, stride_ak = {stride_a_str}
     stride_bk, stride_bn = {stride_b_str}
     stride_cm, stride_cn = {stride_c_str}
-    task_args = (M, N, K, num_sms,
+    task_args = (M, N, K,
                  stride_am, stride_ak,
                  stride_bk, stride_bn,
                  stride_cm, stride_cn, stride_bias)
@@ -234,7 +238,7 @@ def main():
     numThreads = args.n
     rotating_buffer_size = args.rotating_tensor
     """
-    compile_kernels_call_str = f'compile_kernels({M}, {N}, {K}, {num_sms}, rotating_buffer_size, {bias_size}, numThreads)'
+    compile_kernels_call_str = f'compile_kernels({M}, {N}, {K}, rotating_buffer_size, {bias_size}, numThreads)'
 
     f_kernel.write(def_main_str)
     f_kernel.write(compile_kernels_call_str + "\n\n")
@@ -244,7 +248,7 @@ def main():
 
     return filename
 
-def generate_profile_tasks(M, N, K, num_sms, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock,
+def generate_profile_tasks(M, N, K, col_a, col_b, dtype_a, dtype_b, dtype_c, dtype_p, dtype_lock,
                            init_type, configs, jobs, iters, run_bench,
                            rotating_buffer_size, bias_size, icache_flush):
     """
@@ -297,7 +301,7 @@ from icache_flush import icache_flush
 
     # write test_gemm
     # pre string
-    test_gemm_pre_str = f"""def test_gemm(M, N, K, num_sms, rotating_buffer_size, bias_size):
+    test_gemm_pre_str = f"""def test_gemm(M, N, K, rotating_buffer_size, bias_size):
     tensors = gen_rotating_tensors(M, N, K, '{dtype_a}', {col_a}, '{dtype_b}', {col_b}, '{dtype_c}',
                                    1, '{init_type}', rotating_buffer_size, bias_size, device='cuda')
 
@@ -325,11 +329,12 @@ from icache_flush import icache_flush
         configStr = gen_configStr(config)
         block_m = config.get('BLOCK_SIZE_M')
         block_n = config.get('BLOCK_SIZE_N')
+        num_sms = config.get('NUM_SMS')
         matmul_call_str = f"""
     if '{configStr}' not in failed_configs:
         rotating_num = tensors['rotating_num']
-        locks = torch.zeros(({runs}, num_sms), device = "cuda", dtype = torch.int32)
-        P = torch.zeros(({runs}, num_sms,  {block_m}*{block_n}), device="cuda", dtype=torch.float32)
+        locks = torch.zeros(({runs}, {num_sms}), device = "cuda", dtype = torch.int32)
+        P = torch.zeros(({runs}, {num_sms},  {block_m}*{block_n}), device="cuda", dtype=torch.float32)
         for i in range({runs}):
             a = tensors['input_a'][i % rotating_num]
             b = tensors['input_b'][i % rotating_num]
@@ -342,7 +347,7 @@ from icache_flush import icache_flush
         matmul_call_str += f"""
             current_locks = locks[i]
             current_P = P[i]
-            d = matmul_{configStr}(a, b, c, bias, current_P, current_locks, M, N, K, num_sms, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), bias_stride)"""
+            d = matmul_{configStr}(a, b, c, bias, current_P, current_locks, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1), c.stride(0), c.stride(1), bias_stride)"""
         f_kernel[idx % jobs].write(matmul_call_str + "\n")
         idx += 1
     # post string
@@ -360,9 +365,8 @@ def main():
     args = parser.parse_args()
     numThreads = args.n
     rotating_buffer_size = args.rotating_tensor
-    num_sms = 304
     """
-    test_gemm_call_str = f'test_gemm({M}, {N}, {K}, num_sms, rotating_buffer_size, {bias_size})'
+    test_gemm_call_str = f'test_gemm({M}, {N}, {K}, rotating_buffer_size, {bias_size})'
     for fi in range(jobs):
         f_kernel[fi].write(def_main_str)
         f_kernel[fi].write(test_gemm_call_str + "\n\n")

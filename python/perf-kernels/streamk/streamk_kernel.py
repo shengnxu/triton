@@ -4,28 +4,29 @@ import triton.language as tl
 @triton.jit()
 def streamk_gemm(
         A, B, C, bias_ptr, P, locks,
-        M, N, K, num_sms,
+        M, N, K,
         stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn, stride_bias,
         BLOCK_SIZE_M: tl.constexpr, 
         BLOCK_SIZE_N: tl.constexpr, 
         BLOCK_SIZE_K: tl.constexpr,
         GROUP_SIZE_M: tl.constexpr, 
+        NUM_SMS: tl.constexpr,
         BIAS: tl.constexpr, 
         EVEN_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
-    pid = (pid % 8) * (num_sms // 8) + (pid // 8)
+    pid = (pid % 8) * (NUM_SMS // 8) + (pid // 8)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     iters_per_tile = tl.cdiv(K, BLOCK_SIZE_K)
     total_tiles = num_pid_m * num_pid_n
-    if num_sms > 0 and total_tiles > num_sms:
-        total_streamk_tiles = total_tiles % num_sms
-        # total_streamk_tiles = total_streamk_tiles + num_sms
+    if NUM_SMS > 0 and total_tiles > NUM_SMS:
+        total_streamk_tiles = total_tiles % NUM_SMS
+       # total_streamk_tiles = total_streamk_tiles + NUM_SMS
         total_full_tiles = total_tiles - total_streamk_tiles
         total_streamk_iters = total_streamk_tiles * iters_per_tile
-        streamk_iters_pcu = total_streamk_iters // num_sms
-        streamk_remainder_iters = total_streamk_iters % num_sms
+        streamk_iters_pcu = total_streamk_iters // NUM_SMS
+        streamk_remainder_iters = total_streamk_iters % NUM_SMS
     else:
         total_full_tiles = total_tiles
         total_streamk_tiles = 0
@@ -35,17 +36,13 @@ def streamk_gemm(
 
     acc_dtype = tl.float32 if C.type.element_ty != tl.int8 else tl.int32
 
-    for tile_id in range(pid, total_full_tiles, num_sms):
-        if GROUP_SIZE_M == 1:
-            pid_m = tile_id // num_pid_n
-            pid_n = tile_id % num_pid_n
-        else:
-            num_pid_in_group = GROUP_SIZE_M * num_pid_n
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_SIZE_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-            pid_m = first_pid_m + (tile_id % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
+    for tile_id in range(pid, total_full_tiles, NUM_SMS):
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = tile_id // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + ((tile_id % num_pid_in_group) % group_size_m)
+        pid_n = (tile_id % num_pid_in_group) // group_size_m
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
@@ -98,16 +95,12 @@ def streamk_gemm(
         remainder = start_iter % iters_per_tile
         end_iter = tl.minimum(start_iter + (iters_per_tile - remainder), last_iter)
         tile_id = start_iter // iters_per_tile
-        if GROUP_SIZE_M == 1:
-            pid_m = tile_id // num_pid_n
-            pid_n = tile_id % num_pid_n
-        else:
-            num_pid_in_group = GROUP_SIZE_M * num_pid_n
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_SIZE_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-            pid_m = first_pid_m + (tile_id % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
+        num_pid_in_group = GROUP_SIZE_M * num_pid_n
+        group_id = tile_id // num_pid_in_group
+        first_pid_m = group_id * GROUP_SIZE_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+        pid_m = first_pid_m + ((tile_id % num_pid_in_group) % group_size_m)
+        pid_n = (tile_id % num_pid_in_group) // group_size_m
 
         rm = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
         rn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
@@ -151,7 +144,7 @@ def streamk_gemm(
             next_pid = pid + 1
             tile_iter_end = tile_iter + iters_per_tile
             end = end_iter
-            while (end < tile_iter_end and next_pid < num_sms):
+            while (end < tile_iter_end and next_pid < NUM_SMS):
                 while tl.load(locks + next_pid, cache_modifier = ".cv", volatile=True) != 1:
                     pass
                 rm1 = tl.arange(0, BLOCK_SIZE_M)

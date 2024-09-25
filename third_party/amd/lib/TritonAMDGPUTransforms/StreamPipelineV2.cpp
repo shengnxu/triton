@@ -58,9 +58,13 @@ namespace {
 // For each `scf.for` create a StreamPipeliner manager.
 class StreamPipeliner {
 public:
-  StreamPipeliner(scf::ForOp _forOp, int _numStages)
-      : forOp(_forOp), schedule(_numStages), numStages(_numStages),
+  StreamPipeliner(scf::ForOp _forOp, int _numStages, int _prefetch)
+      : forOp(_forOp), prefetch(_prefetch ? 2 : 0),
+        numStages(_numStages + prefetch), schedule(numStages),
         axisInfoAnalysis(forOp->getParentOfType<ModuleOp>()) {
+    for (int i = 0; i < numStages + 1; ++i)
+      clusters.push_back(schedule.clusters.newAtBack());
+
     options.supportDynamicLoops = true;
     options.peelEpilogue = true;
     options.predicateFn = streamPredication;
@@ -71,24 +75,27 @@ public:
   void scheduleLoads(DenseSet<Operation *> &rootUsers);
   void scheduleDependencies();
   void scheduleDistanceOneDependencies();
-  void scheduleRemainingToLastStage(tt::CoarseSchedule::Cluster afterPrologue);
+  void scheduleRemainingToLastStage();
 
   bool preprocessLoopAndBuildSchedule();
   bool pipelineLoop();
 
   Value createAlloc(Operation *loadOp, ttg::SharedEncodingAttr sharedEnc,
                     unsigned numBuffers);
-  void createStreamCopy(tt::LoadOp loadOp, Value alloc, Value extractIdx,
-                        tt::CoarseSchedule::Cluster prefetchCluster);
+  void createStreamCopy(tt::LoadOp loadOp, Value alloc, Value extractIdx);
   void createStreamOps();
 
 private:
   scf::ForOp forOp;
-  tt::CoarseSchedule schedule;
+  int prefetch;
   int numStages;
 
+  // Scheduling clusters
+  tt::CoarseSchedule schedule;
+  SmallVector<tt::CoarseSchedule::Cluster> clusters;
+
   // Mapping and indirection level for each `tt.load` to its use.
-  llvm::SmallVector<std::tuple<Operation *, int, Operation *>>
+  SmallVector<std::tuple<Operation *, int, Operation *>>
       loadOpToIndLevelAndUse;
 
   struct LoadInfo {
@@ -115,8 +122,7 @@ private:
 } // namespace
 
 void StreamPipeliner::createStreamCopy(
-    tt::LoadOp loadOp, Value alloc, Value extractIdx,
-    tt::CoarseSchedule::Cluster prefetchCluster) {
+    tt::LoadOp loadOp, Value alloc, Value extractIdx) {
   OpBuilder builder(forOp);
   Value zero = builder.create<arith::ConstantIntOp>(forOp.getLoc(), 0, 32);
   // Replace the load with insert/extract slice.
@@ -162,13 +168,13 @@ void StreamPipeliner::createStreamCopy(
   auto sharedLoad =
       builder.create<ttg::LocalLoadOp>(loc, loadOp.getType(), viewLoad);
   Value result = sharedLoad.getResult();
-  schedule.insert(sharedLoad, localLoadStage, localLoadCluster);
+  schedule.insert(sharedLoad, localLoadStage, clusters[localLoadStage]);
 
   // Create a select for non-zero other values.
   if (other && !isZeroConst(other)) {
     auto select = builder.create<arith::SelectOp>(
         loc, loadOp.getType(), mask, sharedLoad.getResult(), other);
-    schedule.insert(select, localLoadStage, localLoadCluster);
+    schedule.insert(select, localLoadStage, clusters[localLoadStage]);
     result = select.getResult();
   }
 
@@ -176,17 +182,16 @@ void StreamPipeliner::createStreamCopy(
 
   if (auto cvt = dyn_cast<ttg::ConvertLayoutOp>(*result.getUsers().begin())) {
     assert(result.hasOneUse());
-    schedule.insert(cvt, localLoadStage, localLoadCluster);
+    schedule.insert(cvt, localLoadStage, clusters[localLoadStage]);
   }
 
   // Prefetch load ahead of the dot stage if is used by the dot.
-  if (loadToInfo[loadOp].usedByDot) {
-    assert(numStages >= 2 && "requires num_stages=2 at least");
-    auto storeOp =
-        builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
-    schedule.insert(storeOp, localStoreStage, prefetchCluster);
-    schedule.insert(viewLoad, localStoreStage, prefetchCluster);
-  }
+  assert(numStages >= 2 && "requires num_stages=2 at least");
+  auto storeOp =
+    builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
+  schedule.insert(storeOp, localStoreStage, clusters[localStoreStage]);
+  schedule.insert(viewLoad, localStoreStage, clusters[localStoreStage]);
+
   loadOp.erase();
 }
 
@@ -391,24 +396,20 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   LDBG("stagesBetweenLoads = " << stagesBetweenLoads);
 
   // Put the root uses of the loads in the last stage.
-  tt::CoarseSchedule::Cluster rootUsersCluster = schedule.clusters.newAtFront();
   for (auto &[loadOp, dist, use] : loadOpToIndLevelAndUse) {
     // Non-LoadOp(s) are the (final) root uses of all LoadOp(s).
     if (!isa<tt::LoadOp>(use)) {
-      schedule.insert(use, numStages - 1, rootUsersCluster);
+      schedule.insert(use, numStages - 1, clusters[0]);
       rootUsers.insert(use);
     }
   }
 
-  // Create a cluster for load ops at each indirection level.
-  SmallVector<tt::CoarseSchedule::Cluster> loadsClusters;
-  for (int i = 0; i <= maxIndirectionLevel; i++) {
-    loadsClusters.push_back(schedule.clusters.newAtBack());
-  }
+  assert(maxIndirectionLevel < numStages);
+  
   // Assign stages to the loads.
   for (auto [loadOp, indLevel, _] : loadOpToIndLevelAndUse) {
     int stage = (maxIndirectionLevel - indLevel) * stagesBetweenLoads;
-    schedule.insert(loadOp, stage, loadsClusters[indLevel]);
+    schedule.insert(loadOp, stage, clusters[numStages - indLevel + 1]);
   }
 
   // Calculate distance from the load to the use.
@@ -490,15 +491,14 @@ void StreamPipeliner::scheduleDistanceOneDependencies() {
   }
 }
 
-void StreamPipeliner::scheduleRemainingToLastStage(
-    tt::CoarseSchedule::Cluster afterPrologue) {
+void StreamPipeliner::scheduleRemainingToLastStage() {
   // Assign the rest of the ops to the last stage.
   // Take care of the ordering of the ops - uses cannot be scheduled to the
   // cluster before the definition.
   DenseMap<Operation *, tt::CoarseSchedule::Cluster> opToCluster;
   for (auto &op : forOp.getBody()->without_terminator()) {
     if (schedule.count(&op) == 0) {
-      opToCluster[&op] = afterPrologue;
+      opToCluster[&op] = clusters[numStages];
     }
   }
   SmallVector<Operation *> queue;
@@ -540,8 +540,10 @@ Value StreamPipeliner::createAlloc(Operation *loadOp,
   Type memdescType = tt::MemDescType::get(bufferShape, ty.getElementType(),
                                           sharedEnc, sharedMemorySpace,
                                           /*mutableMemory=*/true);
-  return builder.create<ttg::LocalAllocOp>(loadOp->getLoc(), memdescType,
-                                           Value());
+  auto alloc = builder.create<ttg::LocalAllocOp>(loadOp->getLoc(), memdescType,
+                                                 Value());
+  sharedMemAllocs.push_back(alloc);
+  return alloc;
 }
 
 // Convert load ops into shared memory allocation loads and apply
@@ -550,8 +552,9 @@ void StreamPipeliner::createStreamOps() {
   // Calculate the number of buffers needed for each load.
   // TODO: Use the precise number of buffers needed by the particular load.
   int numBuffers = -1;
-  for (auto &[_, info] : loadToInfo)
-    numBuffers = std::max(numBuffers, info.distToUse - (prefetch ? info.usedByDot : 0));
+  for (auto &[_, info] : loadToInfo) {
+    numBuffers = std::max(numBuffers, info.distToUse - (info.usedByDot ? prefetch : 0));
+  }
   LDBG("deduced shared memory buffer number = " << numBuffers);
 
   SmallVector<std::pair<Operation *, Value>> loadToAllocs;
@@ -561,7 +564,6 @@ void StreamPipeliner::createStreamOps() {
 
     Value alloc = createAlloc(loadOp, info.sharedEncoding, numBuffers);
     assert(alloc && "Failed to create alloc for the async load.");
-    sharedMemAllocs.push_back(alloc);
     loadToAllocs.emplace_back(loadOp, alloc);
   }
 
@@ -593,13 +595,10 @@ void StreamPipeliner::createStreamOps() {
                                                extractIdx, numBuffersVal);
   extractIdx = builder.create<arith::SelectOp>(loc, cndExt, extractIdx, zero);
 
-  // Create a cluster for prefetching global reads for the dot.
-  tt::CoarseSchedule::Cluster localLoadCluster = schedule.clusters.newAtBack();
-  tt::CoarseSchedule::Cluster prefetchCluster = schedule.clusters.newAtBack();
-
+  // Create stream copies.
   for (auto &[op, alloc] : loadToAllocs) {
     if (auto loadOp = dyn_cast<tt::LoadOp>(op))
-      createStreamCopy(loadOp, alloc, extractIdx, prefetchCluster, localLoadCluster);
+      createStreamCopy(loadOp, alloc, extractIdx);
   }
   // Patch the yield with the updated counters.
   appendToForOpYield(forOp, {extractIdx});
@@ -621,14 +620,6 @@ bool StreamPipeliner::preprocessLoopAndBuildSchedule() {
   // Convert the loads into shared memory allocations and loads from them.
   createStreamOps();
 
-  scheduleDependencies(forOp, coarseSchedule, numStages);
-  LLVM_DEBUG({
-    LDBG("Coarse schedule with stream loads:");
-    schedule.dump();
-  });
-
-  tt::CoarseSchedule::Cluster afterPrologue = schedule.clusters.begin();
-
   scheduleDependencies();
   LLVM_DEBUG({
     LDBG("Coarse schedule with dependencies:");
@@ -641,7 +632,7 @@ bool StreamPipeliner::preprocessLoopAndBuildSchedule() {
     schedule.dump();
   });
 
-  scheduleRemainingToLastStage(afterPrologue);
+  scheduleRemainingToLastStage();
   LLVM_DEBUG({
     LDBG("Final coarse schedule:");
     schedule.dump();
@@ -688,7 +679,7 @@ bool StreamPipeliner::pipelineLoop() {
   if (!checkPrecondition(forOp))
     return false;
 
-  numStages++;
+  //numStages++;
   if (!preprocessLoopAndBuildSchedule())
     return false;
   LDBG("Loop before sending to expander:\n" << *forOp);
@@ -715,7 +706,7 @@ struct PipelinePass : public TritonAMDGPUStreamPipelineV2Base<PipelinePass> {
     });
 
     for (scf::ForOp forOp : loops) {
-      StreamPipeliner sp(forOp, getNumStagesOrDefault(forOp));
+      StreamPipeliner sp(forOp, getNumStagesOrDefault(forOp), prefetch);
       sp.pipelineLoop();
     }
   }

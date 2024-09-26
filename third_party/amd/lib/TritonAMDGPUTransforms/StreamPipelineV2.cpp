@@ -59,7 +59,7 @@ namespace {
 class StreamPipeliner {
 public:
   StreamPipeliner(scf::ForOp _forOp, int _numStages, int _prefetch)
-      : forOp(_forOp), prefetch(_prefetch ? 2 : 0),
+      : forOp(_forOp), prefetch(_prefetch ? 1 : 0),
         numStages(_numStages + prefetch), schedule(numStages),
         axisInfoAnalysis(forOp->getParentOfType<ModuleOp>()) {
     for (int i = 0; i < numStages + 1; ++i)
@@ -168,13 +168,15 @@ void StreamPipeliner::createStreamCopy(
   auto sharedLoad =
       builder.create<ttg::LocalLoadOp>(loc, loadOp.getType(), viewLoad);
   Value result = sharedLoad.getResult();
-  schedule.insert(sharedLoad, localLoadStage, clusters[localLoadStage]);
+  if (prefetch)
+    schedule.insert(sharedLoad, localLoadStage, clusters[localLoadStage + 1]);
 
   // Create a select for non-zero other values.
   if (other && !isZeroConst(other)) {
     auto select = builder.create<arith::SelectOp>(
         loc, loadOp.getType(), mask, sharedLoad.getResult(), other);
-    schedule.insert(select, localLoadStage, clusters[localLoadStage]);
+    if (prefetch)
+      schedule.insert(select, localLoadStage, clusters[localLoadStage + 1]);
     result = select.getResult();
   }
 
@@ -182,15 +184,16 @@ void StreamPipeliner::createStreamCopy(
 
   if (auto cvt = dyn_cast<ttg::ConvertLayoutOp>(*result.getUsers().begin())) {
     assert(result.hasOneUse());
-    schedule.insert(cvt, localLoadStage, clusters[localLoadStage]);
+    if (prefetch)
+      schedule.insert(cvt, localLoadStage, clusters[localLoadStage + 1]);
   }
 
   // Prefetch load ahead of the dot stage if is used by the dot.
   assert(numStages >= 2 && "requires num_stages=2 at least");
   auto storeOp =
     builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
-  schedule.insert(storeOp, localStoreStage, clusters[localStoreStage]);
-  schedule.insert(viewLoad, localStoreStage, clusters[localStoreStage]);
+  schedule.insert(storeOp, localStoreStage, clusters[localStoreStage + 1]);
+  schedule.insert(viewLoad, localStoreStage, clusters[localStoreStage + 1]);
 
   loadOp.erase();
 }
@@ -409,7 +412,7 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   // Assign stages to the loads.
   for (auto [loadOp, indLevel, _] : loadOpToIndLevelAndUse) {
     int stage = (maxIndirectionLevel - indLevel) * stagesBetweenLoads;
-    schedule.insert(loadOp, stage, clusters[numStages - indLevel + 1]);
+    schedule.insert(loadOp, stage, clusters[1]);
   }
 
   // Calculate distance from the load to the use.
@@ -551,18 +554,19 @@ Value StreamPipeliner::createAlloc(Operation *loadOp,
 void StreamPipeliner::createStreamOps() {
   // Calculate the number of buffers needed for each load.
   // TODO: Use the precise number of buffers needed by the particular load.
-  int numBuffers = -1;
+  int maxNumBuffers = -1;
   for (auto &[_, info] : loadToInfo) {
-    numBuffers = std::max(numBuffers, info.distToUse - (info.usedByDot ? prefetch : 0));
+    int sharedBuffers = info.distToUse - (info.usedByDot ? prefetch : 0);
+    maxNumBuffers = std::max(maxNumBuffers, sharedBuffers);
   }
-  LDBG("deduced shared memory buffer number = " << numBuffers);
+  LDBG("deduced max shared memory buffer number = " << maxNumBuffers);
 
   SmallVector<std::pair<Operation *, Value>> loadToAllocs;
   for (auto &[loadOp, info] : loadToInfo) {
     if (!info.sharedEncoding)
       continue;
 
-    Value alloc = createAlloc(loadOp, info.sharedEncoding, numBuffers);
+    Value alloc = createAlloc(loadOp, info.sharedEncoding, maxNumBuffers);
     assert(alloc && "Failed to create alloc for the async load.");
     loadToAllocs.emplace_back(loadOp, alloc);
   }
@@ -576,7 +580,7 @@ void StreamPipeliner::createStreamOps() {
   Value one = builder.create<arith::ConstantIntOp>(loc, 1, 32);
   Value extractIdx = minusOne;
   Value numBuffersVal =
-      builder.create<arith::ConstantIntOp>(loc, numBuffers, 32);
+      builder.create<arith::ConstantIntOp>(loc, maxNumBuffers, 32);
 
   unsigned newOperandIndex = forOp.getBody()->getNumArguments();
   // Patch the loop to add the new loop carried dependencies.

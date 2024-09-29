@@ -181,6 +181,7 @@ class HIPBackend(BaseBackend):
                 if options.num_stages == 0:
                     amd.passes.ttgpuir.add_stream_pipeline(pm)
             passes.common.add_canonicalizer(pm)
+        passes.ttgpuir.add_prefetch(pm)
         amd.passes.ttgpuir.insert_instruction_sched_hints(pm)
         passes.ttgpuir.add_optimize_dot_operands(pm, True)
         passes.ttgpuir.add_remove_layout_conversions(pm)

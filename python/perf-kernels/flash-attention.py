@@ -316,14 +316,20 @@ def get_gfx_version():
         print(f"Error: {e}")
     return None
 
+
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 
+
 def is_cdna():
-    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ('gfx940', 'gfx941', 'gfx942', 'gfx90a', 'gfx908')
+    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ('gfx940', 'gfx941', 'gfx942',
+                                                                                   'gfx90a', 'gfx908')
+
 
 def is_rdna():
-    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ("gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201")
+    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ("gfx1030", "gfx1100", "gfx1101",
+                                                                                   "gfx1102", "gfx1200", "gfx1201")
+
 
 def get_cdna_autotune_configs():
     return [
@@ -362,6 +368,7 @@ def get_rdna_autotune_configs():
                       num_warps=2),
     ], ['IS_CAUSAL', 'dropout_p', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K', 'ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK']
 
+
 def get_autotune_configs():
     if is_rdna():
         return get_rdna_autotune_configs()
@@ -372,6 +379,8 @@ def get_autotune_configs():
 
 
 autotune_configs, autotune_keys = get_autotune_configs()
+
+
 @triton.autotune(
     configs=autotune_configs,
     key=autotune_keys,

@@ -23,13 +23,15 @@ def parse_args():
 
 
 def parse_trace(code_fullname, trace_fullname):
-    instr0_clk, bar1_clk, bar2_clk, bar3_clk, instr9_clk, mfma_dsRead_cnt, mfma_dsWrite_cnt = gen_all_clk(
+    instr0_clk, bar1_clk, bar2_clk, bar3_clk, instr9_clk, mfma_dsRead_cnt, mfma_dsWrite_cnt, incomplete = gen_all_clk(
         code_fullname, trace_fullname)
+    if incomplete:
+        return 0, 0, 0, 0, 0, 0, 0, 0, 0, incomplete
     pro, loop, epi, iter_clk = gen_coarse_clk(instr0_clk, bar1_clk, bar3_clk, instr9_clk)
     bar1_lat, bar2_lat = gen_fine_clk(bar1_clk, bar2_clk, bar3_clk)
 
     lat1, lat2, lat_sum, idle1, idle2 = print_loop_eff(bar1_lat, bar2_lat, mfma_dsRead_cnt, mfma_dsWrite_cnt)
-    return pro, loop, epi, iter_clk, lat1, lat2, lat_sum, idle1, idle2
+    return pro, loop, epi, iter_clk, lat1, lat2, lat_sum, idle1, idle2, incomplete
 
 
 def print_list(myList):
@@ -107,11 +109,19 @@ def gen_all_clk(code_fullname, trace_fullname):
                 instrAfterBarrier3_clk = trace_list[i][0]
         lastInstr_clk = trace_list[-1][0]
 
+    incomplete = False
     if len(instrAfterBarrier1_clk) != len(instrAfterBarrier2_clk):
         print("different length of instrAfterBarrier1_clk and instrAfterBarrier2_clk")
-        exit(0)
+        incomplete = True
 
-    return firstInstr_clk, instrAfterBarrier1_clk, instrAfterBarrier2_clk, instrAfterBarrier3_clk, lastInstr_clk, mfma_dsRead_cnt, mfma_dsWrite_cnt
+    len1 = len(instrAfterBarrier1_clk)
+    len2 = len(instrAfterBarrier2_clk)
+    len3 = instrAfterBarrier3_clk
+
+    if len1 == 0 or len2 == 0 or len3 == 0:
+        incomplete = True
+
+    return firstInstr_clk, instrAfterBarrier1_clk, instrAfterBarrier2_clk, instrAfterBarrier3_clk, lastInstr_clk, mfma_dsRead_cnt, mfma_dsWrite_cnt, incomplete
 
 
 def gen_coarse_clk(instr0_clk, bar1_clk, bar3_clk, instr9_clk):
@@ -207,6 +217,7 @@ def main():
     print("wid,prologue,loop,epilogue,iter_clk,lat1,lat2,iter_lat,idle1,idle2")
     epi_total = 0
     epi_1st = 0
+    total = 0
     flag = False
     cnt = 0
     for wid in range(maxwid):
@@ -214,7 +225,9 @@ def main():
             continue
         trace_filename = f"se{se}_sm{sm}_sl{sl}_wv{wid}.json"
         trace_fullname = os.path.join(trace_dir, trace_filename)
-        pro, loop, epi, iter_clk, lat1, lat2, lat_sum, idle1, idle2 = parse_trace(code_fullname, trace_fullname)
+        pro, loop, epi, iter_clk, lat1, lat2, lat_sum, idle1, idle2, incomplete = parse_trace(code_fullname, trace_fullname)
+        if incomplete:
+            continue
         print(f"{wid},{pro},{loop},{epi},{iter_clk:.0f},{lat1},{lat2},{lat_sum},{idle1},{idle2}")
         if not flag:
             epi_1st = epi
@@ -223,9 +236,13 @@ def main():
         if epi > 2 * epi_1st:
             continue
         epi_total += epi
+        total += epi + pro + loop
         cnt += 1
 
+    if cnt == 0:
+        exit(0)
     print(f"averaged epilogue cycles: {epi_total / cnt:.0f}")
+    print(f"averaged total cycles: {total / cnt:.0f}")
     print(f"global_store info (averaged for all {maxwid} waves):")
     calc_global_store_cycles(code_fullname)
 

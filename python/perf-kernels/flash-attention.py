@@ -300,7 +300,32 @@ def _attn_fwd_inner(acc, l_i, m_i, q, k_ptrs, v_ptrs, bias_ptrs, stride_kn, stri
     return acc, l_i, m_i
 
 
-def get_MI_autotune_configs():
+def get_gfx_version():
+    try:
+        # Run the rocminfo command
+        result = subprocess.run(['rocminfo'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        output = result.stdout
+
+        # Parse the output to find the gfx version
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("Name: gfx"):
+                gfx_version = line.split("Name:")[1].strip()
+                return gfx_version
+    except Exception as e:
+        print(f"Error: {e}")
+    return None
+
+def is_hip():
+    return triton.runtime.driver.active.get_current_target().backend == "hip"
+
+def is_cdna():
+    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ('gfx940', 'gfx941', 'gfx942', 'gfx90a', 'gfx908')
+
+def is_rdna():
+    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ("gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201")
+
+def get_cdna_autotune_configs():
     return [
         triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'waves_per_eu': 2, 'PRE_LOAD_V': False}, num_stages=1,
                       num_warps=4),
@@ -318,7 +343,7 @@ def get_MI_autotune_configs():
     ], ['IS_CAUSAL', 'dropout_p', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K', 'ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK']
 
 
-def get_NAVI_autotune_configs():
+def get_rdna_autotune_configs():
     return [
         triton.Config({'BLOCK_M': 32, 'BLOCK_N': 32, 'waves_per_eu': 4, 'PRE_LOAD_V': False}, num_stages=1,
                       num_warps=2),
@@ -337,62 +362,16 @@ def get_NAVI_autotune_configs():
                       num_warps=2),
     ], ['IS_CAUSAL', 'dropout_p', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K', 'ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK']
 
-
-def is_hip():
-    return triton.runtime.driver.active.get_current_target().backend == "hip"
-
-
-def is_cdna():
-    return is_hip() and triton.runtime.driver.active.get_current_target().arch in ('gfx940', 'gfx941', 'gfx942',
-                                                                                   'gfx90a', 'gfx908')
-
-
-def get_gfx_version():
-    try:
-        # Run the rocminfo command
-        result = subprocess.run(['rocminfo'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        output = result.stdout
-
-        # Parse the output to find the gfx version
-        for line in output.splitlines():
-            line = line.strip()
-            if line.startswith("Name: gfx"):
-                gfx_version = line.split("Name:")[1].strip()
-                return gfx_version
-    except Exception as e:
-        print(f"Error: {e}")
-    return None
-
-
-def is_rdna():
-    try:
-        # Attempt to get the GPU architecture using Triton
-        target = triton.runtime.driver.active.get_current_target()
-        backend = target.backend
-        arch = target.arch
-        if backend == 'hip' and arch in ("gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"):
-            return True
-        else:
-            return False
-    except Exception:
-        # Fallback to using rocminfo if Triton method fails
-        gfx_version = get_gfx_version()
-        if gfx_version in ("gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"):
-            return True
-        else:
-            return False
-
-
 def get_autotune_configs():
     if is_rdna():
-        return get_NAVI_autotune_configs()
+        return get_rdna_autotune_configs()
+    elif is_cdna():
+        return get_cdna_autotune_configs()
     else:
-        return get_MI_autotune_configs()
+        raise ValueError("Unknown Device Type")
 
 
 autotune_configs, autotune_keys = get_autotune_configs()
-
-
 @triton.autotune(
     configs=autotune_configs,
     key=autotune_keys,

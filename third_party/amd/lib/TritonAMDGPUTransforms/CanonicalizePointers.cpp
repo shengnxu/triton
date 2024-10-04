@@ -435,19 +435,29 @@ Value PointerCanonicalizer::createTensorPointer(FatPtr fatPtr, Location loc) {
   Value basePtr = fatPtr.basePtr;
   Value offset = fatPtr.offset;
   // Get the offset shape
-  auto offsetType = cast<RankedTensorType>(offset.getType());
-  ArrayRef<int64_t> offsetShape = offsetType.getShape();
-  // Splat the scalar pointer
-  auto tensorPtrType = RankedTensorType::get(offsetShape, basePtr.getType(),
-                                             offsetType.getEncoding());
-  if (fatPtr.canNarrow)
-    offset = narrow64bitOffsetTo32bits(rewriter, loc, offset);
+  if (auto offsetType = dyn_cast<RankedTensorType>(offset.getType())) {
+    ArrayRef<int64_t> offsetShape = offsetType.getShape();
+    // Splat the scalar pointer
+    auto tensorPtrType = RankedTensorType::get(offsetShape, basePtr.getType(),
+                                               offsetType.getEncoding());
+    if (fatPtr.canNarrow)
+      offset = narrow64bitOffsetTo32bits(rewriter, loc, offset);
 
-  Value tensorPtr =
-      rewriter.create<triton::SplatOp>(loc, tensorPtrType, basePtr);
+    Value tensorPtr =
+        rewriter.create<triton::SplatOp>(loc, tensorPtrType, basePtr);
 
-  auto addPtrOp =
-      rewriter.create<triton::AddPtrOp>(loc, tensorPtrType, tensorPtr, offset);
+    auto addPtrOp = rewriter.create<triton::AddPtrOp>(loc, tensorPtrType,
+                                                      tensorPtr, offset);
+
+    addPtrOp->setAttrs(fatPtr.attributes);
+
+    return addPtrOp;
+  }
+  // assert scalar
+  // assert(isa<IntegerType>(offset.getType()));
+
+  auto addPtrOp = rewriter.create<triton::AddPtrOp>(loc, basePtr.getType(),
+                                                    basePtr, offset);
 
   addPtrOp->setAttrs(fatPtr.attributes);
 

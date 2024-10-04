@@ -694,6 +694,17 @@ bool cvtNeedsWarpShuffle(RankedTensorType srcTy, RankedTensorType dstTy) {
 }
 
 bool cvtNeedsSharedMemory(RankedTensorType srcTy, RankedTensorType dstTy) {
+  if (isMoeLDSBypass()) {
+    if (auto blockSrc = llvm::dyn_cast<triton::gpu::BlockedEncodingAttr>(
+            srcTy.getEncoding())) {
+      auto dotOp = llvm::dyn_cast<triton::gpu::DotOperandEncodingAttr>(
+          dstTy.getEncoding());
+      if (dotOp && dotOp.getOpIdx() == 1) {
+        return false;
+      }
+    }
+  }
+
   // TODO(jlebar): Remove these special cases (`isMmaToDotShortcut`,
   // `isBlockedToDotShortcut` and `isMfmaToDotShortcut`) once they're fully
   // subsumed by the linear-layout checks.

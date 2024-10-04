@@ -214,7 +214,10 @@ void init_triton_ir(py::module &&m) {
              self.printStackTraceOnDiagnostic(v);
            })
       .def("disable_multithreading",
-           [](MLIRContext &self) { self.disableMultithreading(); });
+           [](MLIRContext &self) { self.disableMultithreading(); })
+      .def("enable_moe_lds_bypass", [](MLIRContext &self, bool value) -> void {
+        enableMoeLDSBypass(value);
+      });
 
   py::class_<SourceMgrDiagnosticHandler>(m, "source_mgr_diag",
                                          py::module_local())

@@ -42,7 +42,7 @@ public:
           dyn_cast<triton::gpu::DotOperandEncodingAttr>(dstType.getEncoding());
       if (!dstDotOp)
         return;
-      if (!cvtNeedsSharedMemory(srcType, dstType))
+      if (isMoeLDSBypass() && !cvtNeedsSharedMemory(srcType, dstType))
         return;
       auto srcOrder = triton::gpu::getOrder(srcEncoding);
       auto rank = srcOrder.size();

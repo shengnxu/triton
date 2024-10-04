@@ -94,6 +94,8 @@ private:
   struct LoadInfo {
     // Shared layout is used for loads feeding into dot ops.
     ttg::SharedEncodingAttr sharedEncoding = nullptr;
+    // Blocked encoding is used for loads not used by the dot.
+    ttg::BlockedEncodingAttr blockedEncoding = nullptr;
     // The distance of this load's stage to its use' stage.
     int distToUse = 0;
     bool usedByDot = false;
@@ -124,6 +126,25 @@ void StreamPipeliner::createStreamCopy(
   Location loc = loadOp.getLoc();
   Value src = loadOp.getPtr();
   Value mask = loadOp.getMask();
+  Value other = loadOp.getOther();
+  if (!isExpensiveLoadOrStore(loadOp) && loadToInfo[loadOp].blockedEncoding) {
+    // For inexpensive loads that do not directly feed into dot ops
+    // we want to use optimal layout for the data.
+    ttg::BlockedEncodingAttr encoding = loadToInfo[loadOp].blockedEncoding;
+    auto convertBlockLayout = [&](Value src) {
+      auto ty = cast<RankedTensorType>(src.getType());
+      auto newTy =
+          RankedTensorType::get(ty.getShape(), ty.getElementType(), encoding);
+      auto cvt =
+          builder.create<ttg::ConvertLayoutOp>(loadOp->getLoc(), newTy, src);
+      return cvt.getResult();
+    };
+    src = convertBlockLayout(src);
+    if (mask)
+      mask = convertBlockLayout(mask);
+    if (other)
+      other = convertBlockLayout(other);
+  }
 
   tt::MemDescType allocTy = cast<tt::MemDescType>(alloc.getType());
   SmallVector<Value> copyOffsets(allocTy.getRank(), zero);
@@ -161,7 +182,6 @@ void StreamPipeliner::createStreamCopy(
   auto result = sharedLoad->getResults();
 
   // Create a select for non-zero other values.
-  Value other = loadOp.getOther();
   if (other && !isZeroConst(other)) {
     auto select = builder.create<arith::SelectOp>(
         loc, loadOp.getType(), mask, sharedLoad.getResult(), other);
@@ -231,6 +251,25 @@ getSharedEncIfAllUsersAreDotEnc(Value val) {
     attr = tempAttr;
   }
   return attr;
+}
+
+static ttg::BlockedEncodingAttr
+getBlockedEncoding(tt::LoadOp loadOp, tt::ModuleAxisInfoAnalysis &axisInfo) {
+  Value src = loadOp.getPtr();
+  auto ty = cast<RankedTensorType>(src.getType());
+  auto mod = loadOp->getParentOfType<ModuleOp>();
+  int numWarps = ttg::TritonGPUDialect::getNumWarps(mod);
+  int threadsPerWarp = ttg::TritonGPUDialect::getThreadsPerWarp(mod);
+  tt::AxisInfo::DimVectorT contiguity =
+      axisInfo.getAxisInfo(src)->getContiguity();
+  SmallVector<unsigned> order = argSort(contiguity);
+  unsigned currPerThread = getNumElementsPerThread(loadOp, order, axisInfo);
+  SmallVector<unsigned> sizePerThread(order.size(), 1);
+  sizePerThread[order[0]] = currPerThread;
+  ttg::CTALayoutAttr ctaLayout = ttg::getCTALayout(ty.getEncoding());
+  return ttg::BlockedEncodingAttr::get(loadOp->getContext(), ty.getShape(),
+                                       sizePerThread, order, numWarps,
+                                       threadsPerWarp, ctaLayout);
 }
 
 // Create a map from load ops to their indirection levels and the final uses
@@ -315,10 +354,38 @@ void StreamPipeliner::assignMemoryLayouts() {
     }
 
     if (use->hasTrait<OpTrait::DotLike>()) {
-      // Only use shared memory when feeding into a dot op.
-      loadInfo.usedByDot = true;
-      loadInfo.sharedEncoding =
-          getSharedEncIfAllUsersAreDotEnc(op->getResult(0)).value_or(nullptr);
+      RankedTensorType oprTy;
+      DenseSet<Value> seen;
+      std::function<bool(Value, Value)> findLoad =
+        [&](Value loadOp, Value opr) -> bool {
+          if (loadOp == opr)
+            return true;
+          // Skip previously visited load ops.
+          if (seen.contains(opr))
+            return false;
+          seen.insert(opr);
+
+          if (Operation *op = opr.getDefiningOp()) {
+            for (Value operand : op->getOperands()) {
+              if (findLoad(loadOp, operand))
+                return true;
+            }
+          }
+          return false;
+        };
+      for (Value opr : use->getOperands()) {
+        if (findLoad(loadOp.getResult(), opr)) {
+          oprTy = dyn_cast<RankedTensorType>(opr.getType());
+          break;
+        }
+      }
+      assert(oprTy);
+      if (cvtNeedsSharedMemory(tensorTy, oprTy)) {
+        // Only use shared memory when feeding into a dot op.
+        loadInfo.usedByDot = true;
+        loadInfo.sharedEncoding =
+            getSharedEncIfAllUsersAreDotEnc(op->getResult(0)).value_or(nullptr);
+      }
     } else if (auto useOp = dyn_cast<tt::LoadOp>(use)) {
       // The use of this loadOp is another loadOp. If the use is not in the
       // loadToInfo already, it means that the use is not valid for pipelining
@@ -330,6 +397,15 @@ void StreamPipeliner::assignMemoryLayouts() {
       // loadOpToIndLevelAndUse using DFS.
       if (loadToInfo.count(useOp) == 0) {
         continue;
+      }
+    }
+
+    // If we still don't have a shared encoding, try a "generic" shared
+    // encoding.
+    if (!loadInfo.sharedEncoding) {
+      // Also pipeline in-register buffers.
+      if (auto loadOp = dyn_cast<tt::LoadOp>(op)) {
+        loadInfo.blockedEncoding = getBlockedEncoding(loadOp, axisInfoAnalysis);
       }
     }
 
@@ -645,6 +721,9 @@ bool StreamPipeliner::preprocessLoopAndBuildSchedule() {
                        std::vector<std::pair<Operation *, unsigned>> &s) {
         s = std::move(coarseSchedule);
       };
+  options.peelEpilogue = true;
+  options.predicateFn = tt::predicateOp;
+  options.supportDynamicLoops = true;
 
   OpBuilder builder(forOp);
   builder.setInsertionPointAfter(forOp);

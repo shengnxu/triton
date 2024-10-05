@@ -230,6 +230,22 @@ public:
           loadOps.insert(loadOp);
         }
       }
+      // Make sure there are 2 load's in the loop
+      if (loadOps.size() != 2)
+        return;
+      // Make sure the 1st load has shape 256x64
+      auto ldAOp = dyn_cast<triton::LoadOp>(loadOps[0]);
+      auto tileAShape =
+          cast<RankedTensorType>(ldAOp.getResult().getType()).getShape();
+      if (!(tileAShape[0] == 256 && tileAShape[1] == 64))
+        return;
+      // Make sure 2nd load has shape 64x256
+      auto ldBOp = dyn_cast<triton::LoadOp>(loadOps[1]);
+      auto tileBShape =
+          cast<RankedTensorType>(ldBOp.getResult().getType()).getShape();
+      if (!(tileBShape[0] == 64 && tileBShape[1] == 256))
+        return;
+      // move ldBOp right before tt.dot
       for (Operation &op : forOp) {
         if (auto dotOp = dyn_cast<triton::DotOp>(&op)) {
           loadOps[1]->moveBefore(dotOp);

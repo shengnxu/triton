@@ -1,7 +1,6 @@
 import triton
 import triton.language as tl
 
-
 @triton.jit
 def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, P, locks, M, N, K, stride_am, stride_ak, stride_bk, stride_bn, stride_cm,
                   stride_cn, stride_bias, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr,
@@ -69,14 +68,17 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, P, locks, M, N, K, stride_am, s
     else:
         if pid_z == 0:
             for iter in range(1, SPLIT_K):
-                while tl.atomic_cas(locks + pid*iter, 1, 1) != 1:
+                loc_index = pid * SPLIT_K + iter
+           #     while tl.atomic_cas(locks + pid*iter, 0, 1) != 0:
+                while tl.load(locks + loc_index, cache_modifier = ".cv", volatile=True) != 1:
                     pass
                 offs_am1 = tl.arange(0, BLOCK_SIZE_M)
                 offs_bn1 = tl.arange(0, BLOCK_SIZE_N)
                 rm1 = tl.max_contiguous(tl.multiple_of(offs_am1, BLOCK_SIZE_M), BLOCK_SIZE_M)
                 rn1 = tl.max_contiguous(tl.multiple_of(offs_bn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
-                P_ = P + (pid * iter) * BLOCK_SIZE_M * BLOCK_SIZE_N + offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
-                accumulator += tl.load(tl.multiple_of(P_, (1, 16)))
+                P_ = P + loc_index * BLOCK_SIZE_M * BLOCK_SIZE_N + offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
+        #        accumulator += tl.load(tl.multiple_of(P_, (1, 16)))
+                accumulator += tl.load(tl.multiple_of(P_, (1, 16)), cache_modifier = '.cv')
 
             offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))%M
             offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N))%N
@@ -86,11 +88,14 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, bias_ptr, P, locks, M, N, K, stride_am, s
             mask = (offs_am < M)[:, None] & (offs_bn < N)[None, :]
             tl.store(C_, accumulator, mask=mask)
         else:
+            loc_index = pid * SPLIT_K + pid_z
             offs_am1 = tl.arange(0, BLOCK_SIZE_M)
             offs_bn1 = tl.arange(0, BLOCK_SIZE_N)
             offs_am1 = tl.max_contiguous(tl.multiple_of(offs_am1, BLOCK_SIZE_M), BLOCK_SIZE_M)
             offs_bn1 = tl.max_contiguous(tl.multiple_of(offs_bn1, BLOCK_SIZE_N), BLOCK_SIZE_N)
-            P_ = P + (pid * pid_z) * BLOCK_SIZE_M * BLOCK_SIZE_N +  offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
-            tl.store(P_, accumulator)
-            tl.debug_barrier()
-            tl.atomic_xchg(locks + pid * pid_z, 1)
+            P_ = P + loc_index * BLOCK_SIZE_M * BLOCK_SIZE_N +  offs_am1[:, None] * BLOCK_SIZE_N + offs_bn1[None, :]
+            tl.store(P_, accumulator, cache_modifier=".wt")
+            tl.store(locks + loc_index, 1, cache_modifier=".wt")
+         #   tl.store(P_, accumulator)
+         #   tl.debug_barrier()
+         #   tl.atomic_xchg(locks + pid * pid_z, 1)

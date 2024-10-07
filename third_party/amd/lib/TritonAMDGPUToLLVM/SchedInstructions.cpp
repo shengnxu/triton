@@ -138,6 +138,7 @@ struct InstructionSchedHintsRewriter
     if (limitSchedulingRange)
       createSchedBarrier(rewriter, loc, InstructionKindMask::NONE);
 
+    /*
     // Try to schedule ds_write and mfma
     createSchedGroupBarrier(rewriter, loc, InstructionKindMask::VMEM_READ, 4, 0);
     // barrier
@@ -156,6 +157,7 @@ struct InstructionSchedHintsRewriter
     createSchedGroupBarrier(rewriter, loc, InstructionKindMask::MFMA, 1, 0);
     createSchedGroupBarrier(rewriter, loc, InstructionKindMask::DS_WRITE, 8, 0);
     createSchedGroupBarrier(rewriter, loc, InstructionKindMask::MFMA, 19, 0);
+    */
 
     rewriter.eraseOp(instructionSchedHint);
     return mlir::success();

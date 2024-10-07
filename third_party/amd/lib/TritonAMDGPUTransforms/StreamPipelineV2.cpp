@@ -163,7 +163,7 @@ void StreamPipeliner::createStreamCopy(
 
   int lastStage = numStages - 1;
   int localLoadStage = lastStage - prefetch;
-  int localStoreStage = lastStage - 1 - prefetch;
+  int localStoreStage = lastStage - 1;
   
   auto sharedLoad =
       builder.create<ttg::LocalLoadOp>(loc, loadOp.getType(), viewLoad);
@@ -192,8 +192,9 @@ void StreamPipeliner::createStreamCopy(
   assert(numStages >= 2 && "requires num_stages=2 at least");
   auto storeOp =
     builder.create<ttg::LocalStoreOp>(loc, copy->getResult(0), viewLoad);
-  schedule.insert(storeOp, localStoreStage, clusters[localLoadStage + prefetch + 1]);
-  schedule.insert(viewLoad, localStoreStage, clusters[localLoadStage + prefetch + 1]);
+  int localStoreCluster = prefetch ? 0 : localLoadStage + prefetch + 1;
+  schedule.insert(storeOp, localStoreStage, clusters[localStoreCluster]);
+  schedule.insert(viewLoad, localStoreStage, clusters[localStoreCluster]);
 
   loadOp.erase();
 }
@@ -398,7 +399,7 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   for (auto &[loadOp, dist, use] : loadOpToIndLevelAndUse) {
     // Non-LoadOp(s) are the (final) root uses of all LoadOp(s).
     if (!isa<tt::LoadOp>(use)) {
-      schedule.insert(use, numStages - 1, clusters[0]);
+      schedule.insert(use, numStages - 1, clusters[prefetch]);
       rootUsers.insert(use);
     }
   }
@@ -408,7 +409,7 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   // Assign stages to the loads.
   for (auto [loadOp, indLevel, _] : loadOpToIndLevelAndUse) {
     int stage = (maxIndirectionLevel - indLevel) * stagesBetweenLoads;
-    schedule.insert(loadOp, stage, clusters[1]);
+    schedule.insert(loadOp, stage, clusters[prefetch]);
   }
 
   // Calculate distance from the load to the use.

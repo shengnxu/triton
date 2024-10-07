@@ -307,6 +307,7 @@ SmallVector<unsigned> getSizePerThread(Attribute layout) {
     } else if (auto mfmaLayout = parentLayout.dyn_cast<MfmaEncodingAttr>()) {
       auto opIdx = dotLayout.getOpIdx();
       auto kWidth = dotLayout.getKWidth();
+      llvm::outs() << "----kWidth = " << kWidth << "\n";
       if (opIdx == 0) {
         int repeats =
             (mfmaLayout.getMDim() == 64 && mfmaLayout.getNDim() == 4) ? 16 : 1;
@@ -1918,6 +1919,7 @@ struct TritonGPUInferLayoutInterface
         aParentEncoding.getMDim() != aParentEncoding.getNDim())
       return success();
 #endif // USE_ROCM
+    llvm::outs() << "---------------------kWidthA = " << aEncoding.getKWidth() << ", kWidthB = " << bEncoding.getKWidth() << "\n";
     if (aEncoding.getKWidth() != bEncoding.getKWidth())
       return op->emitError("mismatching kWidth between A and B operands");
     return success();

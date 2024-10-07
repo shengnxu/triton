@@ -287,7 +287,7 @@ struct DotOpMFMAConversionHelper {
     auto maybeMfmaInsn =
         MfmaInsn::selectMfma(mDim, nDim, elemTyA, elemTyB, mfmaVersion);
     if (failed(maybeMfmaInsn))
-      llvm::report_fatal_error("No match found in MFMA database\n");
+      llvm::report_fatal_error("2222222No match found in MFMA database\n");
 
     mfmaInsnName = (*maybeMfmaInsn).getInsnName();
     unsigned kBaseA = (*maybeMfmaInsn).getKBaseA();
@@ -298,15 +298,20 @@ struct DotOpMFMAConversionHelper {
 
     auto kWidthA = aEncoding.getKWidth();
     auto kWidthB = bEncoding.getKWidth();
+    llvm::outs() << "kBaseA = " << kBaseA << ", kBaseB = " << kBaseB << "\n";
+    llvm::outs() << "kWidthA = " << kWidthA << ", kWidthB = " << kWidthB << "\n";
 
     auto repA = aEncoding.getMFMARep(aTensorTy.getShape());
     auto repB = bEncoding.getMFMARep(bTensorTy.getShape());
 
+    llvm::outs() << "repA[1] = " << repA[1] << ", repB[0] = " << repB[0] << "\n";
     assert(repA[1] == repB[0]);
 
     Value loadedA = adaptor.getA();
     Value loadedB = adaptor.getB();
     Value loadedC = adaptor.getC();
+
+    llvm::outs() << "loadedC = " << loadedC << "\n";
 
     auto numRepM = repA[0];
     auto numRepN = repB[1];
@@ -320,6 +325,7 @@ struct DotOpMFMAConversionHelper {
     auto dstElemTy = dTensorTy.getElementType();
     auto fc =
         typeConverter->unpackLLElements(loc, loadedC, rewriter, dstElemTy);
+    llvm::outs() << "fc_size = " << fc.size() << "\n";
 
     unsigned warpSize = triton::gpu::getWarpSize(mfmaLayout);
     // compute number of output elements that each thread holds for one MFMA
@@ -355,7 +361,9 @@ struct DotOpMFMAConversionHelper {
     // replace with new packed result
     Type structTy = LLVM::LLVMStructType::getLiteral(
         ctx, SmallVector<Type>(fc.size(), dstElemTy));
+    llvm::outs() << "fc_size = " << fc.size() << ", structTy = " << structTy << "\n";
     Value res = typeConverter->packLLElements(loc, fc, rewriter, structTy);
+
     rewriter.replaceOp(op, res);
 
     return success();
@@ -383,6 +391,9 @@ struct DotOpMFMAConversionHelper {
     int intrinsicK = rawTy.getNumElements() / numIntrinsics / kPack;
     int kBase = rawTy.getNumElements() / kPack;
 
+    llvm::outs() << "elemNum = " << rawTy.getNumElements() << "\n";
+    llvm::outs() << "extractOperands, intrinsicK = " << intrinsicK << ", kBase = " << kBase << ", numIntrinsics = " << numIntrinsics;
+
     SmallVector<Value> results;
     // extract needed elements in original dtype
     auto typedVecTy = vec_ty(rawElemTy, intrinsicK);
@@ -396,6 +407,7 @@ struct DotOpMFMAConversionHelper {
       Value castedVec = bitcast(typedVec, type);
       results.push_back(castedVec);
     }
+    llvm::outs() << ", results_size = " << results.size() << "\n";
     return results;
   }
 
@@ -415,6 +427,7 @@ struct DotOpMFMAConversionHelper {
     // How many rocdl intrinsics will process one tile
     int numIntrinsics = wideOperand ? 16 : 1;
     int intrinsicKWidth = wideOperand ? kBase / numIntrinsics : kBase;
+    llvm::outs() << "kWidth = " << kWidth << ", kBase = " << kBase << ", intrinsicKWidth = " << intrinsicKWidth << "\n";
     Type intrinsicDType;
     if (type.isF32())
       intrinsicDType = f32_ty;

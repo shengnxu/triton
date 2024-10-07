@@ -457,6 +457,7 @@ Value convertLayout(int opIdx, ConversionPatternRewriter &rewriter,
   assert(numSubBlocks == 1 &&
          "after reworking layout, there should be no redundency");
   int numOfElems = mfmaInstrNonK * mfmaInstrK * numSubBlocks / iWaveSize;
+  llvm::outs() << "mfmaInstrNonK = " << mfmaInstrNonK << ", mfmaInstrK = " << mfmaInstrK << ", numSubBlocks = " << numSubBlocks << "\n";
   assert(numOfElems >= 1);
 
   unsigned int maxNumWarps = shape[nonKDimIdx] / mfmaInstrNonK;

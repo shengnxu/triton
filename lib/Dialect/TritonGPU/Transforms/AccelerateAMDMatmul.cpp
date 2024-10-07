@@ -53,6 +53,7 @@ int getMfmaVersion(MatrixCoreVersion matrixCoreVer) {
 }
 
 static bool isTransposeChainDotPattern(tt::DotOp &dotOp) {
+  return false;
   auto filter = [&dotOp](Operation *op) {
     return op->getParentRegion() == dotOp->getParentRegion();
   };
@@ -170,6 +171,7 @@ public:
 
     auto resType = dot.getD().getType().cast<RankedTensorType>();
     auto resShape = resType.getShape();
+    llvm::outs() << "resShape[0] = " << resShape[0] << ", resShape[1] = " << resShape[1] <<"\n";
 
     unsigned mDim = 0;
     unsigned nDim = 0;
@@ -219,7 +221,7 @@ public:
     auto maybeMfmaInsn =
         MfmaInsn::selectMfma(mDim, nDim, dataTypeA, dataTypeB, mfmaVersion);
     if (failed(maybeMfmaInsn))
-      llvm::report_fatal_error("No match found in MFMA database\n");
+      llvm::report_fatal_error("11111111111No match found in MFMA database\n");
     else
       kDim = (*maybeMfmaInsn).getKDim();
     assert(kDim != 0);
@@ -279,6 +281,9 @@ public:
     auto oldAcc = dotOp.getOperand(2);
     auto newAcc = rewriter.create<ttg::ConvertLayoutOp>(oldAcc.getLoc(),
                                                         newRetType, oldAcc);
+
+    llvm::outs() << "oldAcc = " << oldAcc << ", newAcc = " << newAcc << "\n";
+
     auto oldAOrder = oldAType.getEncoding()
                          .cast<ttg::DotOperandEncodingAttr>()
                          .getParent()
@@ -303,6 +308,7 @@ public:
       kWidthA *= kpack;
       kWidthB *= kpack;
     }
+    llvm::outs() << "kWidthA = " << kWidthA << ", kWidthB = " << kWidthB << "\n";
 
     auto newAType = RankedTensorType::get(
         oldAType.getShape(), oldAType.getElementType(),

@@ -74,6 +74,7 @@ public:
   LogicalResult
   matchAndRewrite(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    llvm::outs() << "convetOp = " << op << "\n";
     Value src = op.getSrc();
     Value dst = op.getResult();
     auto srcTy = src.getType().cast<RankedTensorType>();

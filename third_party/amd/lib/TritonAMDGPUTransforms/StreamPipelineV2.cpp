@@ -398,7 +398,7 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   for (auto &[loadOp, dist, use] : loadOpToIndLevelAndUse) {
     // Non-LoadOp(s) are the (final) root uses of all LoadOp(s).
     if (!isa<tt::LoadOp>(use)) {
-      schedule.insert(use, numStages - 1, clusters[0]);
+      schedule.insert(use, numStages - 1, clusters[1]);
       rootUsers.insert(use);
     }
   }
@@ -408,7 +408,7 @@ void StreamPipeliner::scheduleLoads(DenseSet<Operation *> &rootUsers) {
   // Assign stages to the loads.
   for (auto [loadOp, indLevel, _] : loadOpToIndLevelAndUse) {
     int stage = (maxIndirectionLevel - indLevel) * stagesBetweenLoads;
-    schedule.insert(loadOp, stage, clusters[1]);
+    schedule.insert(loadOp, stage, clusters[0]);
   }
 
   // Calculate distance from the load to the use.

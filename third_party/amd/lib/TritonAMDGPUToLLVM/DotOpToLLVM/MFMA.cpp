@@ -244,7 +244,7 @@ struct DotOpMFMAConversionHelper {
         getNumSubmatrices(aTensorTy.getElementType(), mDim, nDim);
     auto elemsPerVec = mDim * nDim * subBlocks / warpSize;
 
-    assert(numRepM == 8 && "numRepM != 8");
+    // assert(numRepM == 8 && "numRepM != 8");
 
     auto vecTy = vec_ty(dstElemTy, elemsPerVec);
     for (int b = 0; b < numRepB; ++b) {
@@ -275,7 +275,7 @@ struct DotOpMFMAConversionHelper {
                 extract_element(dstElemTy, acc, i32_val(v));
           }
         }
-        if (m == 3) {
+        if (numRepM == 8 && m == 3) {
           const char *intrinsicName = "llvm.amdgcn.sched.barrier";
           LLVM::FastmathFlagsAttr defaultFlags{};
 

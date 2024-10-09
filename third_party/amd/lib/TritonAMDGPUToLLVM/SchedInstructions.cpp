@@ -470,16 +470,26 @@ struct TritonAMDGPUInsertInstructionSchedHints
                              .getDefiningOp<triton::gpu::MemDescSubviewOp>();
         Value subviewResult = subviewOp.getResult();
         auto it = llvm::find(yieldedValues, subviewResult);
-        assert(it != yieldedValues.end());
-        size_t idx = std::distance(yieldedValues.begin(), it);
-        Value loopCarriedSubviewValue = initArgs[idx];
+        if (it != yieldedValues.end()) {
+          size_t idx = std::distance(yieldedValues.begin(), it);
+          Value loopCarriedSubviewValue = initArgs[idx];
 
-        auto subviewLoadOps =
-            getUsersOfType<triton::gpu::LocalLoadOp>(loopCarriedSubviewValue);
-        assert(subviewLoadOps.size() == 1);
-        localLoadOp = *subviewLoadOps.begin();
+          auto subviewLoadOps =
+              getUsersOfType<triton::gpu::LocalLoadOp>(loopCarriedSubviewValue);
+          assert(subviewLoadOps.size() == 1);
+          localLoadOp = *subviewLoadOps.begin();
 
-        loopCarriedLoadValue = localLoadOp.getResult();
+          loopCarriedLoadValue = localLoadOp.getResult();
+        }
+        else {
+          auto localLoadOps = getUsersOfType<triton::gpu::LocalLoadOp>(subviewResult);
+          assert(localLoadOps.size() == 1);
+          localLoadOp = *localLoadOps.begin();
+          auto it = llvm::find(yieldedValues, localLoadOp.getResult());
+          assert(it != yieldedValues.end());
+          size_t idx = std::distance(yieldedValues.begin(), it);
+          loopCarriedLoadValue = initArgs[idx];
+        }
         loopCarriedLoadValue = rewindConvertLayoutOps(loopCarriedLoadValue);
       }
 

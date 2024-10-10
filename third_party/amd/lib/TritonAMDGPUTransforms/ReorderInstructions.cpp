@@ -210,14 +210,12 @@ public:
         if (isa<triton::LoadOp>(op))
           loadOps.insert(&op);
 
-      assert(loadOps.size() == 3 && "There should be three loads!!");
+      assert(loadOps.size() == 2 && "There should be two loads!!");
 
       for (Operation &op : forOp) {
         if (isa<triton::DotOp>(op)) {
-          // Sink loadK after local_load
-          loadOps[2]->moveBefore(&op);
-          // Sink loadV after loadK
-          loadOps[1]->moveAfter(loadOps[2]);
+          // Sink loadV after local_load
+          loadOps[0]->moveBefore(&op);
           break;
         }
       }

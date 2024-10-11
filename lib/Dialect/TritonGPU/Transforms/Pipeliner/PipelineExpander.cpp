@@ -677,18 +677,17 @@ LoopPipelinerInternal::emitEpilogue(RewriterBase &rewriter,
   Value rangeDecr =
       rewriter.create<arith::AddIOp>(loc, rangeIncrStep, stepDecr);
   Value totalIterations = rewriter.create<arith::DivSIOp>(loc, rangeDecr, step);
+  Value lastIter = rewriter.create<arith::SubIOp>(loc, totalIterations, one);
 
   // Capture predicates for dynamic loops.
   SmallVector<Value> predicates(maxStage + 1);
 
   for (int64_t i = 0; i < maxStage; i++) {
-    // iterI = total_iters - 1 - i
+    // iterI = last_iter - i
     // May go negative...
     Value minusI =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIntegerAttr(t, -i));
-    Value iterI = rewriter.create<arith::AddIOp>(
-        loc, rewriter.create<arith::AddIOp>(loc, totalIterations, minusOne),
-        minusI);
+    Value iterI = rewriter.create<arith::AddIOp>(loc, lastIter, minusI);
     // newLastIter = lb + step * iterI
     Value newlastIter = rewriter.create<arith::AddIOp>(
         loc, lb, rewriter.create<arith::MulIOp>(loc, step, iterI));
@@ -697,7 +696,7 @@ LoopPipelinerInternal::emitEpilogue(RewriterBase &rewriter,
 
     if (dynamicLoop) {
       // pred = iterI >= 0
-      predicates[i + 1] = rewriter.create<arith::CmpIOp>(
+      predicates[maxStage - i] = rewriter.create<arith::CmpIOp>(
           loc, arith::CmpIPredicate::sge, iterI, zero);
     }
   }

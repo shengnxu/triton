@@ -20,7 +20,11 @@ The foundations of this project are described in the following MAPL2019 publicat
 The [official documentation](https://triton-lang.org) contains installation instructions and tutorials.  See also these third-party [Triton puzzles](https://github.com/srush/Triton-Puzzles), which can all be run using the Triton interpreter -- no GPU required.
 
 git clone -b shared/triton-moe-opt https://github.com/shengnxu/triton.git
+
 cd triton
+
 pip install -e python
+
 cd gemm
+
 python3 test_gemm.py

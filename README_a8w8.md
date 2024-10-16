@@ -23,8 +23,10 @@ git clone -b shared/triton-moe-opt https://github.com/shengnxu/triton.git
 
 cd triton
 
+pip uninstall triton
+
 pip install -e python
 
-cd gemm
+cd test/gemm
 
 python3 test_gemm.py
